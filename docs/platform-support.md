@@ -4,7 +4,7 @@ Xyst publishes platform packages for the architectures below. A package target d
 
 | Platform target | Package | Build and verification evidence | Support boundary |
 | --- | --- | --- | --- |
-| Windows x64 | NSIS installer | Current local release: [`Xyst Setup 0.1.0.exe`](../release/Xyst%20Setup%200.1.0.exe), 267,545,183 bytes; SHA-512 `HbnwTbxLgo7JYk1al3qLkuKkLfaypFMh2Pe3PuzKO2fS7DXY3FFbFWPGtpVRjRN+fgmmyoviAXMBlPf2D+iIsg==`; `latest.yml` matches. Built on Windows with Node 24.20.0; embedded `app.asar` SHA-256 `484DB48D37D662698AF22D6C15C6043A420880751797A1CDF8101FF276A7CBD9`. Package is unsigned. The exact current installer has not been installed because the registered per-user installation is protected; prior hosted CI clean-install evidence is recorded in [verification history](verification-history.md). | Windows ARM64 is not built. A clean install of this exact local artifact and native keyboard/accessibility-tree acceptance remain open. |
+| Windows x64 | NSIS installer | Current local release: [`Xyst Setup 0.1.0.exe`](../release/Xyst%20Setup%200.1.0.exe), 265,546,076 bytes; SHA-512 `T/XuEuEf4g1bEIqSCzu9wrEJvqsDmuxNCcKlNV1Efakz5lc5hMkVze1VxIPudA1q89II2BeCE/Gm2V4+tH/x4Q==`; `latest.yml` matches. Built from a clean npm install on Windows with Node 24.20.0; embedded `app.asar` SHA-256 `B9F41F83623280F12EAB92634B7D339A4156A3D6B1D7943799C178058B0A2446`. Package is unsigned. | Windows ARM64 is not built. A clean install of this exact local artifact and native keyboard/accessibility-tree acceptance remain open; the current commit is being checked by hosted Windows CI. |
 | Linux x64 | AppImage | Current local release: [`Xyst-0.1.0.AppImage`](../release/Xyst-0.1.0.AppImage), 338,729,992 bytes; SHA-512 `AbWyLJ1rIZu0408NEyhZm8VC33HX+ZAvjGSOa8sKoGuoVmKcxLwnKujqyr0IrvO2sykc57JjYCfKOzIZL0JiJQ==`; `latest-linux.yml` matches. Built in Ubuntu 24.04 WSL with Node 22.12.0; typecheck, runtime (130 passed, 3 skips), CLI (14 passed), and package build passed. Extracted `app.asar` SHA-256 `9957c8e2a2e5ef36d3d66d7d8d624da0ca0f7aa4e3e66290cbf9459214850f02`. Exact AppImage rendered under WSL/Xvfb with runtime ready, full access, and 25 buttons. Package is unsigned. | Linux ARM64 is not built. Physical/bare-metal Linux, native service behavior, and supported-distribution acceptance remain open. |
 
 ## Current GNOME Shell/X11 smoke
@@ -60,3 +60,9 @@ The current packaged Windows CLI created a mission that the same package's `desk
 ## Current Linux packaged bidirectional mission updates
 
 The exact current AppImage shared one isolated XDG/Xyst profile between its packaged CLI and GNOME X11 desktop. The CLI created a mission, the desktop displayed and renamed it, and the CLI then read the new name and timestamp from SQLite before deleting the fixture. No mission ran or model was queried. See [verification history](verification-history.md#current-linux-packaged-bidirectional-mission-state-sharing-2026-10-25).
+
+
+## Current PR head hosted verification (2026-10-25)
+
+- PR head f93333bab9b8e0700decf1f5995efbe49367934 passed hosted Cross-platform CI run [40231290931](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40231290931) and Desktop packages run [40231290932](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40231290932). The Windows package job performed a clean install and renderer smoke; Ubuntu package build passed.
+- A second push-triggered copy of these workflows was also observed completing successfully. Current packaged model mission evidence from prior commits is version-specific and recorded in verification history; the current-source Qwen mission acceptance is also listed in BUILD_STATUS.md.
