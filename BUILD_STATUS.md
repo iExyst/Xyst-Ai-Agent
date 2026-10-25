@@ -1,5 +1,20 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Resume checkpoint · live data verified on patched source (2026-10-25)
+
+- Fresh isolated model-backed CLI session `bc3b3630-b2b8-451b-a9f3-e14a6352ba16` fetched `https://api.github.com/repos/iExyst/Xyst-Ai-Agent` through `web_fetch` (HTTP 200, `application/json`), saved API field `pushed_at: 2026-10-25T22:21:18Z` to `.xyst-live-acceptance/guard-final-workspace/live-api-acceptance-final.txt`, read it back, and passed persisted `task_complete` checks. Isolated SQLite integrity is healthy.
+- Tightened completion evidence so explicitly named tools and requested URLs must match persisted calls, named output files require exact-path readback, and those machine-checkable criteria appear before historical guidance. A separate regression rejects unrelated `file_list` evidence. `npm test`: runtime 136 passed, 2 environment-dependent skips; CLI 15 passed. `npm run typecheck` and `git diff --check` passed.
+- LM Studio compaction was attempted on the earlier long session but the provider returned a summary outside the required schema, so Xyst saved no compaction. The successful live session was kept short. Temporary Qwen3.5-9B was unloaded afterward; the preloaded Qwen3-4B remained idle.
+- The build remains active. Current-source live API access works; Brave Search still needs a vault key. Remaining acceptance gates include physical Linux desktop/service behavior, trusted publisher signing/update delivery, target-install integration credentials, and broader live-model recovery/selection cases.
+
+## Resume checkpoint · live-source completion evidence hardening (2026-10-25)
+
+- Re-read the supplied ordered build plan and resumed draft PR #1 at `2223b46`. Verified existing live-data capability in prior acceptance: Xyst retrieved current GitHub repository metadata and Open-Meteo conditions via `web_fetch`; Hugging Face discovery and authenticated GitHub also work. Direct JSON/vendor `+json` retrieval is implemented with bounded output, SSRF/redirect checks, and untrusted-content marking. Brave Search still requires its API key in the OS credential vault.
+- Fixed a false-positive completion path: when the objective explicitly names a tool (such as `web_fetch`), a requested URL, or an output filename, `task_complete` now requires matching persisted tool evidence, a successful 2xx fetch of that URL, and exact `file_read` evidence for that output. The same enforcement refreshes when user guidance arrives during a run.
+- Added regression coverage reproducing an unrelated `file_list` being submitted as completion evidence for a live API/file task; Xyst now leaves that run unverified. `npm test`: runtime 136 passed, 2 host-dependent skips; CLI 15 passed. `npm run typecheck` and `git diff --check` passed.
+- Unloaded temporary `qwen/qwen3.5-9b`; verified the preloaded Qwen3-4B remained idle and loaded. Acceptance artifacts under `.xyst-live-acceptance/` are preserved.
+- Full build remains active; this source fix is ready for the existing draft PR. Physical Linux desktop/service, trusted signed updater delivery, target-install credentials, and broader live-model recovery/selection acceptance remain open.
+
 ## Resume checkpoint · live API agent acceptance and diagnostics (2026-10-25)
 
 - Current-source model-driven CLI session `f03293cf-d35e-41e1-b38f-708c8294b2d2` retrieved GitHub repository metadata and Open-Meteo current New York weather through `web_fetch`. Both persisted results show HTTP 200 JSON, GitHub `iExyst/Xyst-Ai-Agent` pushed at `2026-10-25T21:55:38Z`, and weather at `2026-10-25T18:15`, 14.2 °C, wind 8.2 km/h. A context-budget issue at 8,192 tokens was resolved by resuming with local Qwen3.5-9B at 16,384 context; a real `task_complete` call verified both fetches. Isolated SQLite integrity is healthy and the temporary model was unloaded afterward.

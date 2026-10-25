@@ -1,5 +1,17 @@
 # Xyst verification history
 
+## Patched-source live API and file acceptance (2026-10-25)
+
+- Isolated current-source agent session `bc3b3630-b2b8-451b-a9f3-e14a6352ba16` called `web_fetch` for `https://api.github.com/repos/iExyst/Xyst-Ai-Agent`, received HTTP 200 `application/json`, saved `pushed_at: 2026-10-25T22:21:18Z` in `.xyst-live-acceptance/guard-final-workspace/live-api-acceptance-final.txt`, and reread the exact file. Persisted `task_complete` output verifies all five current criteria using the live fetch and exact-path readback evidence. Isolated database check returned `healthy`.
+- This acceptance used Qwen3.5-9B at 16,384 context after a first attempt with the preloaded 8,192-context Qwen3-4B exceeded its estimate by 138 tokens. The successful model was unloaded after the run; Qwen3-4B remained loaded as found.
+- The first compaction attempt on the earlier session did not save a summary because LM Studio returned output outside the required summary schema. Context compaction remains a retry item; no source or acceptance data was deleted.
+
+## Live-source completion evidence regression (2026-10-25)
+
+- Added inference-time requirements for explicitly requested tool names, URLs, and named output files. `task_complete` rejects a different tool for a specifically named tool, requires a successful 2xx `web_fetch` against the requested URL, and requires an exact-path `file_read` for declared or clearly named output files. New user guidance is checked using the same rules.
+- Regression fixture reproduced a model citing only `file_list` for the objective “Use web_fetch to fetch https://example.com/data.json and save the result to live-api-acceptance.txt.” Completion remained unverified and the persisted rejection identified missing `web_fetch` evidence.
+- Verification: `npm test` passed (runtime 136 passed, 2 environment-dependent skips; CLI 15 passed); `npm run typecheck` passed. This is deterministic evidence-policy coverage. The independent live API receipts below remain the live-network acceptance proof.
+
 ## Fresh current-source live API agent task (2026-10-25)
 
 - Isolated current-source CLI session `f03293cf-d35e-41e1-b38f-708c8294b2d2` called `web_fetch` for the live GitHub repository API and Open-Meteo current weather. Persisted results show HTTP 200 JSON, GitHub `full_name: iExyst/Xyst-Ai-Agent`, `pushed_at: 2026-10-25T21:55:38Z`, and Open-Meteo time `2026-10-25T18:15`, 14.2 °C, wind 8.2 km/h. Both are marked untrusted web content.

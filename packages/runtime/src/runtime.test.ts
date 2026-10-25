@@ -684,6 +684,37 @@ test("agent completion requires successful persisted tool evidence", async () =>
   } finally { store.close(); }
 }));
 
+test("explicit live API and named output requests cannot be verified by unrelated evidence", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "explicit-live-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const objective = "Use web_fetch to fetch https://example.com/data.json and save the result to live-api-acceptance.txt";
+  let turn = 0; let taskSystem = "";
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async (request: { tools: Array<Record<string, unknown>>; messages: Array<Record<string, unknown>> }) => {
+      turn++;
+      if (turn === 1) {
+        taskSystem = String(request.messages.find((message) => message.role === "system")?.content ?? "");
+        return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "unrelated-list", type: "function", function: { name: "file_list", arguments: JSON.stringify({ path: root }) } }] } }] };
+      }
+      if (turn === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "unrelated-completion", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1, 1, 1, 1] }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: "I did not perform the required API fetch." } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const result = await agent.run(objective, { workspace: root, maxTurns: 3 });
+    assert.equal(result.status, "unverified");
+    assert.match(taskSystem, /Required evidence from explicitly requested tool: web_fetch/);
+    assert.match(taskSystem, /Required live fetch from requested URL: https:\/\/example\.com\/data\.json/);
+    assert.match(taskSystem, /live-api-acceptance\.txt/);
+    assert.ok(taskSystem.indexOf("Required evidence from explicitly requested tool: web_fetch") < taskSystem.indexOf("Required live fetch from requested URL:"), "machine-checkable requirements appear before historical user guidance");
+    assert.ok(taskSystem.indexOf("Required live fetch from requested URL:") < taskSystem.lastIndexOf("live-api-acceptance.txt"), "URL and exact output requirements have a stable order");
+    const failed = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed'").get(result.sessionId) as { output_json: string };
+    assert.match(failed.output_json, /must come from web_fetch/);
+  } finally { store.close(); }
+}));
+
 test("malformed external tool arguments fail before durable intent and do not quarantine the mission", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "malformed-external-tool.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

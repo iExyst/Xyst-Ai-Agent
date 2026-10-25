@@ -42,6 +42,42 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function inferExplicitToolEvidence(criteria: string[], availableTools: string[]): Map<string, string> {
+  const required = new Map<string, string>();
+  for (const tool of availableTools) {
+    if (tool === "task_complete") continue;
+    const escaped = tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const explicitRequest = new RegExp(`\\b(?:use|call|invoke|via|through|using)\\s+(?:the\\s+)?(?:\\x60)?${escaped}(?:\\x60)?\\b`, "i");
+    if (criteria.some((criterion) => explicitRequest.test(criterion))) required.set(tool, `Required evidence from explicitly requested tool: ${tool}`);
+  }
+  return required;
+}
+
+function inferRequestedUrls(criteria: string[]): string[] {
+  const urls = new Set<string>();
+  for (const criterion of criteria) {
+    for (const match of criterion.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
+      const raw = match[0].replace(/[),.;!?\]}]+$/, "");
+      try { const url = new URL(raw); url.hash = ""; urls.add(url.href); } catch { /* Ignore malformed URL fragments. */ }
+    }
+  }
+  return [...urls];
+}
+
+function inferNamedOutputPaths(criteria: string[]): string[] {
+  const paths = new Set<string>();
+  const outputIntent = /\b(?:create|write|save|generate|produce|export|put|store)\b/i;
+  for (const criterion of criteria) {
+    if (!outputIntent.test(criterion)) continue;
+    const withoutUrls = criterion.replace(/https?:\/\/[^\s<>"'`]+/gi, "");
+    for (const match of withoutUrls.matchAll(/(?:^|[\s"'`])((?:[A-Za-z]:[\\/])?[^\s"'`<>|?*]+\.(?:txt|md|csv|json|ya?ml|html?|js|mjs|cjs|ts|tsx|jsx|py|sh|ps1|log|xml|pdf|docx|xlsx|pptx))(?![\w])/gi)) {
+      const path = match[1]?.replace(/[),.;:]+$/, "");
+      if (path) paths.add(path);
+    }
+  }
+  return [...paths];
+}
+
 export interface AgentOptions {
   sessionId?: string;
   initialMessage?: Record<string, unknown>;
@@ -390,6 +426,35 @@ export class AgentRunner {
       ...(githubEnabled ? createGitHubTools(access, this.deps.github, { writesEnabled: githubWritesEnabled, mergeAuthorized }) : {}),
       ...(this.deps.memories ? createMemoryTools(this.deps.memories, semanticMemory) : {})
     };
+    const inferredToolEvidence = new Map<string, string>();
+    const requestedUrlCriteria = new Map<string, string>();
+    const inferredOutputPaths = [...new Set(options.expectedOutputPaths ?? [])];
+    const normalizedOutputPath = (path: string) => { const normalized = resolve(workspace, path); return process.platform === "win32" ? normalized.toLowerCase() : normalized; };
+    const addCompletionCriterion = (criterion: string) => { if (!requiredCompletionCriteria.includes(criterion) && requiredCompletionCriteria.length < 50) requiredCompletionCriteria.push(criterion); };
+    const prioritizeEvidenceRequirements = () => {
+      const originalRequirements = requiredCompletionCriteria.slice(0, baseCompletionCriteria.length + requiredToolEvidence.length);
+      const evidenceRequirements = [...inferredToolEvidence.values(), ...requestedUrlCriteria.values(), ...inferredOutputPaths];
+      const prioritized = [...new Set([...originalRequirements, ...evidenceRequirements])].slice(0, 50);
+      const remaining = requiredCompletionCriteria.filter((criterion) => !prioritized.includes(criterion) && !inferredOutputPaths.some((path) => normalizedOutputPath(criterion) === normalizedOutputPath(path)));
+      requiredCompletionCriteria.splice(0, requiredCompletionCriteria.length, ...prioritized, ...remaining.slice(0, 50 - prioritized.length));
+    };
+    const refreshEvidenceRequirements = (criteria: string[]) => {
+      for (const [tool, criterion] of inferExplicitToolEvidence(criteria, Object.keys(tools))) { inferredToolEvidence.set(tool, criterion); addCompletionCriterion(criterion); }
+      if (inferredToolEvidence.has("web_fetch")) {
+        for (const url of inferRequestedUrls(criteria)) {
+          const criterion = `Required live fetch from requested URL: ${url}`;
+          requestedUrlCriteria.set(url, criterion); addCompletionCriterion(criterion);
+        }
+      }
+      for (const outputPath of inferNamedOutputPaths(criteria)) {
+        if (!inferredOutputPaths.some((path) => normalizedOutputPath(path) === normalizedOutputPath(outputPath))) inferredOutputPaths.push(outputPath);
+      }
+      for (const outputPath of inferredOutputPaths) {
+        if (!requiredCompletionCriteria.some((criterion) => normalizedOutputPath(criterion) === normalizedOutputPath(outputPath))) addCompletionCriterion(outputPath);
+      }
+      prioritizeEvidenceRequirements();
+    };
+    refreshEvidenceRequirements(requiredCompletionCriteria);
     let completionVerified = false;
     let currentEvidence: Array<{ id: string; name: string; input_json: string; output_json: string }> = [];
     const evidencePath = (item: { input_json: string; output_json: string }): string | undefined => {
@@ -427,7 +492,7 @@ export class AgentRunner {
           if (typeof evidenceRecord.error === "string" || evidenceRecord.success === false) throw new Error(`Completion evidence ${evidenceId} reports a tool error`);
           const workspaceRoot = options.workspace ?? process.cwd();
           const normalizeOutputPath = (path: string) => { const normalized = resolve(workspaceRoot, path); return process.platform === "win32" ? normalized.toLowerCase() : normalized; };
-          const expectedOutputPath = (options.expectedOutputPaths ?? []).find((path) => normalizeOutputPath(path) === normalizeOutputPath(criterion));
+          const expectedOutputPath = inferredOutputPaths.find((path) => normalizeOutputPath(path) === normalizeOutputPath(criterion));
           if (expectedOutputPath) {
             let evidenceInput: unknown;
             try { evidenceInput = JSON.parse(evidence.input_json) as unknown; } catch { evidenceInput = null; }
@@ -450,6 +515,18 @@ export class AgentRunner {
           if (toolEvidenceRequirement) {
             try { assertRequiredToolEvidence(evidence.name, evidenceRecord, toolEvidenceRequirement); }
             catch (error) { throw new Error(`Completion evidence ${evidenceId}: ${error instanceof Error ? error.message : String(error)}`); }
+          }
+          const inferredTool = [...inferredToolEvidence].find(([, requiredCriterion]) => requiredCriterion === criterion)?.[0];
+          if (inferredTool && evidence.name !== inferredTool) throw new Error(`Completion evidence for explicitly requested tool ${inferredTool} must come from ${inferredTool}, not ${evidence.name}`);
+          const requestedUrl = [...requestedUrlCriteria].find(([, requiredCriterion]) => requiredCriterion === criterion)?.[0];
+          if (requestedUrl) {
+            let evidenceInput: unknown;
+            try { evidenceInput = JSON.parse(evidence.input_json) as unknown; } catch { evidenceInput = null; }
+            let requestedUrlInput: string | undefined;
+            try { requestedUrlInput = new URL(String(asRecord(evidenceInput).url ?? "")).href; } catch { /* Invalid or absent URL cannot satisfy the requested fetch. */ }
+            if (evidence.name !== "web_fetch" || requestedUrlInput !== requestedUrl || typeof evidenceRecord.status !== "number" || evidenceRecord.status < 200 || evidenceRecord.status >= 300) {
+              throw new Error(`Completion evidence must be a successful web_fetch of the requested URL ${requestedUrl}`);
+            }
           }
           if (["run_process", "run_shell"].includes(evidence.name) && (typeof evidenceRecord.code !== "number" || evidenceRecord.code !== 0 || evidenceRecord.signal !== null && evidenceRecord.signal !== undefined)) throw new Error(`Completion evidence ${evidenceId} is a process result that did not exit successfully`);
           return { criterion: criterion as string, evidenceToolCallId: evidenceId, tool: evidence.name, verified: true };
@@ -489,7 +566,7 @@ export class AgentRunner {
       const pending = options.drainUserMessages?.() ?? [];
       for (const message of pending) {
         const safeMessage = this.deps.provider.redact(message).slice(0, 64 * 1024);
-        if (safeMessage.trim()) { completionVerified = false; if (requiredCompletionCriteria.length < 50) requiredCompletionCriteria.push(safeMessage.trim()); save({ role: "user", content: safeMessage }); }
+          if (safeMessage.trim()) { completionVerified = false; addCompletionCriterion(safeMessage.trim()); refreshEvidenceRequirements([safeMessage.trim()]); save({ role: "user", content: safeMessage }); }
       }
       return pending.length;
     };
