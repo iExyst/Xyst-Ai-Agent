@@ -4,6 +4,7 @@
 
 - The live `POST /v1/responses` check through Xyst CLI passed against installed LM Studio 0.4.26.0 and an already-loaded Qwen3-4B. `store:false` returned completed status, exact marker `XYST_RESPONSES_API_LIVE_OK`, and usage of 28 tokens. No model was loaded or unloaded. The support matrix now records this live result; streaming continues to have deterministic SSE coverage.
 - The PR head `55af6bb` updates GitHub workflow actions to official v7 releases, whose metadata uses Node 24. YAML parsing and hosted Windows/Ubuntu CI and package workflows passed.
+- Exact hosted Windows package run `40236464357` at head `79a2e7f` passed a model-backed live GitHub JSON API agent task in isolated data/workspace. The package manifest SHA-512 matches; persisted evidence includes HTTP 200, `full_name`, file create/read, `task_complete`, and healthy SQLite.
 
 ## Live data/API access checkpoint · 2026-10-25
 

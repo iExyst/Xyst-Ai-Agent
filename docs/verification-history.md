@@ -6,6 +6,12 @@
 - This closes the previously open live endpoint check for the non-streaming Responses API. Streaming remains covered by deterministic SSE fixtures; no model was loaded or unloaded for this check.
 - PR head `55af6bb` replaced the Node 20-based GitHub Actions v4 integrations with official v7 releases verified to use Node 24. Workflow YAML parsed, and hosted Windows/Ubuntu CI and package runs passed.
 
+## Hosted Windows package live JSON API agent task (2026-10-25)
+
+- Downloaded the exact `xyst-windows` artifact from hosted package run `40236464357`, head `79a2e7f`. The 264,131,909-byte NSIS installer SHA-512 matches `latest.yml` (`uCF22DUPpiQqRlJhuUbo+2CM9B6h58iGcrKpu8MM7ZBiFbcCNAkE+NF2QbLfTKgzoRqgalmkxYuMkATx0WiKbg==`); embedded `app.asar` SHA-256 is `F9F7EEFB7CA5091890CC5C118BDE1563A7B5D085E5FEBD4B8D610729F34761A7`.
+- The exact package's bundled Node 22.23.4 CLI ran in an isolated APPDATA/LOCALAPPDATA profile and workspace. Its agent fetched the live GitHub repository JSON API (HTTP 200, `full_name: iExyst/Xyst-Ai-Agent`), wrote and reread `api-result.txt` (`status=200; repo=iExyst/Xyst-Ai-Agent; marker=XYST_PACKAGE_LIVE_API_OK`), and persisted successful `task_complete` evidence. Session `bc2a00bb-98d1-4f81-8977-4852d0133367` completed after resuming once with Qwen3.5-9B when the first Qwen3-4B response repeated the evidence index as plain text. The isolated database integrity check is healthy.
+- Qwen3.5-9B was loaded only for the resume and unloaded afterward. The Qwen3-4B instance was preloaded and remains loaded as found. The registered Xyst profile was not used for the acceptance task.
+
 ## Live web/API retrieval and integrations (2026-10-25)
 
 - Extended `web_fetch` to request and accept `application/json` and vendor `application/*+json` responses. Responses remain bounded to 2 MiB and 30,000 returned characters, pass the existing public-address and redirect checks, and are marked untrusted. The result also reports the response content type.
