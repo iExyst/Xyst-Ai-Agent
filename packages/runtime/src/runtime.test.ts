@@ -707,6 +707,9 @@ test("explicit live API and named output requests cannot be verified by unrelate
     assert.equal(result.status, "unverified");
     assert.match(taskSystem, /Required evidence from explicitly requested tool: web_fetch/);
     assert.match(taskSystem, /Required live fetch from requested URL: https:\/\/example\.com\/data\.json/);
+    assert.match(taskSystem, /For current, real-time, recent, or otherwise changing facts, use live sources when network access is available/);
+    assert.match(taskSystem, /identify the source and retrieval time/);
+    assert.match(taskSystem, /Public JSON APIs can be fetched directly even when web search is not configured/);
     assert.match(taskSystem, /live-api-acceptance\.txt/);
     assert.ok(taskSystem.indexOf("Required evidence from explicitly requested tool: web_fetch") < taskSystem.indexOf("Required live fetch from requested URL:"), "machine-checkable requirements appear before historical user guidance");
     assert.ok(taskSystem.indexOf("Required live fetch from requested URL:") < taskSystem.lastIndexOf("live-api-acceptance.txt"), "URL and exact output requirements have a stable order");

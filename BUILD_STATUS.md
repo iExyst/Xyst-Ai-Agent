@@ -5,6 +5,7 @@
 - Confirmed network access defaults on globally and full-access profiles permit network and configured integrations. Current-source and packaged acceptance already proved live GitHub repository API and Open-Meteo weather retrieval; Hugging Face discovery and authenticated GitHub are configured.
 - Updated the agent policy so tasks about current, real-time, recent, or changing facts consult live sources when network is available, identify source and retrieval time, and disclose when verification fails. Direct public JSON APIs remain usable without a web-search key.
 - Web search and fetch outputs now include UTC `retrieved_at` timestamps. Updated general-tools documentation with live-source behavior and the exact search credential setup.
+- Fresh call through the updated Xyst `web_fetch` fetched Open-Meteo NYC current weather (HTTP 200, JSON): `2026-10-25T19:15` America/New_York, `54.1 °F`, retrieved `2026-10-25T23:22:29Z`.
 - `npm test`: runtime 136 passed, 2 host-dependent skips; CLI 15 passed. `npm run typecheck` passed.
 - Current limitation: general web search is not configured until a Brave API key is stored in the OS credential vault. The source offers a working Brave integration, while public APIs and configured GitHub/Hugging Face integrations remain available. Full build gates remain open as listed below.
 
