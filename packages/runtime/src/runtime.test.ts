@@ -977,7 +977,7 @@ test("restricted path checks return the canonical symlink target and block out-o
   try { await symlink(insideFile, insideLink); await symlink(outsideFile, outsideLink); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "EPERM") { t.skip("Windows symlink privilege is unavailable in this environment"); return; } throw error; }
   const access = new AccessController({ mode: "restricted", readRoots: [allowed], writeRoots: [allowed] });
-  assert.equal(await access.assertPath(insideLink, "read"), insideFile);
+  assert.equal(await access.assertPath(insideLink, "read"), await realpath(insideFile));
   const nestedAccess = new AccessController({ mode: "restricted", readRoots: [root], writeRoots: [root] }, access);
   assert.equal(await nestedAccess.assertPath(insideLink, "read"), await realpath(insideFile));
   await assert.rejects(() => access.assertPath(outsideLink, "read"), /denies read access/);
@@ -1884,7 +1884,7 @@ test("mission admission samples LM Studio GPU estimates before assigning automat
   try {
     const mission = runner.repository.create({ name: "GPU-aware assignment", objective: "Complete one task", tasks: [{ id: "worker", objective: "Use the available GPU", dependsOn: [] }] });
     const result = await runner.run(mission.id);
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "completed", String((store.db.prepare("SELECT error FROM mission_runs WHERE id=?").get(result.runId) as { error: string | null } | undefined)?.error ?? "Mission run did not complete"));
     assert.equal(assigned[0]?.model, "larger-file-low-vram");
     const agentState = JSON.parse((store.db.prepare("SELECT definition_json FROM agents WHERE id=?").get(`${result.runId}:worker`) as { definition_json: string }).definition_json) as { modelSelectionReason: string };
     assert.match(agentState.modelSelectionReason, /LM Studio estimates 2.5 GiB total GPU memory.*3 GiB currently free/);
@@ -1908,7 +1908,7 @@ test("mission resource estimates include trigger data and completed dependency r
       { id: "consumer", objective: "Use the source result", dependsOn: ["source"] }
     ] });
     const result = await runner.run(mission.id, { trigger: "github", triggerPayload: { event: "E".repeat(20000) } });
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "completed", String((store.db.prepare("SELECT error FROM mission_runs WHERE id=?").get(result.runId) as { error: string | null } | undefined)?.error ?? "Mission run did not complete"));
     assert.equal(actualContexts.length, 2);
     assert.ok(actualContexts[1]! > actualContexts[0]!, "the dependency result increases the second task's actual prompt estimate");
     assert.deepEqual(estimatedContexts, actualContexts, "LM Studio estimates use the same context lengths as the actual task prompts");
