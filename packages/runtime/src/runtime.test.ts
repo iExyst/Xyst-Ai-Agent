@@ -835,6 +835,30 @@ test("agent prompts once for evidence verification when actions succeeded but th
   } finally { store.close(); }
 }));
 
+test("agent nudges for completion verification after successful read-only tool evidence", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "read-only-completion-nudge.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  let turn = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-only-list", type: "function", function: { name: "file_list", arguments: JSON.stringify({ path: root }) } }] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", content: "I inspected the workspace." } }] };
+      const reminder = request.messages.filter((message) => message.role === "user").at(-1)?.content;
+      assert.match(String(reminder), /call task_complete now/i);
+      assert.match(String(reminder), /1: "file_list"/);
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-only-task-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const result = await agent.run("Inspect this workspace", { workspace: root, maxTurns: 5 });
+    assert.equal(result.status, "completed", JSON.stringify(sessions.messages(result.sessionId)));
+    assert.equal(turn, 3);
+  } finally { store.close(); }
+}));
+
 test("agent resumes incomplete user or tool turns with a valid assistant boundary", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "resume-turn-boundary.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
@@ -894,6 +918,7 @@ test("agent persists messages received during inference and continues with the u
 test("agent appends queued guidance after pending tool results are saved", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mid-run-tool-message.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
+  await writeFile(join(root, "README.md"), "source details");
   let pending: string[] = [];
   const captured: Array<Array<Record<string, unknown>>> = [];
   const provider = {
@@ -904,13 +929,19 @@ test("agent appends queued guidance after pending tool results are saved", async
         pending.push("Skip the generated inventory and inspect the source file.");
         return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "list-before-guidance", type: "function", function: { name: "file_list", arguments: JSON.stringify({ path: root }) } }] } }] };
       }
-      return { choices: [{ message: { role: "assistant", content: "I inspected the source file." } }] };
+      if (captured.length === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-after-guidance", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "README.md" }) } }] } }] };
+      if (captured.length === 3) return { choices: [{ message: { role: "assistant", content: "I inspected the source file." } }] };
+      const reminder = captured.at(-1)!.filter((message) => message.role === "user").at(-1)?.content;
+      assert.match(String(reminder), /call task_complete now/i);
+      assert.match(String(reminder), /1: "file_read"/);
+      assert.match(String(reminder), /2: "file_list"/);
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "verify-after-guidance", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [2, 1] }) } }] } }] };
     }
   };
   const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   try {
-    const result = await agent.run("List project files", { workspace: root, maxTurns: 3, drainUserMessages: () => { const messages = pending; pending = []; return messages; } });
-    assert.equal(result.status, "unverified");
+    const result = await agent.run("List project files", { workspace: root, maxTurns: 5, drainUserMessages: () => { const messages = pending; pending = []; return messages; } });
+    assert.equal(result.status, "completed");
     assert.deepEqual(captured[1]!.slice(-3).map((message) => message.role), ["assistant", "tool", "user"]);
     assert.equal(captured[1]!.at(-1)?.content, "Skip the generated inventory and inspect the source file.");
   } finally { store.close(); }

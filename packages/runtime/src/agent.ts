@@ -658,7 +658,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
           if (!completionVerified && completionNudges < 2) {
             const priorCompletion = this.deps.store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE session_id=? AND name='task_complete'").get(sessionId) as { count: number };
             const evidence = this.deps.store.db.prepare("SELECT id,name,effect,input_json,output_json FROM tool_calls WHERE name!='task_complete' AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?) ORDER BY created_at DESC,rowid DESC LIMIT 50").all(sessionId, executionScope) as Array<{ id: string; name: string; effect: string; input_json: string; output_json: string }>;
-            if (priorCompletion.count === 0 && evidence.some((item) => item.effect === "external")) {
+            if (priorCompletion.count === 0 && evidence.length > 0) {
               const criteria = requiredCompletionCriteria.map((item) => `- ${item}`).join("\n");
               const evidenceList = evidence.map(evidenceLabel).join("\n");
               save({ role: "user", content: `Your prior response did not verify the requested work. Do not repeat completed actions or describe commands. Call task_complete now with one relevant successful evidence index for each server-defined required criterion, in the order shown. Indexes refer to the list in the next system message. You may provide one index if that same result supports every criterion. Required criteria:\n${criteria}\nSuccessful tool results available as evidence:\n${evidenceList}` });
