@@ -6,6 +6,7 @@ test("native PTY provides TTY input, output, and resizable dimensions", async ()
   const source = `
     process.stdin.setRawMode(true);
     process.stdout.write("TTY_READY=" + Number(process.stdin.isTTY && process.stdout.isTTY) + ":" + process.stdout.columns + "x" + process.stdout.rows + "\\n");
+    process.stdout.on("resize", () => process.stdout.write("RESIZED=" + process.stdout.columns + "x" + process.stdout.rows + "\\n"));
     process.stdin.on("data", (value) => {
       const key = value.toString();
       if (key === "x") process.stdout.write("INPUT_RECEIVED\\n");
@@ -29,7 +30,9 @@ test("native PTY provides TTY input, output, and resizable dimensions", async ()
   try {
     await waitFor(/TTY_READY=1:84x26/);
     terminal.write("x"); await waitFor(/INPUT_RECEIVED/);
-    terminal.resize(111, 37); terminal.write("r");
+    terminal.resize(111, 37);
+    if (process.platform !== "win32") await waitFor(/RESIZED=111x37/);
+    terminal.write("r");
     if (process.platform === "win32") await waitFor(/\u001b\[8;37;111t/);
     else await waitFor(/SIZE=111x37/);
     terminal.write("q");
