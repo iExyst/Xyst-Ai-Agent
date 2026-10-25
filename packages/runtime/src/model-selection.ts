@@ -3,6 +3,11 @@ import type { LMStudioModel } from "./providers/lm-studio.js";
 import type { ModelPerformanceStats } from "./model-performance.js";
 
 export interface ModelChoice { model: LMStudioModel; reason: string; considered: number }
+export const MODEL_CONTEXT_HEADROOM_TOKENS = 2048;
+export function modelLoadContextLength(maxContextTokens: number | null | undefined, requiredContextTokens: number): number | undefined {
+  if (!Number.isSafeInteger(requiredContextTokens) || requiredContextTokens < 1 || typeof maxContextTokens !== "number" || !Number.isSafeInteger(maxContextTokens) || maxContextTokens < requiredContextTokens) return undefined;
+  return Math.min(maxContextTokens, requiredContextTokens + MODEL_CONTEXT_HEADROOM_TOKENS);
+}
 
 /** Estimate text/history tokens without treating image data URLs as text; reserve headroom for the system prompt, tool schemas, and generation overhead. */
 export function estimateRequiredContextTokens(messages: Array<{ content?: unknown; tool_calls?: unknown }>, reserveTokens = 6144): number {

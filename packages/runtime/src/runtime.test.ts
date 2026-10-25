@@ -12,7 +12,7 @@ import { createText, patchText, readText, searchFiles } from "./tools/files.js";
 import { normalizeUserPath, runProcess } from "./platform.js";
 import { AccessController } from "./access.js";
 import { credentialStoreError, redactSecrets } from "./credentials.js";
-import { chooseAgentModel, estimateRequiredContextTokens } from "./model-selection.js";
+import { chooseAgentModel, estimateRequiredContextTokens, modelLoadContextLength } from "./model-selection.js";
 import { readModelPerformance } from "./model-performance.js";
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 import { createGitHubWebhookHandler, GitHubProvider, recordWebhookDelivery, verifyGitHubWebhook } from "./integrations/github.js";
@@ -26,7 +26,7 @@ import { runNotification, subscribeRunNotifications, type RunNotification } from
 import { ModelAcquisitionService } from "./integrations/model-acquisition.js";
 import { HuggingFaceProvider } from "./integrations/huggingface.js";
 import { createWebTools } from "./tools/web.js";
-import { AgentRunner, ExternalActionApprovalError } from "./agent.js";
+import { AgentRunner, ExternalActionApprovalError, assertRequiredToolEvidence } from "./agent.js";
 import { createServer } from "node:http";
 import { LMStudioProvider } from "./providers/lm-studio.js";
 import { SessionCompactor } from "./session-compaction.js";
@@ -252,6 +252,9 @@ test("automatic local model selection prefers LM Studio GPU estimates that fit c
 }));
 
 test("automatic model selection filters declared context limits using a bounded task estimate", () => {
+  assert.equal(modelLoadContextLength(32_768, 6144), 8192, "local model loads reserve bounded room for additional tool results");
+  assert.equal(modelLoadContextLength(8192, 6144), 8192, "headroom is capped at the model's declared maximum");
+  assert.equal(modelLoadContextLength(4096, 6144), undefined, "models below the minimum requirement are not loaded with a false context promise");
   const required = estimateRequiredContextTokens([{ content: "x".repeat(35_000) }]);
   assert.equal(required, 16_144);
   assert.equal(estimateRequiredContextTokens([{ content: [{ type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(100_000)}` } }] }]), 7_168, "image data URLs must not be counted as prompt text");
@@ -640,7 +643,6 @@ test("agent completion requires successful persisted tool evidence", async () =>
     assert.equal(verified.status, "completed");
     assert.doesNotMatch(JSON.stringify(completionDefinition), /"criteria"/, "the model cannot replace or paraphrase runtime-defined criteria");
     assert.ok(completionSystemWithEvidence.includes("Available persisted evidence call indexes"));
-    assert.ok(completionSystemWithEvidence.includes("newest-first; index 1 is the most recent successful tool call"), "the evidence prompt defines its ordering explicitly");
     assert.ok(completionSystemWithEvidence.includes('1: "file_list"'), "one-based indexes and safe tool names are shown to the model");
     assert.equal(round, 2, "successful verification ends the run without another inference turn");
     assert.equal(JSON.parse((store.db.prepare("SELECT details_json FROM usage WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(verified.sessionId) as { details_json: string }).details_json).task_outcome, "verified_success");
@@ -648,6 +650,15 @@ test("agent completion requires successful persisted tool evidence", async () =>
     assert.equal(JSON.parse(checked.output_json).verified, true);
   } finally { store.close(); }
 }));
+
+test("mission completion enforces required tool name, exit code, and output assertions", () => {
+  const requirement = { tool: "run_process", exitCode: 0, stdoutEquals: "EXPECTED\n" };
+  assert.doesNotThrow(() => assertRequiredToolEvidence("run_process", { code: 0, signal: null, stdout: "EXPECTED\n" }, requirement));
+  assert.doesNotThrow(() => assertRequiredToolEvidence("run_process", { code: 0, signal: null, stdout: "EXPECTED\r\n" }, { ...requirement, normalizeNewlines: true }));
+  assert.throws(() => assertRequiredToolEvidence("file_read", { code: 0, stdout: "EXPECTED\n" }, requirement), /must come from run_process/);
+  assert.throws(() => assertRequiredToolEvidence("run_process", { code: 1, stdout: "EXPECTED\n" }, requirement), /required 0/);
+  assert.throws(() => assertRequiredToolEvidence("run_process", { code: 0, stdout: "OTHER\n" }, requirement), /stdout did not exactly match/);
+});
 
 test("mission completion evidence must reference each declared file output path", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "expected-output-path.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
@@ -669,33 +680,39 @@ test("mission completion evidence must reference each declared file output path"
     assert.equal(existsSync(expectedPath), false);
     assert.equal(await readFileAsync(join(root, "wrong.txt"), "utf8"), "wrong");
     const failedCompletion = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed'").get(result.sessionId) as { output_json: string };
-    assert.match(failedCompletion.output_json, /does not reference the declared output path/);
+    assert.match(failedCompletion.output_json, /must be a file_read of that exact path/);
   } finally { store.close(); }
 }));
 
-test("declared file outputs need a successful reread before mission completion", async () => withTemp(async (root) => {
-  const store = new XystStore(join(root, "expected-output-reread.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+test("declared outputs require exact readback and the refreshed evidence list identifies its path", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "expected-output-readback.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
-  const expectedPath = join(root, "expected.txt"); let turn = 0;
+  const expectedPath = join(root, "expected.txt"); let turn = 0; const prompts: string[] = [];
   const provider = {
     redact: (value: string) => value,
-    streamChatWithTools: async () => {
+    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
       turn++;
-      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "create-expected", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "expected.txt", content: "verified-marker" }) } }] } }] };
-      if (turn === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "complete-before-read", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
-      if (turn === 3) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-expected", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "expected.txt" }) } }] } }] };
-      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "complete-after-read", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+      if (turn === 1) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "write-expected", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "expected.txt", content: "VERIFIED" }) } }] } }] };
+      prompts.push(String(request.messages.find((message) => message.role === "system")?.content ?? ""));
+      if (turn === 2) return { choices: [{ message: { role: "assistant", tool_calls: [
+        { id: "read-expected", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "expected.txt" }) } },
+        { id: "premature-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }
+      ] } }] };
+      return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "verified-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
     }
   };
   const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   try {
-    const result = await agent.run("Create expected.txt containing verified-marker", { workspace: root, maxTurns: 5, expectedOutputPaths: [expectedPath], completionCriteria: [expectedPath] });
+    const result = await agent.run("Create and verify the declared output", { workspace: root, maxTurns: 4, expectedOutputPaths: [expectedPath], completionCriteria: [expectedPath] });
     assert.equal(result.status, "completed");
-    assert.equal(await readFileAsync(expectedPath, "utf8"), "verified-marker");
-    const failedCompletion = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed'").get(result.sessionId) as { output_json: string };
-    assert.match(failedCompletion.output_json, /must be a successful file_read result/);
-    const verifiedCompletion = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='completed'").get(result.sessionId) as { output_json: string };
-    assert.deepEqual(JSON.parse(verifiedCompletion.output_json).checks.map((check: { tool: string }) => check.tool), ["file_read"]);
+    assert.equal(await readFileAsync(expectedPath, "utf8"), "VERIFIED");
+    const completionCalls = store.db.prepare("SELECT status,input_json,output_json FROM tool_calls WHERE session_id=? AND name='task_complete' ORDER BY rowid").all(result.sessionId) as Array<{ status: string; input_json: string; output_json: string }>;
+    assert.equal(completionCalls[0]?.status, "failed", "a file_create result cannot verify a declared file output");
+    assert.match(completionCalls[0]!.output_json, /file_read completed after the displayed evidence list was sent/);
+    assert.equal(completionCalls[1]?.status, "completed");
+    assert.match(prompts[0]!, /Available persisted evidence call indexes \(newest-first/);
+    assert.match(prompts[1]!, /1: "file_read" path=/);
+    assert.match(prompts[1]!, /2: "file_create" path=/);
   } finally { store.close(); }
 }));
 
@@ -940,13 +957,13 @@ test("agent model loading and idle-unload policies control local loads and reque
   const provider = {
     redact: (value: string) => value, isLocalServer: () => true,
     models: async () => [{ type: "llm", key: "test-model", size_bytes: 1, max_context_length: 8192, loaded_instances: loaded ? [{ id: "xyst-load", config: {} }] : [] }],
-    load: async (_key: string, options: Record<string, unknown>) => { loads++; loaded = true; loadContext = Number(options.context_length); assert.equal(options.ttl_seconds, 900); assert.ok(loadContext > 4096 && loadContext < 8192); return {}; },
+    load: async (_key: string, options: Record<string, unknown>) => { loads++; loaded = true; loadContext = Number(options.context_length); assert.equal(options.ttl_seconds, 900); assert.ok(loadContext > 4096 && loadContext <= 8192); return {}; },
     streamChatWithTools: async (request: Record<string, unknown>) => { generations++; captured = request; return { choices: [{ message: { role: "assistant", content: "Done" } }] }; }
   };
   const runner = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   try {
     const result = await runner.run("Use the model", { workspace: root });
-    assert.equal(result.status, "unverified"); assert.equal(loads, 1); assert.equal(loadContext, estimateRequiredContextTokens([{ content: "Use the model" }]) + 1024); assert.equal(generations, 1); assert.equal(captured.ttl, 900);
+    assert.equal(result.status, "unverified"); assert.equal(loads, 1); assert.equal(loadContext, Math.min(8192, estimateRequiredContextTokens([{ content: "Use the model" }]) + 2048)); assert.equal(generations, 1); assert.equal(captured.ttl, 900);
     loaded = false; config.set("global", "models.automaticLoading", false);
     await assert.rejects(() => runner.run("Do not load", { workspace: root }), /automatic model loading is off/);
     assert.equal(loads, 1); assert.equal(generations, 1);
@@ -1352,8 +1369,11 @@ test("missions validate dependency graphs and persist task checkpoints", async (
   assert.throws(() => repository.create({ name: "unknown agent", objective: "x", agents: [{ id: "known", name: "Known" }], tasks: [
     { id: "task", objective: "task", dependsOn: [], agentId: "missing" }
   ] }), /Unknown agent/);
+  assert.throws(() => repository.create({ name: "empty tool evidence", objective: "x", tasks: [
+    { id: "task", objective: "task", dependsOn: [], requiredToolEvidence: [{ tool: "run_process" }] }
+  ] }), /Tool evidence must include at least one result assertion/);
   const mission = repository.create({ name: "ordered", objective: "Build it", agents: [{ id: "researcher", name: "Researcher", model: "small-model", maxTurns: 5, access: { mode: "restricted", readRoots: [root], writeRoots: [root], network: false, integrations: false, backgroundJobs: false, externalActions: false } }], tasks: [
-    { id: "first", objective: "First step", dependsOn: [], agentId: "researcher", expectedOutputs: ["analysis.md"], completionCriteria: "The analysis is saved." }, { id: "second", objective: "Second step", dependsOn: ["first"] }
+    { id: "first", objective: "First step", dependsOn: [], agentId: "researcher", expectedOutputs: ["analysis.md"], completionCriteria: "The analysis is saved.", requiredToolEvidence: [{ tool: "run_process", exitCode: 0, stdoutIncludes: "verified" }] }, { id: "second", objective: "Second step", dependsOn: ["first"] }
   ] });
   const objectives: string[] = []; const assignments: Array<Record<string, unknown>> = [];
   const fakeAgent = { run: async (objective: string, options: { onSession?: (id: string) => void; [key: string]: unknown }) => {
@@ -1368,6 +1388,7 @@ test("missions validate dependency graphs and persist task checkpoints", async (
   assert.match(objectives[0]!, /analysis\.md/); assert.match(objectives[0]!, /The analysis is saved/);
   assert.equal(assignments[0]?.agentId, "researcher"); assert.equal(assignments[0]?.model, "small-model"); assert.equal(assignments[0]?.maxTurns, 5);
   assert.ok(String((assignments[0]?.expectedOutputPaths as string[] | undefined)?.[0] ?? "").endsWith("analysis.md"));
+  assert.deepEqual(assignments[0]?.requiredToolEvidence, [{ tool: "run_process", exitCode: 0, stdoutIncludes: "verified" }]);
   assert.deepEqual(assignments[0]?.accessProfile, { mode: "restricted", readRoots: [root], writeRoots: [root], network: false, integrations: false, backgroundJobs: false, externalActions: false });
   const tasks = store.db.prepare("SELECT task_key,state,attempts FROM mission_tasks WHERE run_id=? ORDER BY task_key").all(result.runId) as Array<{ task_key: string; state: string; attempts: number }>;
   assert.deepEqual(tasks.map((task) => [task.task_key, task.state, task.attempts]), [["first", "completed", 1], ["second", "completed", 1]]);
@@ -1897,7 +1918,7 @@ test("mission backfill admits newly unlocked dependencies using their completed 
     assert.match(String(consumerObjective), /dependency-output-/);
     const consumerContext = actualContextByTask.get("consumer");
     assert.ok(consumerContext && consumerContext > (actualContextByTask.get("source") ?? 0));
-    assert.ok(estimatedContexts.includes(consumerContext), "the refreshed LM Studio GPU estimate uses the dependency-expanded task context");
+    assert.ok(estimatedContexts.includes(consumerContext + 2048), "the refreshed LM Studio GPU estimate uses the dependency-expanded context plus load headroom");
   } finally { releaseSlow(); store.close(); }
 }));
 
@@ -1964,7 +1985,7 @@ test("mission resource estimates include trigger data and completed dependency r
     assert.equal(result.status, "completed", String((store.db.prepare("SELECT error FROM mission_runs WHERE id=?").get(result.runId) as { error: string | null } | undefined)?.error ?? "Mission run did not complete"));
     assert.equal(actualContexts.length, 2);
     assert.ok(actualContexts[1]! > actualContexts[0]!, "the dependency result increases the second task's actual prompt estimate");
-    assert.deepEqual(estimatedContexts, actualContexts, "LM Studio estimates use the same context lengths as the actual task prompts");
+    assert.deepEqual(estimatedContexts, actualContexts.map((context) => context + 2048), "LM Studio estimates use the actual task prompt context plus the planned load headroom");
   } finally { store.close(); }
 }));
 

@@ -2,6 +2,13 @@
 
 This file preserves the detailed chronological verification notes that were moved out of the active resume checkpoint to keep it concise. Entries are archival snapshots and can be superseded by newer evidence in `BUILD_STATUS.md` or the linked current platform/provider docs.
 
+## Current source model mission and refreshed Linux package (2026-10-25)
+
+- The user's standing authorization permits local LM Studio model loads. The prior checkpoint wording that described model inference as disallowed is superseded. Qwen3.5 9B was loaded through LM Studio at 16,384 context and later unloaded. An isolated current-source mission completed: mission `b5c7e8f6-5852-4c73-8cbe-e052053ddeb8`, run `f83f0a95-ddba-4d60-9da2-7f3e8dbd5f54`. It verified the exact `fizzbuzz.py` readback and process stdout using the configured `run_process` evidence assertion; the mission database and fixture lived under `.xyst-live-acceptance/`.
+- Two isolated automatic-selection attempts chose `liquid/lfm2.5-1.2b` and did not complete. Run `dde29e47-26b5-413d-80bd-9c7275f03201` created a marker but the model supplied a malformed `cmd` invocation. Run `31261db3-1250-4233-9dec-ad389d1a9daf` executed Python successfully and returned the exact marker but did not call `file_read`, so Xyst correctly left the task unverified. These results keep automatic-selection quality open; the selected model was unloaded.
+- Current Windows package bytes: 267,545,183; SHA-512 Base64 `HbnwTbxLgo7JYk1al3qLkuKkLfaypFMh2Pe3PuzKO2fS7DXY3FFbFWPGtpVRjRN+fgmmyoviAXMBlPf2D+iIsg==`; embedded `app.asar` SHA-256 `484DB48D37D662698AF22D6C15C6043A420880751797A1CDF8101FF276A7CBD9`. `latest.yml` size and SHA-512 match.
+- Ubuntu 24.04 WSL, using Node 22.12.0, passed typecheck, runtime tests (130 passed, 3 host-dependent skips), CLI tests (14 passed), and `desktop:package`. Current AppImage: 338,729,992 bytes; SHA-512 Base64 `AbWyLJ1rIZu0408NEyhZm8VC33HX+ZAvjGSOa8sKoGuoVmKcxLwnKujqyr0IrvO2sykc57JjYCfKOzIZL0JiJQ==`; `latest-linux.yml` matches. Extracted embedded `app.asar` SHA-256 `9957c8e2a2e5ef36d3d66d7d8d624da0ca0f7aa4e3e66290cbf9459214850f02`.
+- The exact refreshed AppImage was launched in Ubuntu 24.04 WSL under Xvfb with isolated HOME/XDG data and LM Studio pointed at unused loopback port 9. Chromium DevTools reported `Xyst Control Room`, runtime ready, full access, and 25 buttons. This is a virtual Linux desktop smoke; physical/bare-metal Linux remains open.
 ## Live model source-runtime acceptance (2026-10-25)
 
 - The installed LM Studio 0.4.26 server exposed local models through Xyst inventory. Xyst loaded `nvidia/nemotron-3-nano-4b` through the installed `lms` CLI at 16,384 context with a 600-second TTL. A separate `qwen/qwen3.5-9b` request returned the exact requested inference marker.

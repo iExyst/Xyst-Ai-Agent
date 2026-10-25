@@ -15,12 +15,13 @@ import { freemem, totalmem } from "node:os";
 import type { LMStudioProvider } from "../providers/lm-studio.js";
 import { planResourceAwareBatch, type ResourceTaskAssignment, type ResourceTaskCandidate } from "./resource-scheduler.js";
 import { readModelPerformance } from "../model-performance.js";
-import { chooseAgentModel, estimateRequiredContextTokens } from "../model-selection.js";
+import { chooseAgentModel, estimateRequiredContextTokens, modelLoadContextLength } from "../model-selection.js";
 import { parseLmStudioResourceEstimate, readHostResourceStats } from "../system-resources.js";
 
 const profileSchema = z.object({ mode: z.enum(["full", "restricted"]), readRoots: z.array(z.string()).optional(), writeRoots: z.array(z.string()).optional(), allowedExecutables: z.array(z.string()).optional(), network: z.boolean().optional(), integrations: z.boolean().optional(), backgroundJobs: z.boolean().optional(), externalActions: z.boolean().optional() }).strict();
 const agentSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/), name: z.string().min(1).max(100), model: z.string().optional(), maxTurns: z.number().int().min(1).max(50).optional(), access: profileSchema.optional() }).strict();
-const taskSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(), name: z.string().min(1).max(100).optional(), objective: z.string().min(1), dependsOn: z.array(z.string()).default([]), agentId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(), expectedOutputs: z.array(z.string().min(1).max(500)).max(20).optional(), completionCriteria: z.string().max(4000).optional(), maxTurns: z.number().int().min(1).max(50).optional(), model: z.string().optional(), workspace: z.string().optional(), workspaceMode: z.enum(["shared", "worktree"]).default("shared"), workspaceFrom: z.string().optional(), maxRetries: z.number().int().min(0).max(5).optional() }).strict();
+const requiredToolEvidenceSchema = z.object({ tool: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), exitCode: z.number().int().optional(), stdoutEquals: z.string().max(30000).optional(), stdoutIncludes: z.string().max(30000).optional(), normalizeNewlines: z.boolean().optional() }).strict().refine((value) => value.exitCode !== undefined || value.stdoutEquals !== undefined || value.stdoutIncludes !== undefined, "Tool evidence must include at least one result assertion");
+const taskSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(), name: z.string().min(1).max(100).optional(), objective: z.string().min(1), dependsOn: z.array(z.string()).default([]), agentId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(), expectedOutputs: z.array(z.string().min(1).max(500)).max(20).optional(), completionCriteria: z.string().max(4000).optional(), requiredToolEvidence: z.array(requiredToolEvidenceSchema).max(10).optional(), maxTurns: z.number().int().min(1).max(50).optional(), model: z.string().optional(), workspace: z.string().optional(), workspaceMode: z.enum(["shared", "worktree"]).default("shared"), workspaceFrom: z.string().optional(), maxRetries: z.number().int().min(0).max(5).optional() }).strict();
 const scheduleSchema = z.object({ cron: z.string().min(1), timezone: z.string().default("UTC"), enabled: z.boolean().default(true), missedRun: z.enum(["skip", "run_once"]).default("skip") }).strict();
 const definitionSchema = z.object({ id: z.string().optional(), name: z.string().min(1).max(100), objective: z.string().min(1), workspace: z.string().optional(), worktreeRoot: z.string().optional(), projectId: z.string().optional(), model: z.string().optional(), agents: z.array(agentSchema).max(8).optional(), tasks: z.array(taskSchema).min(1).max(100).optional(), maxRetries: z.number().int().min(0).max(5).default(1), maxConcurrency: z.number().int().min(1).max(8).default(1), schedule: scheduleSchema.optional(), github: z.object({ enabled: z.boolean().optional(), writeEnabled: z.boolean().optional(), mergeAuthorized: z.boolean().optional() }).optional(), githubTrigger: z.object({ events: z.array(z.enum(["issues", "issue_comment", "pull_request", "pull_request_review"])).default(["issues"]), repositories: z.array(z.string()).optional() }).optional() }).strict();
 
@@ -29,7 +30,7 @@ function declaredFileOutputPaths(outputs: string[] | undefined, workspace: strin
 }
 
 export interface MissionAgentDefinition { id: string; name: string; model?: string; maxTurns?: number; access?: AccessProfile }
-export interface MissionTaskDefinition { id?: string; name?: string; objective: string; dependsOn: string[]; agentId?: string; expectedOutputs?: string[]; completionCriteria?: string; maxTurns?: number; model?: string; workspace?: string; workspaceMode: "shared" | "worktree"; workspaceFrom?: string; maxRetries?: number }
+export interface MissionTaskDefinition { id?: string; name?: string; objective: string; dependsOn: string[]; agentId?: string; expectedOutputs?: string[]; completionCriteria?: string; requiredToolEvidence?: Array<{ tool: string; exitCode?: number; stdoutEquals?: string; stdoutIncludes?: string; normalizeNewlines?: boolean }>; maxTurns?: number; model?: string; workspace?: string; workspaceMode: "shared" | "worktree"; workspaceFrom?: string; maxRetries?: number }
 type MissionTaskExecutionOutcome = { taskId: string; status: "completed" | "paused" | "cancelled" } | { taskId: string; status: "retry" | "failed" | "reconciliation_required"; error: string };
 export interface MissionDefinition { id?: string; name: string; objective: string; workspace?: string; worktreeRoot?: string; projectId?: string; model?: string; agents?: MissionAgentDefinition[]; tasks?: MissionTaskDefinition[]; maxRetries: number; maxConcurrency: number; schedule?: { cron: string; timezone: string; enabled: boolean; missedRun: "skip" | "run_once" }; github?: { enabled?: boolean; writeEnabled?: boolean; mergeAuthorized?: boolean }; githubTrigger?: { events: Array<"issues" | "issue_comment" | "pull_request" | "pull_request_review">; repositories?: string[] } }
 export interface StoredMission { id: string; definition: MissionDefinition; status: string; created_at: string; updated_at: string; next_run_at: string | null; last_run_at: string | null }
@@ -416,7 +417,9 @@ export class PersistentMissionRunner {
               for (const modelKey of shortlist) {
                 if (controller.signal.aborted) throw new Error("Mission cancelled");
                 try {
-                  const estimate = await this.deps.modelProvider.estimateLoad(modelKey, { context_length: requiredContextTokens }, controller.signal);
+                  const candidate = installedModels.find((item) => item.key === modelKey);
+                  const estimateContext = modelLoadContextLength(candidate?.max_context_length, requiredContextTokens) ?? requiredContextTokens;
+                  const estimate = await this.deps.modelProvider.estimateLoad(modelKey, { context_length: estimateContext }, controller.signal);
                   const gpuBytes = parseLmStudioResourceEstimate(String(estimate.output ?? "")).gpuBytes;
                   if (gpuBytes !== undefined) estimatedGpuMemoryBytesByModel[modelKey] = gpuBytes;
                 } catch (error) { if (controller.signal.aborted) throw error; }
@@ -459,6 +462,7 @@ export class PersistentMissionRunner {
                 ...(task.completionCriteria ? [task.completionCriteria] : [])
               ],
               expectedOutputPaths: declaredFileOutputPaths(task.expectedOutputs, taskWorkspaces.get(task.id!)!),
+              ...(task.requiredToolEvidence?.length ? { requiredToolEvidence: task.requiredToolEvidence } : {}),
               agentId: task.agentId ?? task.id!, ...(resourceAssignment?.selectedModel ?? taskModels.get(task.id!)?.requested ? { model: resourceAssignment?.selectedModel ?? taskModels.get(task.id!)!.requested } : {}), ...(resourceAssignment?.automatic ? { automaticModelAssignment: true } : {}),
               ...(maxTurns !== undefined ? { maxTurns } : {}), ...(profile?.access ? { accessProfile: profile.access } : {}),
               ...(options.approveExternalAction ? { approveExternalAction: options.approveExternalAction } : {}),
@@ -611,7 +615,9 @@ export class PersistentMissionRunner {
                 for (const modelKey of shortlist) {
                   if (controller.signal.aborted) throw new Error("Mission cancelled");
                   try {
-                    const estimate = await this.deps.modelProvider.estimateLoad(modelKey, { context_length: requiredContextTokens }, controller.signal);
+                    const candidate = currentModels.find((item) => item.key === modelKey);
+                    const estimateContext = modelLoadContextLength(candidate?.max_context_length, requiredContextTokens) ?? requiredContextTokens;
+                    const estimate = await this.deps.modelProvider.estimateLoad(modelKey, { context_length: estimateContext }, controller.signal);
                     const gpuBytes = parseLmStudioResourceEstimate(String(estimate.output ?? "")).gpuBytes;
                     if (gpuBytes === undefined) delete estimatedGpuMemoryBytesByModel[modelKey];
                     else estimatedGpuMemoryBytesByModel[modelKey] = gpuBytes;
