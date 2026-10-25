@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Current-head packaged live-data acceptance (2026-10-25)
+
+- Hosted CI at current PR head `7518727` passed Windows and Ubuntu jobs in run [40245269869](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40245269869); the Windows/Linux packaging run [40245269890](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40245269890) also passed, including Windows clean-install and renderer smoke.
+- Downloaded package sizes and SHA-512 Base64 matched their release manifests: Windows `Xyst Setup 0.1.0.exe`, 264,146,235 bytes, `9VyI5QZSpOMkD/aSeCvjsW7ZRBecuGEuF8q1RiUw02ld9yaaFoU9NlnZcZJPxg2rj6tdHE6xnS8dmelqHEC00w==`; Linux `Xyst-0.1.0.AppImage`, 325,050,544 bytes, `f5f+0un/m+c2PJTG1/x3LW8zVyyzZ0YsRb/TwGL3KWP4aT00nYFbDKBVIW9ltUug0PFbxvZOQGNMeTD2ej4xsw==`.
+- Exact packaged Windows CLI and bundled Node ran isolated model-backed session `a1284cd1-21b5-49c5-8d5b-22559625506c`. The agent fetched the exact Open-Meteo current-conditions endpoint (HTTP 200 JSON), returned `2026-10-25T19:30` America/New_York, `54.4 °F`, and Xyst `retrieved_at: 2026-10-25T23:41:09.848Z`; resuming to call `task_complete` verified persisted web-fetch evidence.
+- The AppImage's bundled Linux runtime tree was executed in Ubuntu 24.04 WSL. Its packaged `web_fetch` returned HTTP 200 JSON for the same current-conditions API with `retrieved_at: 2026-10-25T23:42:02.465Z` and current conditions `2026-10-25T19:30`, `54.4 °F`, humidity 60%, wind 5.4 mph. Earlier exact Linux package model-backed agent acceptance is recorded below.
+
 ## Exact hosted Windows and Linux package live-data acceptance (2026-10-25)
 
 - Both packages built from current PR head `1c885c9` were downloaded from workflow run `40242349840`. The Windows NSIS installer is 264,144,936 bytes; SHA-512 Base64 `U7sDZ19EwQg+1BkSsskl3C9XzeyyEK8V6jcnChaqkzU26QFClcTPfEffwWa5qCCLbok9lx7mtqNDPvLDUEk9BA==` matches `latest.yml`. Exact packaged CLI session `9b56341e-1605-467b-aadb-fd50f9a7495e` fetched the GitHub repository API (HTTP 200, JSON), saved `pushed_at: 2026-10-25T22:54:35Z`, reread the exact file, and completed through persisted `task_complete` checks.
