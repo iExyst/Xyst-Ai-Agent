@@ -1,0 +1,40 @@
+{
+  "name": "xyst",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Xyst shared runtime and command line agent",
+  "type": "module",
+  "desktopName": "xyst",
+  "main": "apps/desktop/dist/main.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "overrides": {
+    "image-size": "2.0.4",
+    "zod": "4.6.7",
+    "node-notifier": {
+      "uuid": "11.1.1"
+    }
+  },
+  "scripts": {
+    "postinstall": "node scripts/apply-dependency-patches.cjs",
+    "build": "npm run build --workspace @xyst/runtime && npm run build --workspace @xyst/cli",
+    "dev": "node --experimental-wasm-modules --import tsx apps/cli/src/index.ts",
+    "xyst": "node --experimental-wasm-modules apps/cli/dist/index.js",
+    "desktop:dev": "npm run build && npm run build --workspace @xyst/desktop && npm run dev --workspace @xyst/desktop",
+    "icons:build": "node apps/desktop/scripts/build-icons.cjs",
+    "desktop:build": "npm run build && npm run build --workspace @xyst/desktop",
+    "desktop:package": "npm run desktop:build && npm run package --workspace @xyst/desktop",
+    "typecheck": "npm run build --workspace @xyst/runtime && npm run typecheck --workspace @xyst/cli && npm run typecheck --workspace @xyst/runtime && npm run typecheck --workspace @xyst/desktop",
+    "test": "npm run build --workspace @xyst/runtime && npm run test --workspace @xyst/runtime && npm run test --workspace @xyst/cli"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "better-sqlite3@12.11.1": true,
+    "node-pty@1.1.0": true
+  }
+}
