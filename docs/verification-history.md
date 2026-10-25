@@ -1,5 +1,11 @@
 # Xyst verification history
 
+## LM Studio Responses API live acceptance (2026-10-25)
+
+- The Xyst CLI sent a non-streaming `POST /v1/responses` request through its LM Studio provider to the installed Windows LM Studio 0.4.26.0 service using the already-loaded `qwen3-4b-2507-instruct-uncensored-hauhaucs-aggressive` instance. The request used `store: false`, requested `XYST_RESPONSES_API_LIVE_OK`, and returned `status: completed`, the exact output marker, and 28 total tokens. The request JSON is preserved under `.xyst-live-acceptance/responses-live-request.json`.
+- This closes the previously open live endpoint check for the non-streaming Responses API. Streaming remains covered by deterministic SSE fixtures; no model was loaded or unloaded for this check.
+- PR head `55af6bb` replaced the Node 20-based GitHub Actions v4 integrations with official v7 releases verified to use Node 24. Workflow YAML parsed, and hosted Windows/Ubuntu CI and package runs passed.
+
 ## Live web/API retrieval and integrations (2026-10-25)
 
 - Extended `web_fetch` to request and accept `application/json` and vendor `application/*+json` responses. Responses remain bounded to 2 MiB and 30,000 returned characters, pass the existing public-address and redirect checks, and are marked untrusted. The result also reports the response content type.
