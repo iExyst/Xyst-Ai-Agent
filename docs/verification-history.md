@@ -2,6 +2,13 @@
 
 This file preserves the detailed chronological verification notes that were moved out of the active resume checkpoint to keep it concise. Entries are archival snapshots and can be superseded by newer evidence in `BUILD_STATUS.md` or the linked current platform/provider docs.
 
+## Live model source-runtime acceptance (2026-10-25)
+
+- The installed LM Studio 0.4.26 server exposed local models through Xyst inventory. Xyst loaded `nvidia/nemotron-3-nano-4b` through the installed `lms` CLI at 16,384 context with a 600-second TTL. A separate `qwen/qwen3.5-9b` request returned the exact requested inference marker.
+- With a fresh isolated `APPDATA` and test database, the Nemotron model completed a Xyst agent task that called `file_read` on a one-line marker file and then verified completion through `task_complete` against the persisted read result. The one-task mission `live-model-marker-acceptance` then completed with run ID `bc2af317-6a28-4b75-a24f-61cd4fb82cc3`, task state `completed`, and saved session `77078344-3ec2-4cf6-a434-dee7cb48cb9d`. The mission was read-only; the marker was a temporary acceptance fixture. This verifies the source CLI/runtime path, not the packaged Windows artifact.
+- An agent continuation with Qwen3.5 9B returned HTTP 500 from LM Studio `/v1/chat/completions`; no source changes were made in response. The successful agent and mission acceptance used the smaller tool-capable Nemotron model.
+- The default `%APPDATA%\\xyst\\xyst.sqlite` returned `SQLITE_CORRUPT` to the read-only database integrity command. It was not modified. Agent and mission checks used `%TEMP%\\xyst-acceptance-20261025\\xyst\\xyst.sqlite` instead.
+
 ## Final package refresh and Linux runtime ABI correction (2026-10-25)
 
 - Current package MCP check: the exact 323,075,196-byte AppImage was extracted from `release/`; its SHA-512 and embedded `app.asar` SHA-256 match [platform support](./platform-support.md). With isolated XDG/Xyst paths and `LM_STUDIO_BASE_URL=http://127.0.0.1:9`, the bundled CLI saved an HTTPS DeepWiki MCP definition and completed Streamable HTTP discovery. The exact packaged runtime then ran an agent-loop tool call to `read_wiki_structure` for `facebook/react`. Persisted SQLite evidence shows the session and MCP tool call completed, the topic list was stored with `untrusted-mcp-content` trust marking, and the explicit completion criterion passed. A deterministic provider fixture drove the two agent turns; no LM Studio model was loaded or queried. This verifies the current packaged runtime's public MCP read and evidence path, not OAuth, model-backed mission execution, or native Linux service behavior.
