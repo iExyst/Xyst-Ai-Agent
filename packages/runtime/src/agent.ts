@@ -490,7 +490,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
             throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${selected} provides ${activeContext}. The session is saved; resume it with a model or LM Studio context setting that can fit the expanded conversation.`);
           }
         }
-      currentEvidence = this.deps.store.db.prepare("SELECT id,name FROM tool_calls WHERE name!='task_complete' AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?) ORDER BY created_at DESC LIMIT 50").all(sessionId, executionScope) as Array<{ id: string; name: string }>;
+      currentEvidence = this.deps.store.db.prepare("SELECT id,name FROM tool_calls WHERE name!='task_complete' AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?) ORDER BY COALESCE(finished_at,created_at) DESC,rowid DESC LIMIT 50").all(sessionId, executionScope) as Array<{ id: string; name: string }>;
       const evidenceIndexesPrompt = currentEvidence.length ? currentEvidence.map((item, index) => `${index + 1}: ${JSON.stringify(item.name)}`).join("\n") : "none yet";
       const turnSystem = `${completionSystem}\n\nAvailable persisted evidence call indexes (one-based, newest-first; index 1 is the most recent successful tool call):\n${evidenceIndexesPrompt}`;
       const messages: ApiMessage[] = [{ role: "system", content: turnSystem }, ...conversation];
