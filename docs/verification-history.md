@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Exact hosted Windows and Linux package live-data acceptance (2026-10-25)
+
+- Both packages built from current PR head `1c885c9` were downloaded from workflow run `40242349840`. The Windows NSIS installer is 264,144,936 bytes; SHA-512 Base64 `U7sDZ19EwQg+1BkSsskl3C9XzeyyEK8V6jcnChaqkzU26QFClcTPfEffwWa5qCCLbok9lx7mtqNDPvLDUEk9BA==` matches `latest.yml`. Exact packaged CLI session `9b56341e-1605-467b-aadb-fd50f9a7495e` fetched the GitHub repository API (HTTP 200, JSON), saved `pushed_at: 2026-10-25T22:54:35Z`, reread the exact file, and completed through persisted `task_complete` checks.
+- The Ubuntu 24.04 AppImage is 325,050,624 bytes; SHA-512 Base64 `+QX8MbNbwUReOnCy1cVjcSbK4OsK6ntPJacIbn6G6JuIifMuE/c60IhkV5HNhQr8sZuhSGqA+lCbOnSSgyA4cQ==` matches `latest-linux.yml`. Exact packaged CLI session `89116597-302c-468e-9ccd-90fa4f9d24c1` fetched the Open-Meteo current-conditions API (HTTP 200, JSON): `2026-10-25T19:00` in `America/New_York` (GMT-4), temperature `54.7 °F`. A resumed completion call cited the successful fetch evidence and completed the session.
+- Both acceptance profiles were isolated under Windows `.xyst-live-acceptance/packaged-1c885c9/` and Ubuntu `/root/.xyst-live-acceptance/packaged-1c885c9/`. Their SQLite integrity checks returned `healthy`. The temporary Qwen3.5-9B Windows instance and extra 16K Qwen3-VL-2B WSL instance were unloaded afterward; the preloaded Qwen3-4B, Qwen3-0.6B, and default 8K Qwen3-VL-2B remain idle and loaded.
+- Hosted CI passed on Windows and Ubuntu in runs [40242349767](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40242349767) and [40242352127](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40242352127). Hosted package builds passed in runs [40242349840](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40242349840) and [40242352101](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40242352101); Windows clean-install and renderer smoke passed.
+
 ## Patched-source live API and file acceptance (2026-10-25)
 
 - Isolated current-source agent session `bc3b3630-b2b8-451b-a9f3-e14a6352ba16` called `web_fetch` for `https://api.github.com/repos/iExyst/Xyst-Ai-Agent`, received HTTP 200 `application/json`, saved `pushed_at: 2026-10-25T22:21:18Z` in `.xyst-live-acceptance/guard-final-workspace/live-api-acceptance-final.txt`, and reread the exact file. Persisted `task_complete` output verifies all five current criteria using the live fetch and exact-path readback evidence. Isolated database check returned `healthy`.
