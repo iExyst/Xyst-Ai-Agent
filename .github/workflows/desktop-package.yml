@@ -12,7 +12,7 @@ jobs:
         include:
           - os: windows-latest
             artifact: xyst-windows
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             artifact: xyst-linux
     runs-on: ${{ matrix.os }}
     steps:
