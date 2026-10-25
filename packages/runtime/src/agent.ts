@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { basename, extname } from "node:path";
+import { basename, extname, resolve } from "node:path";
 import type { RuntimeEvents } from "./events.js";
 import { createAgentTools } from "./tools/registry.js";
 import { validatePdfOcrLanguages } from "./tools/office.js";
@@ -47,6 +47,8 @@ export interface AgentOptions {
   initialMessage?: Record<string, unknown>;
   /** Explicit mission acceptance criteria. Ordinary runs default to the user's objective. */
   completionCriteria?: string[];
+  /** File-like outputs declared by a mission; completion evidence must refer to these exact paths. */
+  expectedOutputPaths?: string[];
   model?: string;
   /** Marks a scheduler-selected model eligible for one automatic local fallback. */
   automaticModelAssignment?: boolean;
@@ -273,16 +275,22 @@ export class AgentRunner {
       if (!candidate) throw new Error(`Selected model ${key} is not present in the LM Studio model inventory`);
       const loadedContexts = candidate.loaded_instances.map((instance) => instance.config.context_length).filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
       const currentContext = loadedContexts.length ? Math.max(...loadedContexts) : candidate.max_context_length;
-      if (typeof currentContext === "number" && currentContext < requiredContextTokens) throw new Error(`Selected model ${key} provides ${currentContext} context tokens, below the estimated ${requiredContextTokens} required for this task. Increase its LM Studio context or choose a model with a larger context.`);
+      if (typeof currentContext === "number" && currentContext < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${key} provides ${currentContext}. Increase its LM Studio context or choose a model with a larger context.`);
       if (candidate.loaded_instances.length > 0) return;
       if (!automaticLoading) throw new Error(`Model ${key} is not loaded and automatic model loading is off. Load it in LM Studio or enable Xyst automatic model loading.`);
       const supportsLocalCli = typeof provider.supportsLocalCliModelLifecycle === "function" ? provider.supportsLocalCliModelLifecycle() : isLocalServer;
       if (isLocalServer && supportsLocalCli && typeof provider.isLocalServer === "function" && typeof provider.load === "function") {
-        await provider.load(key, { ...(typeof candidate.max_context_length === "number" && candidate.max_context_length >= requiredContextTokens ? { context_length: requiredContextTokens } : {}), ...(automaticUnloading ? { ttl_seconds: idleUnloadSeconds } : {}) }, options.signal);
+        const loadContext = typeof candidate.max_context_length === "number" && candidate.max_context_length >= requiredContextTokens
+          ? Math.min(candidate.max_context_length, requiredContextTokens + 1024)
+          : undefined;
+        await provider.load(key, { ...(loadContext !== undefined ? { context_length: loadContext } : {}), ...(automaticUnloading ? { ttl_seconds: idleUnloadSeconds } : {}) }, options.signal);
         const refreshedInventory = await provider.models(options.signal);
         if (provider === this.deps.provider) inventory = refreshedInventory;
-        const loaded = refreshedInventory.find((entry) => entry.key === key)?.loaded_instances.length;
-        if (!loaded) throw new Error(`LM Studio did not report ${key} as loaded after Xyst requested it`);
+        const loadedModel = refreshedInventory.find((entry) => entry.key === key);
+        if (!loadedModel?.loaded_instances.length) throw new Error(`LM Studio did not report ${key} as loaded after Xyst requested it`);
+        const appliedContexts = loadedModel.loaded_instances.map((instance) => instance.config.context_length).filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
+        const appliedContext = appliedContexts.length ? Math.max(...appliedContexts) : undefined;
+        if (typeof appliedContext === "number" && appliedContext < requiredContextTokens) throw new Error(`LM Studio loaded ${key} with ${appliedContext} context tokens, below the estimated ${requiredContextTokens} required for this task. Increase its context or choose a model with a larger context.`);
       }
       // Remote servers perform their documented just-in-time load on the inference request.
     };
@@ -383,12 +391,23 @@ export class AgentRunner {
         }
         const checked = requiredCompletionCriteria.map((criterion, index) => {
           const evidenceId = currentEvidence[(indexes[index] as number) - 1]!.id;
-          const evidence = this.deps.store.db.prepare("SELECT name,status,output_json FROM tool_calls WHERE id=? AND (session_id=? OR execution_scope=?)").get(evidenceId, sessionId, executionScope) as { name: string; status: string; output_json: string | null } | undefined;
+          const evidence = this.deps.store.db.prepare("SELECT name,status,input_json,output_json FROM tool_calls WHERE id=? AND (session_id=? OR execution_scope=?)").get(evidenceId, sessionId, executionScope) as { name: string; status: string; input_json: string; output_json: string | null } | undefined;
           if (!evidence || evidence.name === "task_complete" || !["completed", "reconciled"].includes(evidence.status) || evidence.output_json === null) throw new Error(`Completion evidence ${evidenceId} is missing, failed, or not a completed tool result`);
           let evidenceOutput: unknown;
           try { evidenceOutput = JSON.parse(evidence.output_json) as unknown; } catch { evidenceOutput = evidence.output_json; }
           const evidenceRecord = asRecord(evidenceOutput);
           if (typeof evidenceRecord.error === "string" || evidenceRecord.success === false) throw new Error(`Completion evidence ${evidenceId} reports a tool error`);
+          const workspaceRoot = options.workspace ?? process.cwd();
+          const normalizeOutputPath = (path: string) => { const normalized = resolve(workspaceRoot, path); return process.platform === "win32" ? normalized.toLowerCase() : normalized; };
+          const expectedOutputPath = (options.expectedOutputPaths ?? []).find((path) => normalizeOutputPath(path) === normalizeOutputPath(criterion));
+          if (expectedOutputPath) {
+            let evidenceInput: unknown;
+            try { evidenceInput = JSON.parse(evidence.input_json) as unknown; } catch { evidenceInput = null; }
+            const inputPath = asRecord(evidenceInput).path;
+            const resultPath = evidenceRecord.path;
+            const matchesExpectedPath = [inputPath, resultPath].some((value) => typeof value === "string" && normalizeOutputPath(value) === normalizeOutputPath(expectedOutputPath));
+            if (!matchesExpectedPath) throw new Error(`Completion evidence ${evidenceId} does not reference the declared output path ${expectedOutputPath}`);
+          }
           if (["run_process", "run_shell"].includes(evidence.name) && (typeof evidenceRecord.code !== "number" || evidenceRecord.code !== 0 || evidenceRecord.signal !== null && evidenceRecord.signal !== undefined)) throw new Error(`Completion evidence ${evidenceId} is a process result that did not exit successfully`);
           return { criterion: criterion as string, evidenceToolCallId: evidenceId, tool: evidence.name, verified: true };
         });

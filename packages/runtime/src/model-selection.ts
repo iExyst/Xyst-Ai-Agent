@@ -4,8 +4,8 @@ import type { ModelPerformanceStats } from "./model-performance.js";
 
 export interface ModelChoice { model: LMStudioModel; reason: string; considered: number }
 
-/** Estimate text/history tokens without treating image data URLs as text; reserve headroom for the system prompt and tools. */
-export function estimateRequiredContextTokens(messages: Array<{ content?: unknown; tool_calls?: unknown }>, reserveTokens = 4096): number {
+/** Estimate text/history tokens without treating image data URLs as text; reserve headroom for the system prompt, tool schemas, and generation overhead. */
+export function estimateRequiredContextTokens(messages: Array<{ content?: unknown; tool_calls?: unknown }>, reserveTokens = 6144): number {
   let characters = 0;
   let images = 0;
   const countContent = (value: unknown) => {

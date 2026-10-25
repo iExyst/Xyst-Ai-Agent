@@ -253,15 +253,16 @@ test("automatic local model selection prefers LM Studio GPU estimates that fit c
 
 test("automatic model selection filters declared context limits using a bounded task estimate", () => {
   const required = estimateRequiredContextTokens([{ content: "x".repeat(35_000) }]);
-  assert.equal(required, 14_096);
-  assert.equal(estimateRequiredContextTokens([{ content: [{ type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(100_000)}` } }] }]), 5_120, "image data URLs must not be counted as prompt text");
+  assert.equal(required, 16_144);
+  assert.equal(estimateRequiredContextTokens([{ content: [{ type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(100_000)}` } }] }]), 7_168, "image data URLs must not be counted as prompt text");
+  assert.equal(estimateRequiredContextTokens([{ content: "short task" }]), 6_147, "short tasks reserve enough room for system prompts, tool schemas, and generation overhead");
   const models = [
     { type: "llm" as const, publisher: "a", key: "loaded-short", display_name: "Loaded short", size_bytes: 2_000_000_000, loaded_instances: [{ id: "short", config: { context_length: 8192 } }], max_context_length: 65536, capabilities: { trained_for_tool_use: true } },
     { type: "llm" as const, publisher: "b", key: "large-context", display_name: "Large context", size_bytes: 3_000_000_000, loaded_instances: [], max_context_length: 32768, capabilities: { trained_for_tool_use: true } }
   ];
   const choice = chooseAgentModel(models, { requiredContextTokens: required });
   assert.equal(choice.model.key, "large-context");
-  assert.match(choice.reason, /estimated task context 14096 tokens/);
+  assert.match(choice.reason, /estimated task context 16144 tokens/);
   assert.match(chooseAgentModel(models.slice(0, 1), { requiredContextTokens: required }).reason, /no candidate declares enough context/);
   assert.throws(() => chooseAgentModel(models.slice(0, 1), { requiredContextTokens: required, requireDeclaredContext: true }), /No installed model declares enough context/);
 });
@@ -454,7 +455,7 @@ test("agent resume budgets context from the compacted history and keeps compacte
   let generation = 0; let completionArgs: Record<string, unknown> | undefined; let capturedMessages: Array<Record<string, unknown>> = [];
   const provider = {
     redact: (value: string) => value,
-    models: async () => [{ type: "llm", key: "compact-resume-model", max_context_length: 5200, size_bytes: 1, loaded_instances: [{ id: "loaded", config: { context_length: 5200 } }] }],
+    models: async () => [{ type: "llm", key: "compact-resume-model", max_context_length: 8192, size_bytes: 1, loaded_instances: [{ id: "loaded", config: { context_length: 8192 } }] }],
     isLocalServer: () => true,
     supportsLocalCliModelLifecycle: () => false,
     streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
@@ -647,6 +648,30 @@ test("agent completion requires successful persisted tool evidence", async () =>
   } finally { store.close(); }
 }));
 
+test("mission completion evidence must reference each declared file output path", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "expected-output-path.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const expectedPath = join(root, "expected.txt"); let turn = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "wrong-output", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "wrong.txt", content: "wrong" }) } }] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "wrong-output-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: "The declared output is not present." } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const result = await agent.run("Create the declared output", { workspace: root, maxTurns: 3, expectedOutputPaths: [expectedPath], completionCriteria: [expectedPath, "The expected output contains the required content."] });
+    assert.equal(result.status, "unverified");
+    assert.equal(existsSync(expectedPath), false);
+    assert.equal(await readFileAsync(join(root, "wrong.txt"), "utf8"), "wrong");
+    const failedCompletion = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed'").get(result.sessionId) as { output_json: string };
+    assert.match(failedCompletion.output_json, /does not reference the declared output path/);
+  } finally { store.close(); }
+}));
+
 test("agent prompts once for evidence verification when actions succeeded but the model only returned prose", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "completion-nudge.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
@@ -764,7 +789,7 @@ test("agent rechecks context as queued messages grow the saved conversation", as
   let generations = 0;
   const provider = {
     redact: (value: string) => value,
-    models: async () => [{ type: "llm", key: "short-context-model", max_context_length: 4300, loaded_instances: [{ id: "loaded", config: { context_length: 4300 } }] }],
+    models: async () => [{ type: "llm", key: "short-context-model", max_context_length: 6200, loaded_instances: [{ id: "loaded", config: { context_length: 6200 } }] }],
     isLocalServer: () => true,
     supportsLocalCliModelLifecycle: () => false,
     streamChatWithTools: async () => { generations++; pending.push("additional guidance ".repeat(120)); return { choices: [{ message: { role: "assistant", content: "Ready for the update." } }] }; }
@@ -772,7 +797,7 @@ test("agent rechecks context as queued messages grow the saved conversation", as
   const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   let sessionId = "";
   try {
-    await assert.rejects(() => agent.run("Keep this short", { workspace: root, maxTurns: 3, onSession: (id) => { sessionId = id; }, drainUserMessages: () => { const messages = pending; pending = []; return messages; } }), /conversation now needs an estimated .* selected model short-context-model provides 4300/);
+    await assert.rejects(() => agent.run("Keep this short", { workspace: root, maxTurns: 3, onSession: (id) => { sessionId = id; }, drainUserMessages: () => { const messages = pending; pending = []; return messages; } }), /conversation now needs an estimated .* selected model short-context-model provides 6200/);
     assert.equal(generations, 1);
     assert.equal((sessions.list() as Array<{ id: string; status: string }>).find((session) => session.id === sessionId)?.status, "failed");
     assert.equal((sessions.messages(sessionId) as Array<{ role: string; content: string }>).some((message) => message.role === "user" && message.content.includes("additional guidance")), true);
@@ -884,17 +909,17 @@ test("agent batches independent file reads with scoped bounded concurrency and p
 test("agent model loading and idle-unload policies control local loads and request TTL", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "model-lifecycle.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model"); config.set("global", "models.automaticUnloading", true); config.set("global", "models.idleUnloadSeconds", 900);
-  let loaded = false; let loads = 0; let generations = 0; let captured: Record<string, unknown> = {};
+  let loaded = false; let loads = 0; let loadContext = 0; let generations = 0; let captured: Record<string, unknown> = {};
   const provider = {
     redact: (value: string) => value, isLocalServer: () => true,
     models: async () => [{ type: "llm", key: "test-model", size_bytes: 1, max_context_length: 8192, loaded_instances: loaded ? [{ id: "xyst-load", config: {} }] : [] }],
-    load: async (_key: string, options: Record<string, unknown>) => { loads++; loaded = true; assert.equal(options.ttl_seconds, 900); assert.ok(Number(options.context_length) > 4096 && Number(options.context_length) < 8192); return {}; },
+    load: async (_key: string, options: Record<string, unknown>) => { loads++; loaded = true; loadContext = Number(options.context_length); assert.equal(options.ttl_seconds, 900); assert.ok(loadContext > 4096 && loadContext < 8192); return {}; },
     streamChatWithTools: async (request: Record<string, unknown>) => { generations++; captured = request; return { choices: [{ message: { role: "assistant", content: "Done" } }] }; }
   };
   const runner = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   try {
     const result = await runner.run("Use the model", { workspace: root });
-    assert.equal(result.status, "unverified"); assert.equal(loads, 1); assert.equal(generations, 1); assert.equal(captured.ttl, 900);
+    assert.equal(result.status, "unverified"); assert.equal(loads, 1); assert.equal(loadContext, estimateRequiredContextTokens([{ content: "Use the model" }]) + 1024); assert.equal(generations, 1); assert.equal(captured.ttl, 900);
     loaded = false; config.set("global", "models.automaticLoading", false);
     await assert.rejects(() => runner.run("Do not load", { workspace: root }), /automatic model loading is off/);
     assert.equal(loads, 1); assert.equal(generations, 1);
@@ -1315,6 +1340,7 @@ test("missions validate dependency graphs and persist task checkpoints", async (
   assert.match(objectives[1]!, /result-1/);
   assert.match(objectives[0]!, /analysis\.md/); assert.match(objectives[0]!, /The analysis is saved/);
   assert.equal(assignments[0]?.agentId, "researcher"); assert.equal(assignments[0]?.model, "small-model"); assert.equal(assignments[0]?.maxTurns, 5);
+  assert.ok(String((assignments[0]?.expectedOutputPaths as string[] | undefined)?.[0] ?? "").endsWith("analysis.md"));
   assert.deepEqual(assignments[0]?.accessProfile, { mode: "restricted", readRoots: [root], writeRoots: [root], network: false, integrations: false, backgroundJobs: false, externalActions: false });
   const tasks = store.db.prepare("SELECT task_key,state,attempts FROM mission_tasks WHERE run_id=? ORDER BY task_key").all(result.runId) as Array<{ task_key: string; state: string; attempts: number }>;
   assert.deepEqual(tasks.map((task) => [task.task_key, task.state, task.attempts]), [["first", "completed", 1], ["second", "completed", 1]]);

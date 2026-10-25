@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { Cron } from "croner";
 import { z } from "zod";
 import type { RuntimeEvents } from "../events.js";
@@ -23,6 +23,10 @@ const agentSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{
 const taskSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(), name: z.string().min(1).max(100).optional(), objective: z.string().min(1), dependsOn: z.array(z.string()).default([]), agentId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(), expectedOutputs: z.array(z.string().min(1).max(500)).max(20).optional(), completionCriteria: z.string().max(4000).optional(), maxTurns: z.number().int().min(1).max(50).optional(), model: z.string().optional(), workspace: z.string().optional(), workspaceMode: z.enum(["shared", "worktree"]).default("shared"), workspaceFrom: z.string().optional(), maxRetries: z.number().int().min(0).max(5).optional() }).strict();
 const scheduleSchema = z.object({ cron: z.string().min(1), timezone: z.string().default("UTC"), enabled: z.boolean().default(true), missedRun: z.enum(["skip", "run_once"]).default("skip") }).strict();
 const definitionSchema = z.object({ id: z.string().optional(), name: z.string().min(1).max(100), objective: z.string().min(1), workspace: z.string().optional(), worktreeRoot: z.string().optional(), projectId: z.string().optional(), model: z.string().optional(), agents: z.array(agentSchema).max(8).optional(), tasks: z.array(taskSchema).min(1).max(100).optional(), maxRetries: z.number().int().min(0).max(5).default(1), maxConcurrency: z.number().int().min(1).max(8).default(1), schedule: scheduleSchema.optional(), github: z.object({ enabled: z.boolean().optional(), writeEnabled: z.boolean().optional(), mergeAuthorized: z.boolean().optional() }).optional(), githubTrigger: z.object({ events: z.array(z.enum(["issues", "issue_comment", "pull_request", "pull_request_review"])).default(["issues"]), repositories: z.array(z.string()).optional() }).optional() }).strict();
+
+function declaredFileOutputPaths(outputs: string[] | undefined, workspace: string): string[] {
+  return (outputs ?? []).filter((output) => isAbsolute(output) || /[\\/]/.test(output) || /\.[^./\\]{1,16}$/.test(output)).map((output) => resolve(workspace, output));
+}
 
 export interface MissionAgentDefinition { id: string; name: string; model?: string; maxTurns?: number; access?: AccessProfile }
 export interface MissionTaskDefinition { id?: string; name?: string; objective: string; dependsOn: string[]; agentId?: string; expectedOutputs?: string[]; completionCriteria?: string; maxTurns?: number; model?: string; workspace?: string; workspaceMode: "shared" | "worktree"; workspaceFrom?: string; maxRetries?: number }
@@ -454,6 +458,7 @@ export class PersistentMissionRunner {
                 ...(task.expectedOutputs?.length ? task.expectedOutputs : task.completionCriteria ? [] : [task.objective]),
                 ...(task.completionCriteria ? [task.completionCriteria] : [])
               ],
+              expectedOutputPaths: declaredFileOutputPaths(task.expectedOutputs, taskWorkspaces.get(task.id!)!),
               agentId: task.agentId ?? task.id!, ...(resourceAssignment?.selectedModel ?? taskModels.get(task.id!)?.requested ? { model: resourceAssignment?.selectedModel ?? taskModels.get(task.id!)!.requested } : {}), ...(resourceAssignment?.automatic ? { automaticModelAssignment: true } : {}),
               ...(maxTurns !== undefined ? { maxTurns } : {}), ...(profile?.access ? { accessProfile: profile.access } : {}),
               ...(options.approveExternalAction ? { approveExternalAction: options.approveExternalAction } : {}),
