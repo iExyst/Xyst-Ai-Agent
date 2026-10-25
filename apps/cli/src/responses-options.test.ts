@@ -30,8 +30,9 @@ test("lm responses CLI sends regular and streaming requests and emits JSON event
   await mkdir(work); await mkdir(appData);
   await writeFile(join(work, "request.json"), JSON.stringify({ model: "mock-model", input: "fixture prompt", max_output_tokens: 24 }));
   await writeFile(join(work, "request-incomplete.json"), JSON.stringify({ model: "mock-model", input: "fixture incomplete", max_output_tokens: 24 }));
-  const received: Array<Record<string, unknown>> = [];
+  const received: Array<Record<string, unknown>> = []; const authorizations: string[] = [];
   const server = createServer((request, response) => {
+    if (typeof request.headers.authorization === "string") authorizations.push(request.headers.authorization);
     let body = "";
     request.setEncoding("utf8"); request.on("data", (chunk: string) => { body += chunk; });
     request.on("end", () => {
@@ -53,7 +54,7 @@ test("lm responses CLI sends regular and streaming requests and emits JSON event
     const address = server.address();
     assert.ok(address && typeof address === "object");
     const cliEntry = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
-    const env = { ...process.env, APPDATA: appData, XYST_ROOT: work, LM_STUDIO_BASE_URL: `http://127.0.0.1:${address.port}` };
+    const env = { ...process.env, APPDATA: appData, XYST_ROOT: work, LM_STUDIO_BASE_URL: `http://127.0.0.1:${address.port}`, LM_API_TOKEN: "fixture-token" };
     const invoke = (args: string[]) => new Promise<{ code: number | null; stdout: string; stderr: string }>((resolveRun, reject) => {
       const packagedEntry = process.env.XYST_RESPONSES_CLI_ENTRY;
       const executable = process.env.XYST_RESPONSES_NODE ?? process.execPath;
@@ -88,6 +89,7 @@ test("lm responses CLI sends regular and streaming requests and emits JSON event
     assert.equal(incomplete.code, 2, incomplete.stderr);
     const incompleteEvent = JSON.parse(incomplete.stdout.trim()) as { data: Record<string, unknown> };
     assert.equal(incompleteEvent.data.status, "incomplete");
+    assert.deepEqual(authorizations, Array(3).fill("Bearer fixture-token"));
   } finally {
     if (server.listening) await closeServer();
     await rm(scratch, { recursive: true, force: true });
