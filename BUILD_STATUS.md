@@ -6,6 +6,7 @@
 - Updated the agent policy so tasks about current, real-time, recent, or changing facts consult live sources when network is available, identify source and retrieval time, and disclose when verification fails. Direct public JSON APIs remain usable without a web-search key.
 - Web search and fetch outputs now include UTC `retrieved_at` timestamps. Updated general-tools documentation with live-source behavior and the exact search credential setup.
 - Fresh call through the updated Xyst `web_fetch` fetched Open-Meteo NYC current weather (HTTP 200, JSON): `2026-10-25T19:15` America/New_York, `54.1 °F`, retrieved `2026-10-25T23:22:29Z`.
+- Isolated model-backed Xyst CLI session `d58facf6-2582-447a-b5f9-5b27ee363519` then called the exact current-conditions endpoint and verified persisted fetch evidence with Qwen3.5-9B at 16,384 context: `2026-10-25T19:30` America/New_York, `54.4 °F`, Xyst retrieval `2026-10-25T23:32:17.408Z`. Temporary Qwen3.5-9B was unloaded after; the preloaded Qwen3-4B remains loaded and idle.
 - `npm test`: runtime 136 passed, 2 host-dependent skips; CLI 15 passed. `npm run typecheck` passed.
 - Current limitation: general web search is not configured until a Brave API key is stored in the OS credential vault. The source offers a working Brave integration, while public APIs and configured GitHub/Hugging Face integrations remain available. Full build gates remain open as listed below.
 
