@@ -640,6 +640,7 @@ test("agent completion requires successful persisted tool evidence", async () =>
     assert.equal(verified.status, "completed");
     assert.doesNotMatch(JSON.stringify(completionDefinition), /"criteria"/, "the model cannot replace or paraphrase runtime-defined criteria");
     assert.ok(completionSystemWithEvidence.includes("Available persisted evidence call indexes"));
+    assert.ok(completionSystemWithEvidence.includes("newest-first; index 1 is the most recent successful tool call"), "the evidence prompt defines its ordering explicitly");
     assert.ok(completionSystemWithEvidence.includes('1: "file_list"'), "one-based indexes and safe tool names are shown to the model");
     assert.equal(round, 2, "successful verification ends the run without another inference turn");
     assert.equal(JSON.parse((store.db.prepare("SELECT details_json FROM usage WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(verified.sessionId) as { details_json: string }).details_json).task_outcome, "verified_success");
