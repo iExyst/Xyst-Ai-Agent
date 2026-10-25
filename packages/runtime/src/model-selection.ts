@@ -63,8 +63,16 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
   const performance = requirements.performanceByModel ?? {};
   pool.sort((a, b) => {
     const aMeasured = performance[a.key]; const bMeasured = performance[b.key];
+    const aTaskRate = aMeasured?.taskSamples ? aMeasured.taskSuccessRate : null;
+    const bTaskRate = bMeasured?.taskSamples ? bMeasured.taskSuccessRate : null;
+    // A model with observed task failures should not keep winning solely because
+    // it is smaller when an eligible model has no local task evidence yet. Keep
+    // unknown reliability distinct from measured reliability; don't invent a
+    // publisher score for candidates without samples.
+    if (aTaskRate === 0 && bTaskRate === null) return 1;
+    if (bTaskRate === 0 && aTaskRate === null) return -1;
+    if (aTaskRate !== null && bTaskRate !== null && aTaskRate !== bTaskRate) return bTaskRate - aTaskRate;
     if (aMeasured && bMeasured && aMeasured.samples >= 3 && bMeasured.samples >= 3) {
-      if ((aMeasured.taskSamples ?? 0) >= 3 && (bMeasured.taskSamples ?? 0) >= 3 && aMeasured.taskSuccessRate !== null && bMeasured.taskSuccessRate !== null && aMeasured.taskSuccessRate !== bMeasured.taskSuccessRate) return bMeasured.taskSuccessRate - aMeasured.taskSuccessRate;
       if (aMeasured.successRate !== bMeasured.successRate) return bMeasured.successRate - aMeasured.successRate;
       if (aMeasured.tokensPerSecond !== null && bMeasured.tokensPerSecond !== null && aMeasured.tokensPerSecond !== bMeasured.tokensPerSecond) return bMeasured.tokensPerSecond - aMeasured.tokensPerSecond;
       if (aMeasured.medianLatencyMs !== bMeasured.medianLatencyMs) return aMeasured.medianLatencyMs - bMeasured.medianLatencyMs;
@@ -81,7 +89,7 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
     model.loaded_instances.length ? "already loaded" : "available in the local inventory",
     model.size_bytes <= memoryBudget ? `model file size ${model.size_bytes} bytes is within the approximate ${memoryBudget} byte memory budget` : `smallest suitable model exceeds the approximate ${memoryBudget} byte memory budget`,
     ...(typeof requirements.requiredContextTokens === "number" ? [contextSatisfied ? `estimated task context ${requirements.requiredContextTokens} tokens; ${effectiveContextLength(model) === undefined ? "selected model context is undeclared" : `selected model supports ${effectiveContextLength(model)} tokens`}` : `no candidate declares enough context for the estimated ${requirements.requiredContextTokens} token requirement; selected the best available model (${effectiveContextLength(model) ?? "context unknown"} tokens)`] : [(model.max_context_length ?? 0) > 0 ? `declares up to ${model.max_context_length} context tokens` : "context length not declared"]),
-    ...(performance[model.key] && performance[model.key]!.taskSamples >= 3 && performance[model.key]!.taskSuccessRate !== null ? [`verified locally over ${performance[model.key]!.taskSamples} tasks: ${Math.round((performance[model.key]!.taskSuccessRate ?? 0) * 100)}% completed successfully`] : []),
+    ...(performance[model.key] && performance[model.key]!.taskSamples >= 1 && performance[model.key]!.taskSuccessRate !== null ? [`observed locally over ${performance[model.key]!.taskSamples} tasks: ${performance[model.key]!.taskSuccesses}/${performance[model.key]!.taskSamples} verified completions`] : [`local task completion reliability is unmeasured`]),
     ...(performance[model.key] && performance[model.key]!.samples >= 3 ? [`measured locally over ${performance[model.key]!.samples} inference calls: ${Math.round(performance[model.key]!.successRate * 100)}% response success, ${performance[model.key]!.medianLatencyMs} ms median latency${performance[model.key]!.tokensPerSecond === null ? "" : `, ${performance[model.key]!.tokensPerSecond} tokens/s`}`] : [])
   ];
   return { model, reason: reasons.join("; "), considered: candidates.length };

@@ -76,13 +76,33 @@ export function planResourceAwareBatch(
       const remainingGpuBytes = availableGpuBytes === undefined ? undefined : Math.max(0, availableGpuBytes - estimatedAdditionalGpuMemoryBytes);
       const fitsRam = llms.filter((candidate) => modelCost(candidate) <= remainingBytes);
       const fitting = fitsRam.filter((candidate) => remainingGpuBytes === undefined || gpuCost(candidate) <= remainingGpuBytes);
-      const resourcePool = fitting.length ? fitting : [...(fitsRam.length ? fitsRam : llms)].sort((left, right) => {
+      let resourcePool = fitting.length ? fitting : [...(fitsRam.length ? fitsRam : llms)].sort((left, right) => {
         if (remainingGpuBytes !== undefined) {
           const gpuDifference = gpuCost(left) - gpuCost(right);
           if (gpuDifference) return gpuDifference;
         }
         return modelCost(left) - modelCost(right);
       }).slice(0, 1);
+      let reliabilityExploration = false;
+      const allGpuFittingModelsFailed = fitting.length > 0 && fitting.every((candidate) => {
+        const measured = options.performanceByModel?.[candidate.key];
+        return measured?.taskSamples && measured.taskSuccessRate === 0;
+      });
+      if (allGpuFittingModelsFailed && fitsRam.length > 0) {
+        const bestRamCandidate = chooseAgentModel(fitsRam, {
+          ...(task.requiredContextTokens === undefined ? {} : { requiredContextTokens: task.requiredContextTokens }),
+          ...(options.performanceByModel ? { performanceByModel: options.performanceByModel } : {})
+        }).model;
+        const bestMetrics = options.performanceByModel?.[bestRamCandidate.key];
+        const hasUnknownReliability = !bestMetrics?.taskSamples;
+        if (hasUnknownReliability && !fitting.some((candidate) => candidate.key === bestRamCandidate.key)) {
+          // GPU estimates are advisory and may be unavailable for a model.
+          // When every measured-fit candidate has zero verified task outcomes,
+          // let the best RAM-eligible unknown model make one bounded attempt.
+          resourcePool = [bestRamCandidate];
+          reliabilityExploration = true;
+        }
+      }
       const attempted = new Set(task.previouslyAttemptedModels ?? []);
       const untried = resourcePool.filter((candidate) => !attempted.has(candidate.key));
       const pool = untried.length ? untried : resourcePool;
@@ -91,7 +111,7 @@ export function planResourceAwareBatch(
         ...(options.performanceByModel ? { performanceByModel: options.performanceByModel } : {})
       });
       model = choice.model;
-      selectionReason = `${fitting.length ? "resource-fit automatic local selection" : remainingGpuBytes !== undefined && fitsRam.length ? "no sampled GPU estimate fits current free VRAM; selected the lowest-footprint eligible model" : "no model fits the remaining estimate; selected the smallest-footprint local model"}${untried.length && attempted.size ? "; avoiding previously failed automatic assignment" : attempted.size ? "; all eligible models were already tried, reusing the best available model" : ""}; ${choice.reason}`;
+      selectionReason = `${reliabilityExploration ? "all GPU-estimated candidates have zero verified task outcomes; trying the best RAM-eligible model with unknown GPU fit" : fitting.length ? "resource-fit automatic local selection" : remainingGpuBytes !== undefined && fitsRam.length ? "no sampled GPU estimate fits current free VRAM; selected the lowest-footprint eligible model" : "no model fits the remaining estimate; selected the smallest-footprint local model"}${untried.length && attempted.size ? "; avoiding previously failed automatic assignment" : attempted.size ? "; all eligible models were already tried, reusing the best available model" : ""}; ${choice.reason}`;
     }
 
     const modelKey = model?.key ?? task.model ?? "unresolved";

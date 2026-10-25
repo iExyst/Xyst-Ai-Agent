@@ -216,9 +216,36 @@ test("local model performance aggregates and informs automatic selection without
     assert.equal(performance.fast?.taskSuccessRate, 0);
     const models = ["fast", "reliable"].map((key) => ({ type: "llm" as const, publisher: "unknown", key, display_name: key, size_bytes: 4_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }));
     const choice = chooseAgentModel(models, { performanceByModel: performance });
-    assert.equal(choice.model.key, "reliable", "verified task outcomes outrank inference-response success and speed once both models have three task samples"); assert.match(choice.reason, /verified locally over 3 tasks: 100% completed successfully/);
+    assert.equal(choice.model.key, "reliable", "verified task outcomes outrank inference-response success and speed"); assert.match(choice.reason, /observed locally over 3 tasks: 3\/3 verified completions/);
   } finally { store.close(); }
 }));
+
+test("automatic selection deprioritizes a model with observed zero task completions when an eligible model is unmeasured", () => {
+  const models = [
+    { type: "llm" as const, publisher: "test", key: "observed-failures", display_name: "Observed Failures", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
+    { type: "llm" as const, publisher: "test", key: "unmeasured", display_name: "Unmeasured", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
+  ];
+  const performance = { "observed-failures": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 2000, tokensPerSecond: 20, taskSamples: 2, taskSuccesses: 0, taskSuccessRate: 0 } };
+  const choice = chooseAgentModel(models, { performanceByModel: performance });
+  assert.equal(choice.model.key, "unmeasured");
+  assert.match(choice.reason, /local task completion reliability is unmeasured/);
+});
+
+test("mission scheduler explores an unmeasured RAM-fitting model after every GPU-fit model has zero verified task outcomes", () => {
+  const models = [
+    { type: "llm" as const, publisher: "test", key: "known-failure", display_name: "Known failure", size_bytes: 1_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
+    { type: "llm" as const, publisher: "test", key: "unknown-fit", display_name: "Unknown GPU fit", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
+  ];
+  const plan = planResourceAwareBatch([{ id: "task", automatic: true }], models, {
+    memoryBudgetBytes: 8 * 1024 ** 3, maxConcurrency: 1, availableGpuMemoryBytes: 8 * 1024 ** 3,
+    estimatedGpuMemoryBytesByModel: { "known-failure": 2 * 1024 ** 3 },
+    performanceByModel: { "known-failure": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 1000, tokensPerSecond: 20, taskSamples: 3, taskSuccesses: 0, taskSuccessRate: 0 } }
+  });
+  assert.equal(plan.assignments[0]?.selectedModel, "unknown-fit");
+  assert.equal(plan.assignments[0]?.admittedOverBudget, true);
+  assert.match(plan.assignments[0]?.selectionReason ?? "", /trying the best RAM-eligible model with unknown GPU fit/);
+  assert.match(plan.assignments[0]?.selectionReason ?? "", /VRAM fit is unknown/);
+});
 
 test("automatic local model selection prefers LM Studio GPU estimates that fit current free VRAM", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "gpu-selection.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
@@ -648,6 +675,29 @@ test("agent completion requires successful persisted tool evidence", async () =>
     assert.equal(JSON.parse((store.db.prepare("SELECT details_json FROM usage WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(verified.sessionId) as { details_json: string }).details_json).task_outcome, "verified_success");
     const checked = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='completed'").get(verified.sessionId) as { output_json: string };
     assert.equal(JSON.parse(checked.output_json).verified, true);
+  } finally { store.close(); }
+}));
+
+test("malformed external tool arguments fail before durable intent and do not quarantine the mission", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "malformed-external-tool.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  let turn = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      return turn === 1
+        ? { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "malformed-run", type: "function", function: { name: "run_process", arguments: "{\"executable\":\"python\",\"args\":[" } }] } }] }
+        : { choices: [{ message: { role: "assistant", content: "The malformed call was rejected." } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const result = await agent.run("Run the declared local command", { workspace: root, maxTurns: 2 });
+    assert.equal(result.status, "unverified");
+    assert.equal(store.db.prepare("SELECT 1 FROM tool_calls WHERE id='malformed-run'").get(), undefined);
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE status='uncertain'").get() as { count: number }).count, 0);
+    assert.equal(turn, 2);
   } finally { store.close(); }
 }));
 

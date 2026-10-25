@@ -696,8 +696,9 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
           } catch (error) {
             const message = this.deps.provider.redact(error instanceof Error ? error.message : String(error));
             const external = isExternalAction(name);
-            const uncertain = external && !isDefiniteNoEffect(error);
-            if (this.deps.store.db.prepare("SELECT 1 FROM tool_calls WHERE id=?").get(callId)) this.deps.store.db.prepare("UPDATE tool_calls SET output_json=?,status=?,finished_at=? WHERE id=?").run(JSON.stringify({ error: message }), uncertain ? "uncertain" : "failed", new Date().toISOString(), callId);
+            const intent = this.deps.store.db.prepare("SELECT 1 FROM tool_calls WHERE id=?").get(callId);
+            const uncertain = external && Boolean(intent) && !isDefiniteNoEffect(error);
+            if (intent) this.deps.store.db.prepare("UPDATE tool_calls SET output_json=?,status=?,finished_at=? WHERE id=?").run(JSON.stringify({ error: message }), uncertain ? "uncertain" : "failed", new Date().toISOString(), callId);
             this.deps.events.emit("tool.failed", { id: callId, name, error: message }, sessionId);
             if (error instanceof ExternalActionApprovalError) throw error;
             save({ role: "tool", tool_call_id: callId, content: JSON.stringify({ error: message }) });
