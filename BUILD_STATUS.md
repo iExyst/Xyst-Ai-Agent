@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Resume checkpoint · live API agent acceptance and diagnostics (2026-10-25)
+
+- Current-source model-driven CLI session `f03293cf-d35e-41e1-b38f-708c8294b2d2` retrieved GitHub repository metadata and Open-Meteo current New York weather through `web_fetch`. Both persisted results show HTTP 200 JSON, GitHub `iExyst/Xyst-Ai-Agent` pushed at `2026-10-25T21:55:38Z`, and weather at `2026-10-25T18:15`, 14.2 °C, wind 8.2 km/h. A context-budget issue at 8,192 tokens was resolved by resuming with local Qwen3.5-9B at 16,384 context; a real `task_complete` call verified both fetches. Isolated SQLite integrity is healthy and the temporary model was unloaded afterward.
+- Current-source tests pass: runtime 135 passed, 2 host-dependent skips; CLI 15 passed. Generic public JSON APIs, authenticated GitHub, and Hugging Face discovery work. Brave public-web search still needs its API token in the OS vault.
+- Corrupt-database diagnostics now report an unavailable runtime before startup, and the desktop snapshot forwards the error. Fixture coverage confirms no repair or data change. The registered profile database remains untouched.
+
 ## LM Studio Responses endpoint checkpoint · 2026-10-25
 
 - The live `POST /v1/responses` check through Xyst CLI passed against installed LM Studio 0.4.26.0 and an already-loaded Qwen3-4B. `store:false` returned completed status, exact marker `XYST_RESPONSES_API_LIVE_OK`, and usage of 28 tokens. No model was loaded or unloaded. The support matrix now records this live result; streaming continues to have deterministic SSE coverage.

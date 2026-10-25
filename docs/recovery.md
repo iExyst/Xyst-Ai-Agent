@@ -6,7 +6,9 @@ Xyst stores sessions, missions, settings, job history, and local model measureme
 xyst database check
 ```
 
-The command opens the default database in read-only mode and runs SQLite `quick_check`. It does not apply migrations or change the file. It reports `healthy`, `corrupt`, `missing`, or `unavailable`; a non-healthy result returns a nonzero exit code. It works when regular CLI startup fails because the database cannot be opened.
+The command opens the default database in read-only mode and runs SQLite `quick_check`. It does not apply migrations or write database pages. SQLite may create its normal WAL/shared-memory sidecar files while opening a WAL-mode database; keep any `xyst.sqlite-wal` and `xyst.sqlite-shm` files with the database when making a backup. It reports `healthy`, `corrupt`, `missing`, or `unavailable`; a non-healthy result returns a nonzero exit code. It works when regular CLI startup fails because the database cannot be opened.
+
+`xyst status` and the desktop snapshot also check integrity before runtime startup. A corrupt database is reported as `runtime: unavailable` and `database: corrupt`, with a read-only check and restore-from-backup instruction. These diagnostics do not attempt repair or run migrations against a corrupt database.
 
 The default database is `%APPDATA%\xyst\xyst.sqlite` on Windows. On Linux it is `$XDG_DATA_HOME/xyst/xyst.sqlite`, or `~/.local/share/xyst/xyst.sqlite` when `XDG_DATA_HOME` is unset.
 

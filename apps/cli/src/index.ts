@@ -43,6 +43,23 @@ if (clean[0] === "database" && clean[1] === "check") {
   await new Promise<void>((flushed) => process.stdout.write("", () => flushed()));
   process.exit();
 }
+const statusIntegrity = clean[0] === "status" || (clean[0] === "desktop" && clean[1] === "snapshot")
+  ? inspectDatabaseIntegrity(resolve(getDataDirectory(), "xyst.sqlite"))
+  : undefined;
+if (statusIntegrity?.status === "corrupt") {
+  const dataDir = getDataDirectory();
+  const message = "Xyst couldn't open its local database. Run `xyst database check` for a read-only integrity report, then restore from a known-good backup if needed.";
+  const status = {
+    version: "0.1.0", runtime: "unavailable", dataDir, database: "corrupt",
+    databaseIntegrity: statusIntegrity, error: message,
+    errorDetails: statusIntegrity.error ?? statusIntegrity.details?.join("; ") ?? "SQLite reported corruption"
+  };
+  if (clean[0] === "desktop") output({ status, sessions: [], memories: [], missions: [], agents: [], jobs: [], models: [], downloads: [] });
+  else output(status);
+  process.exitCode = clean[0] === "status" ? 1 : 0;
+  await new Promise<void>((flushed) => process.stdout.write("", () => flushed()));
+  process.exit();
+}
 const runtime = createRuntime();
 const lm = runtime.lmStudio;
 if (process.env.XYST_DESKTOP_PARENT !== "1") subscribeRunNotifications(runtime.events, (event) => {
@@ -560,7 +577,7 @@ try {
     const models = modelsResult.models.map((model) => ({ ...model, performance: modelPerformance[model.key as string] }));
     const modelsError = "modelsError" in modelsResult ? modelsResult.modelsError : undefined;
     const browser = browserSetting.browser ?? { installed: false };
-    const status = { version: "0.1.0", runtime: "ready", dataDir: runtime.dataDir, database: "ready", sessions: sessions.length, missions: missions.length, profile: runtime.access.profile.mode };
+    const status = { version: "0.1.0", runtime: "ready", dataDir: runtime.dataDir, database: "ready", databaseIntegrity: statusIntegrity?.status === "healthy" ? statusIntegrity : inspectDatabaseIntegrity(resolve(runtime.dataDir, "xyst.sqlite")), sessions: sessions.length, missions: missions.length, profile: runtime.access.profile.mode };
     output({ status, systemResources: systemResourcesResult, browser, sessions, missions, agents, memories: runtime.memories.list(), models, downloads: runtime.modelAcquisition.listDownloads(), jobs: runtime.jobs.list(50), ...(modelsError ? { modelsError } : {}), settings: {
       accessProfile: scalarSetting("access.profile", { mode: "full", network: true, integrations: true, backgroundJobs: true, externalActions: true }),
       githubEnabled: settingValue("integrations.github.enabled"), githubWrites: settingValue("integrations.github.writeEnabled"), githubMerge: settingValue("integrations.github.mergeEnabled"), githubApiBaseUrl: scalarSetting("integrations.github.apiBaseUrl", ""),
@@ -717,7 +734,7 @@ try {
     }
   }
   else if (command === "status") {
-    output({ version: "0.1.0", runtime: "ready", dataDir: runtime.dataDir, database: "ready", sessions: runtime.sessions.list().length, missions: runtime.missions.repository.list().length, profile: runtime.access.profile.mode });
+    output({ version: "0.1.0", runtime: "ready", dataDir: runtime.dataDir, database: "ready", databaseIntegrity: statusIntegrity?.status === "healthy" ? statusIntegrity : inspectDatabaseIntegrity(resolve(runtime.dataDir, "xyst.sqlite")), sessions: runtime.sessions.list().length, missions: runtime.missions.repository.list().length, profile: runtime.access.profile.mode });
   }
   else if (command === "mission") {
     if (subcommand === "plan") {

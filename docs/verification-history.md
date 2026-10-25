@@ -1,5 +1,11 @@
 # Xyst verification history
 
+## Fresh current-source live API agent task (2026-10-25)
+
+- Isolated current-source CLI session `f03293cf-d35e-41e1-b38f-708c8294b2d2` called `web_fetch` for the live GitHub repository API and Open-Meteo current weather. Persisted results show HTTP 200 JSON, GitHub `full_name: iExyst/Xyst-Ai-Agent`, `pushed_at: 2026-10-25T21:55:38Z`, and Open-Meteo time `2026-10-25T18:15`, 14.2 °C, wind 8.2 km/h. Both are marked untrusted web content.
+- After the initial 8,192-token context could not resume the long evidence context, local Qwen3.5-9B at 16,384 context resumed the same session. Its journal records an actual `task_complete` with verified evidence indexes `[1,2]`; session and isolated SQLite are healthy. Qwen3.5-9B was unloaded afterward.
+- Current-source `npm test`: runtime 135 passed, 2 host-dependent skips, 0 failed; CLI 15 passed, 0 skipped. Generic public JSON API access works alongside authenticated GitHub and Hugging Face integrations.
+
 ## LM Studio Responses API live acceptance (2026-10-25)
 
 - The Xyst CLI sent a non-streaming `POST /v1/responses` request through its LM Studio provider to the installed Windows LM Studio 0.4.26.0 service using the already-loaded `qwen3-4b-2507-instruct-uncensored-hauhaucs-aggressive` instance. The request used `store: false`, requested `XYST_RESPONSES_API_LIVE_OK`, and returned `status: completed`, the exact output marker, and 28 total tokens. The request JSON is preserved under `.xyst-live-acceptance/responses-live-request.json`.

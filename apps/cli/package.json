@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/load-options.test.ts src/chat-options.test.ts src/responses-options.test.ts src/process-pty.test.ts src/config-context.test.ts",
+    "test": "tsx --test src/load-options.test.ts src/chat-options.test.ts src/responses-options.test.ts src/process-pty.test.ts src/config-context.test.ts src/status-diagnostics.test.ts",
     "dev": "node --experimental-wasm-modules --import tsx src/index.ts",
     "start": "node --experimental-wasm-modules dist/index.js"
   },

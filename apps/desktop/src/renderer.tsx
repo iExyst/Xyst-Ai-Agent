@@ -222,7 +222,11 @@ function App() {
       previousSnapshot.current = current;
       setSnapshot(current);
       setRuntimeState(current.status?.runtime === "ready" && current.status?.database === "ready" ? "ready" : "unavailable");
-      if (current.updateState) setUpdateState(current.updateState); setError("");
+      if (current.updateState) setUpdateState(current.updateState);
+      if (typeof current.status?.error === "string") {
+        setErrorMessage(current.status.error);
+        setErrorDetails(typeof current.status.errorDetails === "string" ? current.status.errorDetails : "");
+      } else setError("");
     }
     catch (reason) {
       setRuntimeState("unavailable");
