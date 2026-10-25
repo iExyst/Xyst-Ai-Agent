@@ -18,6 +18,26 @@ type HubGgufFile = { rfilename: string; size?: number; lfs?: { size?: number; sh
 type GgufArtifact = { filename: string; role: "model" | "model-shard" | "vision-projector"; sizeBytes: number; sha256?: string };
 type GgufArtifactSet = { artifact: string; quantization: string; sizeBytes: number; files: GgufArtifact[] };
 
+function normalizeModelRepositoryKey(value: string): string {
+  const parts = value.trim().toLowerCase().split("/");
+  const name = parts.pop() ?? "";
+  parts.push(name.replace(/[-_.]gguf$/, ""));
+  return parts.join("/");
+}
+
+function findDownloadedModel<T extends { key: string }>(models: T[], repository: string): { model?: T; status: "verified" | "not_found" | "ambiguous" } {
+  const exact = models.find((model) => model.key.toLowerCase() === repository.toLowerCase());
+  if (exact) return { model: exact, status: "verified" };
+  const normalizedRepository = normalizeModelRepositoryKey(repository);
+  const normalizedMatches = models.filter((model) => normalizeModelRepositoryKey(model.key) === normalizedRepository);
+  if (normalizedMatches.length === 1) return { model: normalizedMatches[0]!, status: "verified" };
+  if (normalizedMatches.length > 1) return { status: "ambiguous" };
+  const basename = normalizedRepository.split("/").at(-1)!;
+  const basenameMatches = models.filter((model) => normalizeModelRepositoryKey(model.key).split("/").at(-1) === basename);
+  if (basenameMatches.length === 1) return { model: basenameMatches[0]!, status: "verified" };
+  return { status: basenameMatches.length > 1 ? "ambiguous" : "not_found" };
+}
+
 export class ModelAcquisitionService {
   constructor(private readonly deps: { store: XystStore; config: ConfigStore; huggingFace: HuggingFaceProvider; lmStudio: LMStudioProvider; access?: AccessController; commandRunner?: (command: string, args: string[], options?: { cwd?: string; signal?: AbortSignal; timeoutMs?: number; maxOutputChars?: number }) => Promise<ProcessResult>; hostResourceStats?: () => Promise<HostResourceStats>; modelDirectory?: () => Promise<string>; diskAvailableBytes?: (path: string) => Promise<number> }) {}
   private async modelDirectory(): Promise<string> {
@@ -391,9 +411,8 @@ export class ModelAcquisitionService {
     if (["completed", "already_downloaded"].includes(state) && !details.inventoryVerification) {
       try {
         const models = await this.deps.lmStudio.models(signal);
-        const expectedName = row.repository.split("/").at(-1)!.toLowerCase();
-        const match = models.find((model) => model.key.toLowerCase().includes(expectedName));
-        details.inventoryVerification = { status: match ? "verified" : "not_found", modelKey: match?.key ?? null, checkedAt: new Date().toISOString() };
+        const match = findDownloadedModel(models, row.repository);
+        details.inventoryVerification = { status: match.status, modelKey: match.model?.key ?? null, checkedAt: new Date().toISOString() };
       } catch (error) {
         details.inventoryVerification = { status: "unavailable", error: error instanceof Error ? error.message : String(error), checkedAt: new Date().toISOString() };
       }
@@ -408,14 +427,9 @@ export class ModelAcquisitionService {
     if (!["completed", "already_downloaded"].includes(row.state)) throw new Error(`Model download is not complete (state: ${row.state})`);
     const details = JSON.parse(row.details_json) as Record<string, any>;
     const models = await this.deps.lmStudio.models(signal);
-    const expected = row.repository.toLowerCase();
-    let model = models.find((entry) => entry.key.toLowerCase() === expected);
-    if (!model) {
-      const basename = expected.split("/").at(-1)!;
-      const matches = models.filter((entry) => entry.key.toLowerCase().split("/").at(-1) === basename);
-      if (matches.length !== 1) throw new Error(matches.length ? `Model inventory match is ambiguous for ${row.repository}; select the exact LM Studio model and verify it manually` : `Downloaded model ${row.repository} was not found in LM Studio inventory`);
-      model = matches[0]!;
-    }
+    const match = findDownloadedModel(models, row.repository);
+    const model = match.model;
+    if (!model) throw new Error(match.status === "ambiguous" ? `Model inventory match is ambiguous for ${row.repository}; select the exact LM Studio model and verify it manually` : `Downloaded model ${row.repository} was not found in LM Studio inventory`);
     if (requirements.visionRequired && model.capabilities?.vision !== true) throw new Error(`Downloaded model ${model.key} does not declare vision support in LM Studio inventory`);
     details.inventoryVerification = { status: "verified", modelKey: model.key, checkedAt: new Date().toISOString() };
     if (model.type !== "llm" && model.type !== "decision") throw new Error(`Downloaded model ${model.key} is ${model.type}; a generation probe is not supported`);

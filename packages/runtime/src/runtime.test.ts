@@ -2065,6 +2065,39 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   } finally { store.close(); }
 }));
 
+test("LM Studio model discovery matches a Hugging Face GGUF repository and prefers the same publisher", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "gguf-inventory.sqlite")); const config = new ConfigStore(store);
+  try {
+    config.set("global", "models.onlineDiscovery", true); config.set("global", "models.automaticDownloads", true);
+    const inventory = [
+      { key: "bartowski/smollm2-360m-instruct", type: "llm", max_context_length: 4096, loaded_instances: [] as Array<{ id: string; config: Record<string, unknown> }> },
+      { key: "lmstudio-community/smollm2-360m-instruct", type: "llm", max_context_length: 4096, loaded_instances: [] as Array<{ id: string; config: Record<string, unknown> }> }
+    ];
+    const hf = {
+      model: async (id: string) => ({ id, private: false, gated: false }),
+      files: async () => [{ rfilename: "SmolLM2-360M-Instruct-Q4_K_M.gguf", size: 1024 }]
+    };
+    const lm = {
+      download: async () => ({ job_id: "smollm-download", status: "downloading" }),
+      downloadStatus: async () => ({ status: "completed" }),
+      models: async () => inventory,
+      load: async (key: string) => { const model = inventory.find((entry) => entry.key === key)!; model.loaded_instances.push({ id: "smollm-verification", config: {} }); return { instance_id: "smollm-verification" }; },
+      chat: async () => ({ output: [{ type: "message", content: [{ type: "text", text: "XYST_MODEL_READY" }] }] }),
+      unload: async (id: string) => { for (const model of inventory) model.loaded_instances = model.loaded_instances.filter((instance) => instance.id !== id); return {}; }
+    };
+    const service = new ModelAcquisitionService({ store, config, huggingFace: hf as never, lmStudio: lm as never, modelDirectory: async () => root, diskAvailableBytes: async () => 4096 });
+    const started = await service.download("bartowski/SmolLM2-360M-Instruct-GGUF", "Q4_K_M");
+    const status = await service.status(String(started.id));
+    assert.equal(status.inventoryVerified, true);
+    assert.equal((status.details as Record<string, any>).inventoryVerification.modelKey, "bartowski/smollm2-360m-instruct");
+    const verified = await service.verify(String(started.id)) as unknown as { capabilityCheck: { status: string; modelKey: string; loadedByVerification: boolean } };
+    assert.equal(verified.capabilityCheck.status, "passed");
+    assert.equal(verified.capabilityCheck.modelKey, "bartowski/smollm2-360m-instruct");
+    assert.equal(verified.capabilityCheck.loadedByVerification, true);
+    assert.equal(inventory.every((model) => model.loaded_instances.length === 0), true);
+  } finally { store.close(); }
+}));
+
 test("recommended model acquisition pins and hashes the artifact before importing it", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "verified-model.sqlite")); const config = new ConfigStore(store);
   const artifact = Buffer.from("verified gguf fixture"); const sha256 = createHash("sha256").update(artifact).digest("hex");
