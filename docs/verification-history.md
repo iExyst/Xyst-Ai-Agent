@@ -12,6 +12,12 @@
 - The exact package's bundled Node 22.23.4 CLI ran in an isolated APPDATA/LOCALAPPDATA profile and workspace. Its agent fetched the live GitHub repository JSON API (HTTP 200, `full_name: iExyst/Xyst-Ai-Agent`), wrote and reread `api-result.txt` (`status=200; repo=iExyst/Xyst-Ai-Agent; marker=XYST_PACKAGE_LIVE_API_OK`), and persisted successful `task_complete` evidence. Session `bc2a00bb-98d1-4f81-8977-4852d0133367` completed after resuming once with Qwen3.5-9B when the first Qwen3-4B response repeated the evidence index as plain text. The isolated database integrity check is healthy.
 - Qwen3.5-9B was loaded only for the resume and unloaded afterward. The Qwen3-4B instance was preloaded and remains loaded as found. The registered Xyst profile was not used for the acceptance task.
 
+## Hosted Linux package live JSON API agent task (2026-10-25)
+
+- The exact `xyst-linux` artifact from hosted run `40236464357`, head `79a2e7f`, was launched through its bundled Node 22.23.3 CLI in Ubuntu 24.04 WSL. AppImage size is 325,042,417 bytes and SHA-512 matches `latest-linux.yml` (`s6QzfEHlVCDEL7GvioXSbD5Y95b3oWoc/BQSOlMs/cq3TKssDO9Uf5Hm1i13Ni+PG8pPtIoBIG0wPwwWXSRyLw==`); the included `linux-unpacked/resources/app.asar` SHA-256 is `A170E6B5DE5CB3A67221026A2AF0BD54C66FB7279923AA7429263D6633372276`.
+- With isolated XDG/Xyst data and a separate workspace, packaged agent session `83924902-72c3-4e61-94b9-d73fae208e85` used the already-loaded `qwen/qwen3-vl-2b` to fetch the live GitHub JSON API (HTTP 200), create and reread `api-result.txt` with exact marker `XYST_LINUX_PACKAGE_LIVE_API_OK`, and complete `task_complete` with evidence index 1. The isolated database integrity check is healthy.
+- Qwen3-VL-2B was loaded before this check and was left loaded as found; no model was loaded or unloaded. The AppImage itself has separate Xvfb/Ubuntu guest launch evidence in the platform history; this mission used the exact artifact's unpacked packaged CLI payload.
+
 ## Live web/API retrieval and integrations (2026-10-25)
 
 - Extended `web_fetch` to request and accept `application/json` and vendor `application/*+json` responses. Responses remain bounded to 2 MiB and 30,000 returned characters, pass the existing public-address and redirect checks, and are marked untrusted. The result also reports the response content type.
