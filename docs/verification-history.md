@@ -1,5 +1,13 @@
 # Xyst verification history
 
+## Read-only completion recovery and exact packaged live-data acceptance (2026-10-25)
+
+- Source commit `dff735a` changes the completion nudge to run after any successful persisted tool result, including read-only results. A regression test covers a read-only `file_list` followed by model prose; queued guidance coverage now reads back the file and verifies both criteria. Local runtime tests: 137 passed, 2 host-dependent skips; CLI: 15 passed; full typecheck passed.
+- Hosted Windows/Ubuntu CI passed in [run 40246215917](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40246215917), and Windows/Linux packaging passed in [run 40246215878](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40246215878), including Windows clean-install and renderer smoke.
+- The exact packaged Windows installer is 264,146,921 bytes with SHA-512 Base64 `1DI55EZOaCJe8BfpABtkH4LYMxUhYbAiDUS+pbWYFTQMjZFvBPSUpCSU2UtmlFjyFENv+tOpMKLEQRefm52SBA==`, matching `latest.yml`. Its bundled CLI and Node ran isolated agent session `68178fad-9aa4-4f11-b21b-16c560e73883`, fetched the exact Open-Meteo current endpoint (HTTP 200 JSON), reported `2026-10-25T19:45` America/New_York and 53.9 °F with `retrieved_at: 2026-10-25T23:52:54.297Z`, and automatically completed after the read-only evidence reminder. Xyst verified the persisted `web_fetch` result; session status is completed.
+- The exact Ubuntu AppImage is 325,050,571 bytes with SHA-512 Base64 `edEojINL9jVqiHJ69qGhZAVoV1JE+nadrMM+PRx22LGwPXrV9xgKn8QmGifONvwKTefs1evjDYCpqcB29c+xCg==`, matching `latest-linux.yml`. The AppImage's bundled Linux runtime tree ran under Ubuntu 24.04 WSL and fetched the same live API (HTTP 200 JSON, current 19:45 and 53.9 °F, retrieved `2026-10-25T23:53:10.079Z`).
+- Qwen3.5-9B was temporarily loaded at 16,384 context for packaged Windows acceptance and unloaded afterward. The preloaded Qwen3-4B remains loaded and idle.
+
 ## Current-head packaged live-data acceptance (2026-10-25)
 
 - Hosted CI at current PR head `7518727` passed Windows and Ubuntu jobs in run [40245269869](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40245269869); the Windows/Linux packaging run [40245269890](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40245269890) also passed, including Windows clean-install and renderer smoke.
