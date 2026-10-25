@@ -2104,7 +2104,7 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   let hfSearchResults = [{ id: "owner/model", downloads: 10 }];
   const hf = {
     search: async () => hfSearchResults,
-    model: async (id: string) => ({ id, gated: false, sha: "a".repeat(40), downloads: id === "owner/popular" ? 10000 : 10, tags: ["license:mit"], ...(id === "owner/evaluated" ? { cardData: { license: "mit", eval_results: [{ dataset: { name: "Code benchmark" }, metric: { name: "pass@1" }, value: 42, source: { name: "Publisher report", url: "https://example.test/eval" } }] } } : {}) }),
+    model: async (id: string) => ({ id, gated: false, sha: "a".repeat(40), downloads: id === "owner/popular" ? 10000 : 10, tags: ["license:mit"], ...(id === "owner/asr" ? { pipeline_tag: "automatic-speech-recognition" } : id === "owner/reranker" ? { pipeline_tag: "text-ranking" } : id === "owner/chat" ? { pipeline_tag: "text-generation" } : {}), ...(id === "owner/evaluated" ? { cardData: { license: "mit", eval_results: [{ dataset: { name: "Code benchmark" }, metric: { name: "pass@1" }, value: 42, source: { name: "Publisher report", url: "https://example.test/eval" } }] } } : {}) }),
     modelConfig: async () => hfModelConfig,
     files: async () => [
       { rfilename: "model-Q5_K_M-00001-of-00002.gguf", size: 1500, lfs: { size: 1500, sha256: "1".repeat(64) } },
@@ -2135,6 +2135,11 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   assert.equal(recommendations[0]?.license, "mit"); assert.equal(recommendations[0]?.licenseAllowed, false);
   config.set("global", "models.allowedLicenses", ["mit"]);
   const licenseAllowedRecommendations = await service.recommend("coding"); assert.equal(licenseAllowedRecommendations[0]?.licenseAllowed, true);
+  hfSearchResults = [{ id: "owner/asr", downloads: 10000 }, { id: "owner/reranker", downloads: 9000 }, { id: "Qwen/Embedding-0.6B-GGUF", downloads: 8000 }, { id: "owner/chat", downloads: 10 }];
+  const chatRecommendations = await service.recommend("chat model");
+  assert.deepEqual(chatRecommendations.map((item) => item.repository), ["owner/chat"], "speech, ranking, and embedding models are not recommended as chat models");
+  assert.equal(chatRecommendations[0]?.pipeline, "text-generation");
+  hfSearchResults = [{ id: "owner/model", downloads: 10 }];
   config.set("global", "models.allowedLicenses", []);
   const visionRecommendations = await service.recommend("image understanding", undefined, {}, { minimumContextTokens: 4096, visionRequired: true });
   const visionRecommendation = visionRecommendations[0]; assert.ok(visionRecommendation, JSON.stringify(visionRecommendations));
