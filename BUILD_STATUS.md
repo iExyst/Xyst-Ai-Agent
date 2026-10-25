@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Live data/API access checkpoint · 2026-10-25
+
+- Xyst `web_fetch` now accepts JSON and vendor `+json` responses, returns the content type, and keeps DNS/private-address/redirect checks, timeouts, size/character limits, and the untrusted-data marker. Runtime coverage includes the JSON API response path.
+- Verified the built Xyst tool against GitHub's public repository API (HTTP 200, `application/json`) and live Hugging Face model search. Authenticated GitHub access is configured as `iExyst`; online Hugging Face model discovery is enabled in the active Xyst profile.
+- Brave Search remains available after storing a `brave/search-api-key`; that credential is currently absent from the OS vault. Public API access through `web_fetch`, Hugging Face, and authenticated GitHub work without it.
+- Runtime suite: 135 passed, 2 host-dependent skips, 0 failed; runtime typecheck passed. Overall build acceptance remains incomplete; see the external signing/update-feed and physical-host gates below.
+
 ## Latest continuation · 2026-10-25
 
 - **Model-loading authorization:** the user explicitly authorized loading LM Studio models. This supersedes earlier checkpoint statements that treated inference as disallowed. No LM Studio model is loaded now.

@@ -2394,6 +2394,23 @@ test("web retrieval requires network access and blocks loopback targets", async 
   await assert.rejects(() => denied.web_fetch!.execute({ url: "https://example.com" }), /denies network/);
 });
 
+test("web retrieval returns bounded JSON API responses as untrusted data", async () => {
+  let accept = "";
+  const tools = createWebTools(new AccessController({ mode: "restricted", network: true }), {
+    fetcher: async (_input, init) => {
+      accept = new Headers(init?.headers).get("Accept") ?? "";
+      return new Response('{"updated_at":"2026-10-25T12:00:00Z","items":[1,2]}', { status: 200, headers: { "content-type": "application/vnd.example+json; charset=utf-8" } });
+    }
+  });
+  const result = await tools.web_fetch!.execute({ url: "https://8.8.8.8/api/status" }) as { contentType: string; status: number; text: string; truncated: boolean; trust: string };
+  assert.ok(accept.includes("application/*+json"));
+  assert.equal(result.contentType, "application/vnd.example+json");
+  assert.equal(result.status, 200);
+  assert.equal(result.text, '{"updated_at":"2026-10-25T12:00:00Z","items":[1,2]}');
+  assert.equal(result.truncated, false);
+  assert.equal(result.trust, "untrusted-web-content");
+});
+
 test("desktop capability diagnostics distinguish Linux display sessions from native app automation", () => {
   const wayland = inspectDesktopCapabilities({ XDG_SESSION_TYPE: "wayland", XDG_CURRENT_DESKTOP: "GNOME", WAYLAND_DISPLAY: "wayland-0" }, "linux");
   assert.equal(wayland.session.type, "wayland");

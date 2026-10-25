@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Live web/API retrieval and integrations (2026-10-25)
+
+- Extended `web_fetch` to request and accept `application/json` and vendor `application/*+json` responses. Responses remain bounded to 2 MiB and 30,000 returned characters, pass the existing public-address and redirect checks, and are marked untrusted. The result also reports the response content type.
+- Verified with the built Xyst runtime against `https://api.github.com/repos/iExyst/Xyst-Ai-Agent`: HTTP 200, `application/json`, with live repository metadata. Xyst Hugging Face search returned live model IDs, pipeline tags, and download counts. GitHub auth status reports the configured `iExyst` account; Hugging Face public discovery requires no token and online model discovery is enabled in the active profile.
+- The OS credential vault has no Brave Search API key. The existing `web_search` integration reports that setup requirement; no key was supplied or fabricated. Direct public JSON APIs, Hugging Face, and authenticated GitHub are verified live routes for data access.
+- Verification: `npm run build`, runtime typecheck, and runtime suite passed; 135 passed and 2 host-dependent checks skipped. An isolated regression test verifies vendor `+json` handling and untrusted marking.
+
 This file preserves the detailed chronological verification notes that were moved out of the active resume checkpoint to keep it concise. Entries are archival snapshots and can be superseded by newer evidence in `BUILD_STATUS.md` or the linked current platform/provider docs.
 
 ## Current source model mission and refreshed Linux package (2026-10-25)

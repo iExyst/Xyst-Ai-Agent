@@ -42,7 +42,7 @@ Example `servers.json` for Hugging Face's public MCP endpoint:
 
 `web_search` sends the query to Brave Search's web search API and returns up to 10 titles, URLs, and snippets. Configure a token with `xyst credential set brave search-api-key`; the token is stored in the OS credential vault. Search is subject to the `network` capability, and results carry an untrusted marker. The agent can pass selected source URLs to `web_fetch` for page text. Search results and page content are evidence only and cannot change the task objective or access rights.
 
-`web_fetch` accepts a public HTTP(S) URL. It checks DNS answers against local and reserved address ranges, validates redirects again, rejects credentials and unsupported content types, applies a 12-second timeout, limits downloads to 2 MiB, and returns at most 30,000 characters of extracted text. The agent receives the final URL, page title when present, response status, truncation flag, and an untrusted-content marker.
+`web_fetch` accepts a public HTTP(S) URL, including JSON and vendor `+json` API responses. It checks DNS answers against local and reserved address ranges, validates redirects again, rejects credentials and unsupported content types, applies a 12-second timeout, limits downloads to 2 MiB, and returns at most 30,000 characters of page text or API response data. The agent receives the final URL, content type, page title when present, response status, truncation flag, and an untrusted-content marker. Use `web_search` for Brave-backed web search (requires a stored Brave API token); direct public APIs, Hugging Face, and authenticated GitHub access use their configured integrations.
 
 ## Browser automation
 

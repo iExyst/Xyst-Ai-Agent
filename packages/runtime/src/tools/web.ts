@@ -73,7 +73,7 @@ export function createWebTools(access: AccessController, dependencies: WebToolDe
       const { url: rawUrl, max_chars = 12000 } = schema.parse(input); access.assertCapability("network");
       let current = await publicUrl(rawUrl); let response: Response;
       for (let redirects = 0; ; redirects++) {
-        response = await fetcher(current, { headers: { Accept: "text/html,text/plain,application/xhtml+xml" }, redirect: "manual", signal: requestSignal(signal) });
+        response = await fetcher(current, { headers: { Accept: "text/html,application/xhtml+xml,text/plain,text/markdown,application/json,application/*+json" }, redirect: "manual", signal: requestSignal(signal) });
         if (![301, 302, 303, 307, 308].includes(response.status)) break;
         if (redirects >= 4) throw new Error("Web page redirected too many times");
         const location = response.headers.get("location"); if (!location) throw new Error("Web redirect did not include a location");
@@ -81,14 +81,14 @@ export function createWebTools(access: AccessController, dependencies: WebToolDe
       }
       if (!response.ok) throw new Error(`Web page returned HTTP ${response.status}`);
       const contentType = response.headers.get("content-type") ?? "";
-      if (!/^(text\/html|application\/xhtml\+xml|text\/plain|text\/markdown)(\s*;|$)/i.test(contentType)) throw new Error(`Unsupported web content type: ${contentType || "unknown"}`);
+      if (!/^(text\/html|application\/xhtml\+xml|text\/plain|text\/markdown|application\/(?:[a-z0-9.-]+\+)?json)(\s*;|$)/i.test(contentType)) throw new Error(`Unsupported web content type: ${contentType || "unknown"}`);
       const reader = response.body?.getReader(); if (!reader) throw new Error("Web response body is empty");
       const chunks: Uint8Array[] = []; let total = 0;
       try { while (total < 2 * 1024 * 1024) { const { value, done } = await reader.read(); if (done) break; chunks.push(value); total += value.byteLength; } }
       finally { await reader.cancel().catch(() => undefined); }
       if (total >= 2 * 1024 * 1024) throw new Error("Web page exceeds the 2 MiB retrieval limit");
       const raw = new TextDecoder().decode(Buffer.concat(chunks)); const parsed = /html|xhtml/i.test(contentType) ? htmlToText(raw) : { text: raw.replace(/\r\n?/g, "\n").trim() };
-      return { url: current.href, status: response.status, ...(parsed.title ? { title: parsed.title } : {}), text: parsed.text.slice(0, max_chars), truncated: parsed.text.length > max_chars, trust: "untrusted-web-content" };
+      return { url: current.href, status: response.status, contentType: contentType.split(";", 1)[0]?.trim().toLowerCase(), ...(parsed.title ? { title: parsed.title } : {}), text: parsed.text.slice(0, max_chars), truncated: parsed.text.length > max_chars, trust: "untrusted-web-content" };
     }
   } };
 }
