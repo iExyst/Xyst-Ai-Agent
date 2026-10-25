@@ -1874,13 +1874,13 @@ test("mission execution defers ready work when model memory estimates exceed the
 
 test("mission admission samples LM Studio GPU estimates before assigning automatic models", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "gpu-mission.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
-  config.set("global", "orchestration.memoryBudgetBytes", 16 * 1024 ** 3);
+  config.set("global", "orchestration.memoryBudgetBytes", 2 * 1024 ** 3);
   const models = [
-    { type: "llm" as const, publisher: "Test", key: "small-file-high-vram", display_name: "Small file high VRAM", size_bytes: 2 * 1024 ** 3, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
-    { type: "llm" as const, publisher: "Test", key: "larger-file-low-vram", display_name: "Larger file low VRAM", size_bytes: 4 * 1024 ** 3, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
+    { type: "llm" as const, publisher: "Test", key: "small-file-high-vram", display_name: "Small file high VRAM", size_bytes: 512 * 1024 ** 2, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
+    { type: "llm" as const, publisher: "Test", key: "larger-file-low-vram", display_name: "Larger file low VRAM", size_bytes: 1024 ** 3, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
   ];
   const assigned: Array<Record<string, unknown>> = [];
-  const runner = new PersistentMissionRunner({ store, config, events, modelProvider: { supportsLocalCliModelLifecycle: () => true, models: async () => models, estimateLoad: async (model: string) => ({ output: `Estimated GPU Memory: ${model === "small-file-high-vram" ? 8 : 2.5} GiB\nEstimated Total Memory: 8 GiB` }) } as never, resourceStatsReader: async () => ({ source: "Xyst host", checkedAt: new Date().toISOString(), systemMemory: { totalBytes: 16 * 1024 ** 3, usedBytes: 4 * 1024 ** 3, availableBytes: 12 * 1024 ** 3, usedPercent: 25 }, nvidiaGpuMemory: { status: "available", source: "nvidia-smi", devices: [{ name: "GPU", totalBytes: 16 * 1024 ** 3, usedBytes: 13 * 1024 ** 3, freeBytes: 3 * 1024 ** 3 }] } }), agent: { run: async (_objective: string, options: Record<string, unknown>) => { assigned.push(options); const currentAgent = JSON.parse((store.db.prepare("SELECT definition_json FROM agents WHERE mission_id=? AND status='running'").get(options.missionId) as { definition_json: string }).definition_json) as { modelSelectionReason: string }; return { sessionId: "gpu-mission-session", model: options.model, selectionReason: currentAgent.modelSelectionReason, turns: 1, status: "completed" as const, response: "done" }; } } as never });
+  const runner = new PersistentMissionRunner({ store, config, events, modelProvider: { supportsLocalCliModelLifecycle: () => true, models: async () => models, estimateLoad: async (model: string) => ({ output: `Estimated GPU Memory: ${model === "small-file-high-vram" ? 8 : 2.5} GiB\nEstimated Total Memory: 1.5 GiB` }) } as never, resourceStatsReader: async () => ({ source: "Xyst host", checkedAt: new Date().toISOString(), systemMemory: { totalBytes: 16 * 1024 ** 3, usedBytes: 4 * 1024 ** 3, availableBytes: 12 * 1024 ** 3, usedPercent: 25 }, nvidiaGpuMemory: { status: "available", source: "nvidia-smi", devices: [{ name: "GPU", totalBytes: 16 * 1024 ** 3, usedBytes: 13 * 1024 ** 3, freeBytes: 3 * 1024 ** 3 }] } }), agent: { run: async (_objective: string, options: Record<string, unknown>) => { assigned.push(options); const currentAgent = JSON.parse((store.db.prepare("SELECT definition_json FROM agents WHERE mission_id=? AND status='running'").get(options.missionId) as { definition_json: string }).definition_json) as { modelSelectionReason: string }; return { sessionId: "gpu-mission-session", model: options.model, selectionReason: currentAgent.modelSelectionReason, turns: 1, status: "completed" as const, response: "done" }; } } as never });
   try {
     const mission = runner.repository.create({ name: "GPU-aware assignment", objective: "Complete one task", tasks: [{ id: "worker", objective: "Use the available GPU", dependsOn: [] }] });
     const result = await runner.run(mission.id);
@@ -1893,8 +1893,8 @@ test("mission admission samples LM Studio GPU estimates before assigning automat
 
 test("mission resource estimates include trigger data and completed dependency results", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-context-estimate.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
-  config.set("global", "orchestration.memoryBudgetBytes", 16 * 1024 ** 3);
-  const models = [{ type: "llm" as const, publisher: "Test", key: "context-aware", display_name: "Context aware", size_bytes: 2 * 1024 ** 3, loaded_instances: [], max_context_length: 32768, capabilities: { trained_for_tool_use: true } }];
+  config.set("global", "orchestration.memoryBudgetBytes", 2 * 1024 ** 3);
+  const models = [{ type: "llm" as const, publisher: "Test", key: "context-aware", display_name: "Context aware", size_bytes: 512 * 1024 ** 2, loaded_instances: [], max_context_length: 32768, capabilities: { trained_for_tool_use: true } }];
   const estimatedContexts: number[] = []; const actualContexts: number[] = [];
   const runner = new PersistentMissionRunner({
     store, config, events,
