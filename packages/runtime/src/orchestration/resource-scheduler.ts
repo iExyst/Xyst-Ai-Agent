@@ -95,7 +95,9 @@ export function planResourceAwareBatch(
         }).model;
         const bestMetrics = options.performanceByModel?.[bestRamCandidate.key];
         const hasUnknownReliability = !bestMetrics?.taskSamples;
-        if (hasUnknownReliability && !fitting.some((candidate) => candidate.key === bestRamCandidate.key)) {
+        const bestGpuEstimate = options.estimatedGpuMemoryBytesByModel?.[bestRamCandidate.key];
+        const hasUnknownGpuFit = remainingGpuBytes !== undefined && (bestGpuEstimate === undefined || !Number.isFinite(bestGpuEstimate) || bestGpuEstimate < 0);
+        if (hasUnknownReliability && hasUnknownGpuFit && !fitting.some((candidate) => candidate.key === bestRamCandidate.key)) {
           // GPU estimates are advisory and may be unavailable for a model.
           // When every measured-fit candidate has zero verified task outcomes,
           // let the best RAM-eligible unknown model make one bounded attempt.

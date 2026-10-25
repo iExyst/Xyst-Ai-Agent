@@ -245,6 +245,12 @@ test("mission scheduler explores an unmeasured RAM-fitting model after every GPU
   assert.equal(plan.assignments[0]?.admittedOverBudget, true);
   assert.match(plan.assignments[0]?.selectionReason ?? "", /trying the best RAM-eligible model with unknown GPU fit/);
   assert.match(plan.assignments[0]?.selectionReason ?? "", /VRAM fit is unknown/);
+  const overBudgetKnownGpu = planResourceAwareBatch([{ id: "task", automatic: true }], models, {
+    memoryBudgetBytes: 8 * 1024 ** 3, maxConcurrency: 1, availableGpuMemoryBytes: 8 * 1024 ** 3,
+    estimatedGpuMemoryBytesByModel: { "known-failure": 2 * 1024 ** 3, "unknown-fit": 12 * 1024 ** 3 },
+    performanceByModel: { "known-failure": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 1000, tokensPerSecond: 20, taskSamples: 3, taskSuccesses: 0, taskSuccessRate: 0 } }
+  });
+  assert.equal(overBudgetKnownGpu.assignments[0]?.selectedModel, "known-failure", "a known estimate over free VRAM is not treated as unknown");
 });
 
 test("automatic local model selection prefers LM Studio GPU estimates that fit current free VRAM", async () => withTemp(async (root) => {
