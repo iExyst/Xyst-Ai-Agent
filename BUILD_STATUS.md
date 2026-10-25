@@ -1,5 +1,13 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Resume checkpoint · live data source behavior (2026-10-25)
+
+- Confirmed network access defaults on globally and full-access profiles permit network and configured integrations. Current-source and packaged acceptance already proved live GitHub repository API and Open-Meteo weather retrieval; Hugging Face discovery and authenticated GitHub are configured.
+- Updated the agent policy so tasks about current, real-time, recent, or changing facts consult live sources when network is available, identify source and retrieval time, and disclose when verification fails. Direct public JSON APIs remain usable without a web-search key.
+- Web search and fetch outputs now include UTC `retrieved_at` timestamps. Updated general-tools documentation with live-source behavior and the exact search credential setup.
+- `npm test`: runtime 136 passed, 2 host-dependent skips; CLI 15 passed. `npm run typecheck` passed.
+- Current limitation: general web search is not configured until a Brave API key is stored in the OS credential vault. The source offers a working Brave integration, while public APIs and configured GitHub/Hugging Face integrations remain available. Full build gates remain open as listed below.
+
 ## Resume checkpoint · live data verified on patched source (2026-10-25)
 
 - Exact hosted packages from commit `1c885c9` passed live-data agent tasks. The Windows NSIS artifact (264,144,936 bytes) matched `latest.yml`; its isolated session `9b56341e-1605-467b-aadb-fd50f9a7495e` fetched GitHub API `pushed_at: 2026-10-25T22:54:35Z`, wrote/read it, and completed with verified evidence. The Ubuntu AppImage (325,050,624 bytes) matched `latest-linux.yml`; its isolated session `89116597-302c-468e-9ccd-90fa4f9d24c1` fetched Open-Meteo current New York conditions (2026-10-25 19:00 America/New_York, 54.7 °F) and completed with verified evidence. Both package SQLite checks returned healthy.

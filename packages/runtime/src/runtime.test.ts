@@ -2433,12 +2433,13 @@ test("web retrieval returns bounded JSON API responses as untrusted data", async
       return new Response('{"updated_at":"2026-10-25T12:00:00Z","items":[1,2]}', { status: 200, headers: { "content-type": "application/vnd.example+json; charset=utf-8" } });
     }
   });
-  const result = await tools.web_fetch!.execute({ url: "https://8.8.8.8/api/status" }) as { contentType: string; status: number; text: string; truncated: boolean; trust: string };
+  const result = await tools.web_fetch!.execute({ url: "https://8.8.8.8/api/status" }) as { contentType: string; status: number; text: string; truncated: boolean; retrieved_at: string; trust: string };
   assert.ok(accept.includes("application/*+json"));
   assert.equal(result.contentType, "application/vnd.example+json");
   assert.equal(result.status, 200);
   assert.equal(result.text, '{"updated_at":"2026-10-25T12:00:00Z","items":[1,2]}');
   assert.equal(result.truncated, false);
+  assert.ok(Number.isFinite(Date.parse(result.retrieved_at)));
   assert.equal(result.trust, "untrusted-web-content");
 });
 
@@ -2612,11 +2613,12 @@ test("web search uses the configured Brave token and returns bounded untrusted s
       ] } }), { status: 200, headers: { "content-type": "application/json" } });
     }
   });
-  const result = await tools.web_search!.execute({ query: "local agent tools", count: 3 }) as { results: Array<{ title: string; url: string; snippet: string }>; trust: string };
+  const result = await tools.web_search!.execute({ query: "local agent tools", count: 3 }) as { results: Array<{ title: string; url: string; snippet: string }>; retrieved_at: string; trust: string };
   assert.equal(new URL(requestedUrl).searchParams.get("q"), "local agent tools");
   assert.equal(new URL(requestedUrl).searchParams.get("count"), "3");
   assert.equal(authorization, "test-search-token");
   assert.deepEqual(result.results, [{ title: "Result", url: "https://example.com/page", snippet: "Snippet" }]);
+  assert.ok(Number.isFinite(Date.parse(result.retrieved_at)));
   assert.equal(result.trust, "untrusted-search-results");
 });
 
