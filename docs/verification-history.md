@@ -5,7 +5,9 @@
 - Fixed resumable session workspace loss with SQLite migration 16. Agent runs persist their resolved absolute workspace; resume restores it unless `--workspace` overrides it; old sessions capture the current workspace on first resume; forks and exports retain the workspace. CLI `agent run`, `agent resume`, and `agent chat` accept `--workspace`, and `session new` records its creation directory.
 - Added deterministic coverage for migration/reopen, session fork and export, workspace-preserving resume, and a full resumed-agent `file_read` plus declared-output completion check with no workspace override.
 - Verification: `npm test` passed 149 runtime tests and 18 CLI tests (2 host-dependent runtime skips); `npm run typecheck`, `npm run build`, and `git diff --check` passed.
+- Hosted verification and packaging for commit `0d07857` passed 8/8: Windows and Ubuntu verification plus Windows and Linux packages across push runs `40324488621` / `40324488716` and PR runs `40324497271` / `40324497183`.
 - Separate live-model attempt fetched Open-Meteo successfully (HTTP 200; retrieved `2026-10-26T12:32:23.799Z`), but the model repeatedly used a guessed path outside the isolated workspace and did not finish. The session is explicitly unverified and is excluded from acceptance; its artifact was preserved in the isolated acceptance folder.
+- A second isolated Qwen3-4B live run fetched the exact GitHub repository API (HTTP 200; `retrieved_at=2026-10-26T12:49:03.468Z`), created `repo-live.json` with the exact URL/timestamp/status/repository fields, and read the exact file back using the correct workspace. Its follow-up resume wrote `task_complete` as plain text rather than invoking the tool. The run remains unverified and is excluded from completed-task acceptance; this is evidence of live API and file-tool operation, not task completion.
 
 ## Live automatic model acquisition and vision task acceptance (2026-10-26)
 
