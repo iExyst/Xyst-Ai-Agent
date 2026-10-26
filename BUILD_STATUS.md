@@ -1,5 +1,13 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Current acceptance snapshot · PR head db8af19 · 2026-10-26
+
+- Hosted verification and Windows/Linux packaging passed 8/8 on source head `a824fff`; the documentation-only follow-up `db8af19` has a fresh CI/package run in progress. Local `npm test` passed 146 runtime tests (2 host-dependent skips) and 18 CLI tests; full workspace typecheck passed.
+- Ubuntu 24.04 WSL2 with a SHA-256-verified Node 24.22.0 clean build installed the actual systemd user service through Xyst CLI. It reached `active/running`, logged scheduler startup, reported healthy isolated SQLite state, then uninstalled and stopped cleanly. This does not establish bare-metal Linux boot/reboot behavior.
+- The resumed installed Qwen3.5-9B agent created and read back its output; Xyst persisted `task_complete` with `verified:true`. Public live API fetches remain verified through Xyst with exact URLs and retrieval timestamps.
+- Implemented paths and acceptance evidence are summarized in the ordered milestone checklist below. Open gates: real automatic acquisition when no adequate model is installed followed by role-appropriate task use; physical Linux GUI/service/reboot checks; LM Studio configured-plugin permission and independent Responses-MCP interoperability; publisher signing and a trusted production update feed; and credentials for Brave Search/private APIs.
+- The registered Windows Xyst profile database is malformed; it and the preserved backup were left untouched, and all current acceptance uses isolated healthy profiles. Release artifacts were not replaced.
+
 ## Latest continuation · current source validation (2026-10-26)
 
 - Fresh integrated-PR live API acceptance: global `network.enabled=true`, no global access-profile override. Qwen 0.6B used Xyst `web_fetch` for Open-Meteo (HTTP 200, untruncated) and returned the exact source, `retrieved_at=2026-10-26T08:03:22.101Z`, observation `04:00` EDT, 42.9 °F, 77% humidity, WMO code 0. Its first run omitted `task_complete`; resuming the same session without refetching verified the persisted source evidence and completed session `5e89199c-eaf1-4d84-a64e-c4a667df3cd1`. A Qwen3.5-9B follow-up produced no tool call after about two minutes and was stopped; it is not counted. The default profile database is malformed, so acceptance used isolated APPDATA and left the preserved original and incomplete salvage untouched.
