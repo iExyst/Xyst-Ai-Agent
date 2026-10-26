@@ -6,6 +6,12 @@
 - Latest head `4f9cd3c` passed all 8 duplicated hosted checks: Windows and Ubuntu verification, plus Windows and Linux packaging, across push and PR workflows. Run IDs: `40397497598`, `40397497664`, `40397505272`, `40397505331`.
 - The full build is still active. Remaining gates documented in the acceptance map include bare-metal Linux desktop/service/reboot, production signing and trusted update hosting, installed LM Studio plugin permissions, broader model selection and resource coordination, configured Brave/private API credentials, and final representative mission/install acceptance. Preserve `.help recover` and `.xyst-live-acceptance/`.
 
+## Resume · configured LM Studio plugin permission probe
+
+- Rechecked the installed Windows LM Studio API through an isolated Xyst profile: `lm diagnose` returned ready at `http://127.0.0.1:1235` with 38 models. The already-loaded `qwen3-0.6b:2` was used for a bounded read-only configured-plugin request; LM Studio returned HTTP 403, `Permission denied to use plugin 'mcp/xyst_local_acceptance'`.
+- The feature matrix now records this exact result. It confirms native chat and ephemeral MCP are available, while the preconfigured `mcp.json` route still requires LM Studio server-side permission and API-token authorization. No model was loaded/unloaded, no server permissions or model-catalog settings were changed, and the Xyst probe used its own isolated data directory.
+- LM Studio's app window could not be activated after two refreshed attempts, so its UI permission setting was left unchanged. Official documentation places this control in Server Settings; the installed `lms server` CLI exposes only start, stop, and status. The plugin route remains an external acceptance gate until that documented server permission and API-token authorization are verified.
+
 ## Continuation · explicit corrupt-profile recovery and live-data scope
 
 - Added `xyst database recover <new-archive-directory>` for a corrupt default database. It snapshots and hashes the full profile, checks SQLite on a temporary copy so the source WAL/SHM bytes are untouched, records a recovery manifest, quarantines database sidecars, and initializes a new database only after the snapshot verifies. The new database is empty; this operation does not salvage broken sessions. It rejects destinations inside the profile or already-existing paths, detects concurrent profile changes, and attempts rollback if initialization fails. See [recovery guide](docs/recovery.md).
