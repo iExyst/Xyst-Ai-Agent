@@ -90,7 +90,9 @@ function isControlOnlyUserMessage(value: string): boolean {
   const text = value.trim().replace(/[.!?]+$/g, "").replace(/\s+/g, " ");
   if (/^(?:please\s+)?(?:resume|continue|proceed|go ahead|try again|keep going|keep working|finish(?: it)?|do it)(?:\s+(?:and\s+)?(?:resume|continue|proceed|go ahead|keep going|keep working|the work|the task|the build|after compaction|until (?:it(?:'s| is) )?finished|until (?:it is )?(?:complete|done)))*$/i.test(text)) return true;
   if (/^(?:do what you need to do to get it done|(?:i said )?(?:you(?:'re| are)|your) allowed to do everything (?:that )?you need to do)$/i.test(text)) return true;
-  return /^(?:what(?:'s| is)\b.*\b(?:constraint|status|progress)\b|what\s*%.*\b(?:complete|build|project)\b|how far along\b.*|when did i say that)$/i.test(text);
+  if (/^what(?:'s| is)\b/i.test(text) && /\b(?:constraint|status|progress)\b/i.test(text)) return true;
+  if (/^what\b/i.test(text) && text.includes("%") && /\b(?:complete|build|project)\b/i.test(text)) return true;
+  return /^(?:how far along\b.*|when did i say that)$/i.test(text);
 }
 
 export interface AgentOptions {

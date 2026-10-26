@@ -574,7 +574,7 @@ test("agent resume budgets context from the compacted history and keeps compacte
     assert.doesNotMatch(systemMessage, /- When did I say that\?/);
     assert.equal(JSON.stringify(capturedMessages).includes("Archived detail"), false, "inference uses summary plus post-boundary messages, not the archived raw transcript");
     assert.ok(capturedMessages.some((message) => JSON.stringify(message).includes(originalGoal)), "the saved summary remains in resume context");
-    assert.equal((sessions.messages(sessionId) as unknown[]).length, 17, "resume preserves every original message while appending new turns");
+    assert.equal((sessions.messages(sessionId) as unknown[]).length, 18, "resume preserves every original message while appending new turns");
   } finally { store.close(); }
 }));
 

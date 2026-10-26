@@ -7,6 +7,11 @@
 - Fixed resume completion-criteria collection to ignore control-only resume/progress/permission messages while retaining the original goal, compacted user goals, and substantive new requests. The focused compacted-resume test, runtime + CLI TypeScript builds, and `git diff --check` pass.
 - Full build remains active. No user credentials or live application settings were changed in this continuation.
 
+## Follow-up · cross-platform regression caught and corrected (2026-10-26)
+
+- Hosted run `40319066603` on commit `d298c93` exposed that a progress question phrased “What % complete would you say the build is?” still entered resume criteria. Both Ubuntu and Windows runtime suites caught the same regression. The control-message matcher now excludes that wording; the focused resume test passes locally.
+- Full local verification after the correction: runtime 148 passed, 2 host-dependent skips, 0 failed; CLI 18 passed; `npm run build` and `git diff --check` pass. The Linux package job for `d298c93` passed. Its Windows package job was still running when recorded. The corrected source will be pushed to trigger fresh hosted verification.
+
 ## Latest continuation · live automatic model selection and recovery (2026-10-26)
 
 - With `model.autoSelect=true` in an isolated Xyst profile against live LM Studio at `127.0.0.1:1235`, Xyst selected already-loaded `qwen3-0.6b` for a short file task. Its recorded reason included declared tool-use support, loaded state, 639 MB model size, a 6,216-token estimate fitting the 11,520-token instance, and stated that local task-completion reliability was unmeasured.
