@@ -12,6 +12,16 @@ The command opens the default database in read-only mode and runs SQLite `quick_
 
 The default database is `%APPDATA%\xyst\xyst.sqlite` on Windows. On Linux it is `$XDG_DATA_HOME/xyst/xyst.sqlite`, or `~/.local/share/xyst/xyst.sqlite` when `XDG_DATA_HOME` is unset.
 
+## Create a consistent database backup
+
+```sh
+xyst database backup ./backups/xyst.sqlite
+```
+
+This command snapshots a healthy SQLite database, including committed WAL data, verifies the new copy with `quick_check`, and refuses to overwrite an existing destination. It can run before normal runtime startup. It backs up only `xyst.sqlite`; it does not include workspaces, external artifacts, browser data, or other files in the Xyst data directory. For a full profile backup, stop Xyst and copy the entire data directory as described below.
+
+The command refuses to back up a corrupt or unavailable database. Preserve a damaged profile by copying its full data directory and sidecars before attempting salvage; never treat an integrity-clean partial salvage as a complete restore.
+
 ## Preserve data before recovery
 
 1. Stop the desktop app and all Xyst mission runners so no process is writing to the database.

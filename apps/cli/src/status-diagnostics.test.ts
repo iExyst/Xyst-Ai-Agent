@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { createRuntime } from "@xyst/runtime";
 
 const cliEntry = fileURLToPath(new URL("./index.ts", import.meta.url));
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -85,6 +86,68 @@ test("CLI help works without opening a corrupt profile or starting an agent", ()
     assert.equal(existsSync(`${databasePath}-wal`), false);
     assert.equal(existsSync(`${databasePath}-shm`), false);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("database backup preserves a healthy profile and refuses corrupt or existing destinations", () => {
+  const root = mkdtempSync(resolve(tmpdir(), "xyst-database-backup-"));
+  const dataHome = resolve(root, "data");
+  const workspace = resolve(root, "workspace");
+  const databasePath = resolve(dataHome, "xyst", "xyst.sqlite");
+  const backupDataHome = resolve(root, "backup-data");
+  const backupPath = resolve(backupDataHome, "xyst", "xyst.sqlite");
+  const corruptDataHome = resolve(root, "corrupt-data");
+  const corruptDatabasePath = resolve(corruptDataHome, "xyst", "xyst.sqlite");
+  const rejectedBackupPath = resolve(root, "rejected-backup.sqlite");
+  mkdirSync(workspace, { recursive: true });
+  mkdirSync(dirname(corruptDatabasePath), { recursive: true });
+  let runtime: ReturnType<typeof createRuntime> | undefined;
+
+  try {
+    const initialized = runCli(dataHome, workspace, "status");
+    assert.equal(initialized.error, undefined, initialized.error?.message);
+    assert.equal(initialized.status, 0);
+    runtime = createRuntime({ dataDir: resolve(dataHome, "xyst") });
+    const sessionId = runtime.sessions.create("Backup fixture", workspace);
+    const originalHash = createHash("sha256").update(readFileSync(databasePath)).digest("hex");
+
+    const backup = runCli(dataHome, workspace, "database", "backup", backupPath);
+    assert.equal(backup.error, undefined, backup.error?.message);
+    assert.equal(backup.status, 0);
+    assert.equal(JSON.parse(backup.stdout).data.status, "healthy");
+    assert.equal(createHash("sha256").update(readFileSync(databasePath)).digest("hex"), originalHash);
+
+    const backupStatus = runCli(backupDataHome, workspace, "status");
+    assert.equal(backupStatus.error, undefined, backupStatus.error?.message);
+    assert.equal(backupStatus.status, 0);
+    assert.equal(JSON.parse(backupStatus.stdout).data.sessions, 1);
+    const backupSession = runCli(backupDataHome, workspace, "session", "list");
+    assert.equal(backupSession.error, undefined, backupSession.error?.message);
+    assert.equal(backupSession.status, 0);
+    assert.equal(JSON.parse(backupSession.stdout).data.some((session: { id: string }) => session.id === sessionId), true);
+
+    const backupHash = createHash("sha256").update(readFileSync(backupPath)).digest("hex");
+    const overwrite = runCli(dataHome, workspace, "database", "backup", backupPath);
+    assert.equal(overwrite.status, 1);
+    assert.match(JSON.parse(overwrite.stdout).data.error, /already exists/);
+    assert.equal(createHash("sha256").update(readFileSync(backupPath)).digest("hex"), backupHash);
+
+    const samePath = runCli(dataHome, workspace, "database", "backup", databasePath);
+    assert.equal(samePath.status, 1);
+    assert.match(JSON.parse(samePath.stdout).data.error, /must differ from the source/);
+    assert.equal(createHash("sha256").update(readFileSync(databasePath)).digest("hex"), originalHash);
+
+    writeFileSync(corruptDatabasePath, Buffer.from("deliberately-invalid-sqlite-fixture"));
+    const corruptHash = createHash("sha256").update(readFileSync(corruptDatabasePath)).digest("hex");
+    const rejected = runCli(corruptDataHome, workspace, "database", "backup", rejectedBackupPath);
+    assert.equal(rejected.status, 1);
+    assert.match(JSON.parse(rejected.stdout).data.error, /corrupt database/);
+    assert.equal(existsSync(rejectedBackupPath), false);
+    assert.equal(createHash("sha256").update(readFileSync(corruptDatabasePath)).digest("hex"), corruptHash);
+    assert.equal(existsSync(backupPath), true);
+  } finally {
+    runtime?.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

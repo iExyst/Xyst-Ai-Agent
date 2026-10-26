@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { totalmem } from "node:os";
 import { spawn } from "node:child_process";
 import * as nodePty from "node-pty";
-import { authenticateMcpOAuth, createMcpTools, createRuntime, createText, deletePath, getDataDirectory, getSessionCompactionModel, inspectDatabaseIntegrity, McpOAuthClientProvider, resolveLMStudioIntegrations, gitBranches, gitClone, gitCommit, gitCreateBranch, gitDiff, gitFetch, gitLog, gitPush, gitStage, gitStatus, indexMemories, inspectDesktopCapabilities, inspectLmsDaemon, listFiles, mcpServersSchema, movePath, patchText, readModelPerformance, readText, requestEmbeddings, runProcess, runShell, searchFiles, sendNativeNotification, subscribeRunNotifications, type ExternalActionApprovalRequest, type RemoteFallbackApprovalRequest } from "@xyst/runtime";
+import { authenticateMcpOAuth, createDatabaseBackup, createMcpTools, createRuntime, createText, deletePath, getDataDirectory, getSessionCompactionModel, inspectDatabaseIntegrity, McpOAuthClientProvider, resolveLMStudioIntegrations, gitBranches, gitClone, gitCommit, gitCreateBranch, gitDiff, gitFetch, gitLog, gitPush, gitStage, gitStatus, indexMemories, inspectDesktopCapabilities, inspectLmsDaemon, listFiles, mcpServersSchema, movePath, patchText, readModelPerformance, readText, requestEmbeddings, runProcess, runShell, searchFiles, sendNativeNotification, subscribeRunNotifications, type ExternalActionApprovalRequest, type RemoteFallbackApprovalRequest } from "@xyst/runtime";
 import { parseLoadOptions } from "./load-options.js";
 import { parseChatOptions } from "./chat-options.js";
 import { parseResponsesRequest } from "./responses-options.js";
@@ -47,6 +47,19 @@ if (clean[0] === "database" && clean[1] === "check") {
   const report = inspectDatabaseIntegrity(resolve(getDataDirectory(), "xyst.sqlite"));
   output(report);
   process.exitCode = report.status === "healthy" ? 0 : 1;
+  await new Promise<void>((flushed) => process.stdout.write("", () => flushed()));
+  process.exit();
+}
+if (clean[0] === "database" && clean[1] === "backup") {
+  const target = clean[2];
+  if (!target || clean.length !== 3) fail("Usage: database backup <new-destination.sqlite>");
+  try {
+    const result = await createDatabaseBackup(resolve(getDataDirectory(), "xyst.sqlite"), resolve(target));
+    output(result);
+  } catch (error) {
+    output({ status: "failed", error: error instanceof Error ? error.message : String(error) });
+    process.exitCode = 1;
+  }
   await new Promise<void>((flushed) => process.stdout.write("", () => flushed()));
   process.exit();
 }
@@ -221,6 +234,7 @@ Usage: xyst [--json] <command>
   desktop snapshot              Read the complete desktop dashboard state in one runtime call
   desktop automation on|off|status  Enable optional native application automation
   database check                Read-only SQLite integrity check (also works when runtime startup fails)
+  database backup <new-path>   Create and verify a consistent backup; refuses corrupt sources and existing targets
   model loading|unloading|discovery|downloads|switching|remote-fallback on|off
   model idle-unload <seconds>       Set the automatic idle-unload TTL (60–604800 seconds)
   hf auth set|delete|status     Configure optional Hugging Face access

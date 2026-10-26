@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
 import { existsSync } from "node:fs";
+import { link, mkdir, mkdtemp, rm, unlink } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { validateSettingScope, validateSettingValue } from "./settings-schema.js";
 
@@ -78,6 +79,57 @@ export function inspectDatabaseIntegrity(path: string): DatabaseIntegrityReport 
       : { path: absolute, status: "unavailable", error: message };
   } finally {
     db?.close();
+  }
+}
+
+export type DatabaseBackupReport = { source: string; destination: string; status: "healthy"; createdAt: string };
+
+/** Create a consistent, integrity-checked SQLite backup without replacing an existing destination. */
+export async function createDatabaseBackup(sourcePath: string, destinationPath: string): Promise<DatabaseBackupReport> {
+  const source = resolve(sourcePath);
+  const destination = resolve(destinationPath);
+  if (source === destination) throw new Error("Backup destination must differ from the source database");
+  if (existsSync(destination)) throw new Error(`Backup destination already exists: ${destination}`);
+  const sourceIntegrity = inspectDatabaseIntegrity(source);
+  if (sourceIntegrity.status !== "healthy") {
+    const detail = sourceIntegrity.error ?? sourceIntegrity.details?.join("; ") ?? sourceIntegrity.status;
+    throw new Error(`Cannot create a SQLite backup from a ${sourceIntegrity.status} database: ${detail}`);
+  }
+
+  await mkdir(dirname(destination), { recursive: true });
+  const temporaryDirectory = await mkdtemp(join(dirname(destination), `.${basename(destination)}.xyst-backup-`));
+  const temporaryPath = join(temporaryDirectory, "xyst.sqlite");
+  try {
+    let db: Database.Database | undefined;
+    try {
+      db = new Database(source, { readonly: true, fileMustExist: true });
+      db.pragma("busy_timeout = 10000");
+      await db.backup(temporaryPath);
+    } finally {
+      db?.close();
+    }
+
+    const temporaryIntegrity = inspectDatabaseIntegrity(temporaryPath);
+    if (temporaryIntegrity.status !== "healthy") {
+      throw new Error(`SQLite backup failed integrity verification: ${temporaryIntegrity.error ?? temporaryIntegrity.details?.join("; ") ?? temporaryIntegrity.status}`);
+    }
+
+    try {
+      await link(temporaryPath, destination);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Backup destination already exists: ${destination}`, { cause: error });
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Could not publish the verified backup without overwriting an existing file: ${destination}. ${detail}`, { cause: error });
+    }
+
+    const destinationIntegrity = inspectDatabaseIntegrity(destination);
+    if (destinationIntegrity.status !== "healthy") {
+      await unlink(destination).catch(() => undefined);
+      throw new Error(`Published SQLite backup failed integrity verification: ${destinationIntegrity.error ?? destinationIntegrity.details?.join("; ") ?? destinationIntegrity.status}`);
+    }
+    return { source, destination, status: "healthy", createdAt: new Date().toISOString() };
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }
 

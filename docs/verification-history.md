@@ -13,6 +13,12 @@
 - Resumed the saved session `dcc45210-5990-4e78-a086-a70fb3b2f0f363` with the already-loaded Qwen3-0.6B, without repeating the fetch or file write. Xyst called `task_complete`; its persisted result was `verified:true` for both the exact API URL and the exact read-back evidence. The final file contains `full_name=iExyst/Xyst-Ai-Agent`, `default_branch=main`, `archived=false`, source URL, HTTP 200, and the exact fetch timestamp above. Isolated database `integrity_check` returned `ok`.
 - This verifies current-source live public API access, file creation/read-back, and resumption from saved evidence. It also records slow model completion under current GPU contention as an open resource/model reliability limitation. The additional 9B instance loaded for this attempt was unloaded; the pre-existing 9B instance remains loaded. All acceptance data is under `.xyst-live-acceptance/resume-followup-current-20261026/`.
 
+## Consistent database backup command (2026-10-26)
+
+- Added `xyst database backup <new-path>` as a startup-independent maintenance command. On a healthy SQLite source it snapshots committed data through SQLite's backup API, checks the temporary and published copy with `quick_check`, and publishes without replacing an existing destination. Corrupt or unavailable sources are rejected; no automatic repair or replacement occurs.
+- Focused Windows and Ubuntu 24.04 WSL verification held a source `XystStore` open with a committed session in WAL mode while invoking the CLI backup. A second CLI runtime started from the backup and listed the same session. Source and backup hashes stayed unchanged when same-path and existing-target requests were rejected; a corrupt source remained byte-identical and produced no destination. Runtime build, CLI typecheck, and all three focused CLI diagnostic tests passed on both platforms. Cross-platform hosted checks are pending for the change.
+- The command backs up SQLite only. The recovery guide and README distinguish it from copying the full data directory. It cannot restore missing rows from the user's current malformed profile.
+
 ## Exact current CI Linux package GUI and live API acceptance (2026-10-26)
 
 - Downloaded the `xyst-linux` artifact from successful CI run `40368740323` for PR head `cb32093df8dc71089f66755808d49601015b54c6`. The AppImage is 325,087,566 bytes; SHA-512 Base64 `Hw23maGTiaoKzJrwP3GzhUV5zfJePad6AEu/MDp6r+GU2ASAcfk9vtorJlMuYYc3zbcViTZnvxd7hEyrmrZ1pA==`; the downloaded `latest-linux.yml` matched its size and digest.

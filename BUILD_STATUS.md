@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-26 (refreshed)
 
+## Recovery hardening · verified SQLite backup command (2026-10-26)
+
+- Added `xyst database backup <new-path>`. It uses SQLite's backup API so committed WAL data is included, verifies the copied database, and refuses corrupt sources and existing destinations. It remains available before normal runtime startup. It is a database-only backup; full profile copies remain necessary for workspaces and external files.
+- Windows and Ubuntu 24.04 WSL verification both kept Xyst's source database open in WAL mode with a newly created session, backed it up, started a second runtime from the copy, and found the same session. The checks also confirmed source/destination hashes remain unchanged on same-path, existing-target, and corrupt-source rejection. Runtime build, CLI typecheck, and the focused 3-test diagnostic suite passed on both platforms. Hosted checks for this code change are pending.
+- This improves future recovery but does not reconstruct the current malformed default profile; its latest isolated salvage still lacks messages and tool-call history.
+
 ## Continuation · resumable current-source live API acceptance (2026-10-26)
 
 - A fresh isolated current-source Xyst CLI run against LM Studio `127.0.0.1:1235` fetched the live GitHub REST API (HTTP 200), created `verified-repo.json`, and read it back with exact fields and source timestamp. The 9B model stalled on final completion inference under 98–99% GPU load; the saved session was resumed with the already-loaded 0.6B model, and persisted `task_complete` verified both live-fetch and file-read evidence. Isolated SQLite integrity is `ok`. Details and exact session ID: [verification history](docs/verification-history.md#current-source-live-api-task-resumed-after-slow-inference-2026-10-26).
