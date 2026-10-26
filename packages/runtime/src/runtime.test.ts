@@ -2316,18 +2316,21 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   try {
   const hostResources = { source: "Xyst host" as const, checkedAt: new Date(0).toISOString(), systemMemory: { totalBytes: 16 * 1024 ** 3, usedBytes: 8 * 1024 ** 3, availableBytes: 8 * 1024 ** 3, usedPercent: 50 }, nvidiaGpuMemory: { status: "available" as const, source: "nvidia-smi" as const, devices: [{ name: "Test GPU", totalBytes: 2 * 1024 ** 3, usedBytes: 1024 ** 3, freeBytes: 1024 ** 3 }] } };
   let hfModelConfig: Record<string, unknown> = { max_position_embeddings: 32768 };
+  let hfModelCard = "Supports up to 32768 tokens of context.";
   let hfSearchResults = [{ id: "owner/model", downloads: 10 }];
+  let recommendationSearchLimit = 0;
   const hf = {
-    search: async () => hfSearchResults,
+    search: async (_query: string, options?: { limit?: number }) => { recommendationSearchLimit = options?.limit ?? 0; return hfSearchResults; },
     model: async (id: string) => ({ id, gated: false, sha: "a".repeat(40), downloads: id === "owner/popular" ? 10000 : 10, tags: ["license:mit"], ...(id === "owner/evaluated" ? { cardData: { license: "mit", eval_results: [{ dataset: { name: "Code benchmark" }, metric: { name: "pass@1" }, value: 42, source: { name: "Publisher report", url: "https://example.test/eval" } }] } } : {}) }),
-    modelConfig: async () => hfModelConfig,
+    modelConfig: async (id: string) => id === "owner/base" ? { max_position_embeddings: 32768, num_hidden_layers: 32, hidden_size: 4096, num_attention_heads: 32, num_key_value_heads: 8 } : hfModelConfig,
+    card: async () => hfModelCard,
     files: async () => [
       { rfilename: "model-Q5_K_M-00001-of-00002.gguf", size: 1500, lfs: { size: 1500, sha256: "1".repeat(64) } },
       { rfilename: "model-Q5_K_M-00002-of-00002.gguf", size: 1500, lfs: { size: 1500, sha256: "2".repeat(64) } },
       { rfilename: "mmproj-model-Q5_K_M.gguf", size: 512, lfs: { size: 512, sha256: "3".repeat(64) } },
       { rfilename: "model-Q5_K_M.gguf", size: 600 * 1024 ** 2, lfs: { size: 600 * 1024 ** 2, sha256: "4".repeat(64) } },
-      { rfilename: "model-Q4_K_M.gguf", size: 1024, lfs: { size: 1024, sha256: "5".repeat(64) } },
-      { rfilename: "mmproj-model-Q4_K_M.gguf", size: 512, lfs: { size: 512, sha256: "6".repeat(64) } }
+      { rfilename: "model-Q4_K_M.gguf", size: 1024, lfs: { size: 1024, oid: "5".repeat(64) } },
+      { rfilename: "mmproj-model-Q4_K_M.gguf", size: 512, lfs: { size: 512, oid: "6".repeat(64) } }
     ]
   };
   const modelInventory = [{ key: "owner/model", type: "llm", max_context_length: 8192, loaded_instances: [] as Array<{ id: string; config: Record<string, unknown> }> }];
@@ -2347,6 +2350,8 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   await assert.rejects(() => service.download("owner/model", "Q4_K_M"), /over the configured/);
   config.set("global", "models.maxDownloadBytes", 2048);
   const recommendations = await service.recommend("coding"); assert.equal(recommendations[0]?.repository, "owner/model"); assert.equal(recommendations[0]?.artifact, "model-Q4_K_M.gguf");
+  assert.equal(recommendationSearchLimit, 20, "automatic recommendations use a bounded, broad enough shortlist");
+  assert.equal(recommendations[0]?.sha256, "5".repeat(64), "Hugging Face LFS oid is the SHA-256 when the newer tree API omits lfs.sha256");
   assert.equal(recommendations[0]?.license, "mit"); assert.equal(recommendations[0]?.licenseAllowed, false);
   config.set("global", "models.allowedLicenses", ["mit"]);
   const licenseAllowedRecommendations = await service.recommend("coding"); assert.equal(licenseAllowedRecommendations[0]?.licenseAllowed, true);
@@ -2365,8 +2370,15 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   const evidenceRanked = await service.recommend("coding");
   assert.equal(evidenceRanked[0]?.repository, "owner/evaluated", "publisher evaluation metadata is preferred over popularity without comparing reported scores");
   assert.deepEqual(evidenceRanked[0]?.publishedEvaluationEvidence, [{ dataset: "Code benchmark", metric: "pass@1", value: 42, source: "Publisher report", sourceUrl: "https://example.test/eval" }]);
+  hfModelConfig = {};
+  hfModelCard = "---\nbase_model:\n- owner/base\n---\nThis quantized model uses the named base model.";
   const contextRecommendations = await service.recommend("coding", undefined, {}, { minimumContextTokens: 16000 });
   assert.equal(contextRecommendations[0]?.declaredContextTokens, 32768);
+  assert.equal(contextRecommendations[0]?.contextMetadataSource, `pinned base-model config (owner/base@${"a".repeat(40)})`);
+  hfModelCard = "Context Length: Full 32,768 tokens.";
+  const cardContextRecommendations = await service.recommend("coding", undefined, {}, { minimumContextTokens: 16000 });
+  assert.equal(cardContextRecommendations[0]?.declaredContextTokens, 32768);
+  assert.equal(cardContextRecommendations[0]?.contextMetadataSource, "pinned model card");
   assert.equal((await service.recommend("coding", undefined, {}, { minimumContextTokens: 65536 })).length, 0);
   hfModelConfig = { max_position_embeddings: 32768, num_hidden_layers: 32, hidden_size: 4096, num_attention_heads: 32, num_key_value_heads: 8 };
   config.set("global", "orchestration.maxConcurrency", 2);
@@ -2446,10 +2458,10 @@ test("LM Studio model discovery matches a Hugging Face GGUF repository and prefe
 test("recommended model acquisition pins and hashes the artifact before importing it", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "verified-model.sqlite")); const config = new ConfigStore(store);
   const artifact = Buffer.from("verified gguf fixture"); const sha256 = createHash("sha256").update(artifact).digest("hex");
-  const modelInventory = [{ key: "owner/model", type: "llm", max_context_length: 8192, size_bytes: 20, capabilities: { trained_for_tool_use: true }, loaded_instances: [] as Array<{ id: string; config: Record<string, unknown> }> }];
+  const modelInventory = [{ key: "qwen/qwen2.5-coder-1.5b-instruct", type: "llm", max_context_length: 8192, size_bytes: 20, capabilities: { trained_for_tool_use: true }, loaded_instances: [] as Array<{ id: string; config: Record<string, unknown> }> }];
   const commands: Array<{ command: string; args: string[] }> = []; let imported = false;
   const hf = { downloadArtifact: async (repository: string, revision: string, filename: string) => {
-    assert.equal(repository, "owner/model"); assert.equal(revision, "a".repeat(40)); assert.equal(filename, "model-Q4_K_M.gguf"); return new Response(artifact);
+    assert.equal(repository, "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"); assert.equal(revision, "a".repeat(40)); assert.equal(filename, "model-Q4_K_M.gguf"); return new Response(artifact);
   } };
   const lm = { models: async () => modelInventory, load: async (key: string) => { modelInventory[0]!.loaded_instances.push({ id: "probe", config: {} }); return { model: key }; },
     chat: async () => ({ output: [{ type: "message", content: [{ type: "text", text: "XYST_MODEL_READY" }] }] }),
@@ -2458,13 +2470,14 @@ test("recommended model acquisition pins and hashes the artifact before importin
     commandRunner: async (command, args) => { commands.push({ command, args }); imported = true; return { code: 0, signal: null, stdout: "imported", stderr: "", durationMs: 1 }; } });
   try {
     config.set("global", "models.onlineDiscovery", true); config.set("global", "models.automaticDownloads", true);
-    const recommendation = { repository: "owner/model", revision: "a".repeat(40), artifact: "model-Q4_K_M.gguf", quantization: "Q4_K_M", sizeBytes: artifact.length, sha256, license: "mit" };
+    const recommendation = { repository: "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF", revision: "a".repeat(40), artifact: "model-Q4_K_M.gguf", quantization: "Q4_K_M", sizeBytes: artifact.length, sha256, license: "mit" };
     await assert.rejects(() => service.acquireRecommended(recommendation), /license mit is not in the saved models.allowedLicenses preference/);
     config.set("global", "models.allowedLicenses", ["mit"]);
     const result = await service.acquireRecommended(recommendation);
     assert.equal(result.state, "completed"); assert.equal(result.sha256, sha256); assert.equal(imported, true);
     assert.equal(commands[0]!.command, "lms"); assert.equal(commands[0]!.args[0], "import");
-    assert.equal(commands[0]!.args[2], "--user-repo"); assert.equal(commands[0]!.args[3], "owner/model"); assert.match(commands[0]!.args[1]!, /\.gguf$/);
+    assert.equal(commands[0]!.args[2], "--user-repo"); assert.equal(commands[0]!.args[3], "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"); assert.match(commands[0]!.args[1]!, /\.gguf$/);
+    assert.equal(result.modelKey, "qwen/qwen2.5-coder-1.5b-instruct");
     const verification = await service.verify(result.id) as unknown as { capabilityCheck: { status: string } }; assert.equal(verification.capabilityCheck.status, "passed");
     const records = service.listDownloads() as Array<{ state: string; details_json: string }>;
     assert.equal(records[0]!.state, "completed"); assert.equal(JSON.parse(records[0]!.details_json).verifiedSha256, sha256);
@@ -2553,7 +2566,7 @@ test("agent model acquisition follows discovery and download controls without se
   try {
     config.set("global", "models.onlineDiscovery", true);
     await assert.rejects(() => agent.run("PRIVATE objective: use local repository details"), /Recommended owner\/model model-Q4_K_M.gguf/);
-    assert.equal(acquired, 0); assert.deepEqual(discoveryQueries, ["GGUF coding assistant tool calling instruction following"]);
+    assert.equal(acquired, 0); assert.deepEqual(discoveryQueries, ["coder GGUF"]);
     config.set("global", "models.automaticDownloads", true);
     await assert.rejects(() => agent.run("PRIVATE objective: use local repository details"), /none matches the saved license preference/);
     assert.equal(acquired, 0);

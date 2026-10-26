@@ -312,7 +312,8 @@ export class AgentRunner {
         if (!eligibleForAcquisition || !onlineDiscoveryEnabled) throw selectionError;
         // Use only a generic capability query. The task objective and workspace content stay local.
         const acquisition = this.deps.modelAcquisition!;
-        const capabilityQuery = visionRequired ? "GGUF vision language model image understanding tool calling instruction following" : "GGUF coding assistant tool calling instruction following";
+        const codeOriented = /\b(code|coding|program(?:ming)?|developer|software|repository|repo|pull request|bug|feature|refactor|compile|typecheck|source file|function)\b/i.test(objective);
+        const capabilityQuery = visionRequired ? "vision GGUF" : codeOriented ? "coder GGUF" : "instruct GGUF";
         const recommendations = await acquisition.recommend(capabilityQuery, options.signal, scopes, { minimumContextTokens: requiredContextTokens, ...(visionRequired ? { visionRequired: true } : {}) });
         const suitableRecommendations = recommendations.filter((item) => item.diskSufficient === true && typeof item.sha256 === "string");
         if (!suitableRecommendations.length) throw new Error(`No installed model declares enough context for the estimated ${requiredContextTokens} tokens, and Hugging Face found no artifact with a pinned, declared context that fits current memory, disk, and download limits.`);

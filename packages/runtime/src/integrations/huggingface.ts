@@ -97,6 +97,19 @@ export class HuggingFaceProvider {
     const repo = repository.split("/").map(encodeURIComponent).join("/");
     const response = await fetch(`${this.baseUrl}/${repo}/raw/${encodeURIComponent(revision)}/README.md`, { headers, ...(signal ? { signal } : {}) });
     if (!response.ok) throw new Error(`Hugging Face returned HTTP ${response.status} while reading the model card`);
-    return (await response.text()).slice(0, 50_000);
+    const limit = 50_000;
+    const declaredLength = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > limit) { await response.body?.cancel(); throw new Error("Hugging Face model card exceeds the 50 KB inspection limit"); }
+    if (!response.body) return "";
+    const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let length = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break;
+        length += value.byteLength;
+        if (length > limit) { await reader.cancel(); throw new Error("Hugging Face model card exceeds the 50 KB inspection limit"); }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    return Buffer.concat(chunks).toString("utf8");
   }
 }

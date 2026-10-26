@@ -14,7 +14,7 @@ import type { ConfigStore, SettingScope, XystStore } from "../storage.js";
 import type { LMStudioProvider } from "../providers/lm-studio.js";
 import type { HuggingFaceProvider } from "./huggingface.js";
 
-type HubGgufFile = { rfilename: string; size?: number; lfs?: { size?: number; sha256?: string } };
+type HubGgufFile = { rfilename: string; size?: number; lfs?: { size?: number; sha256?: string; oid?: string } };
 type GgufArtifact = { filename: string; role: "model" | "model-shard" | "vision-projector"; sizeBytes: number; sha256?: string };
 type GgufArtifactSet = { artifact: string; quantization: string; sizeBytes: number; files: GgufArtifact[] };
 
@@ -23,6 +23,46 @@ function normalizeModelRepositoryKey(value: string): string {
   const name = parts.pop() ?? "";
   parts.push(name.replace(/[-_.]gguf$/, ""));
   return parts.join("/");
+}
+
+function hubFileSha256(file: HubGgufFile): string | undefined {
+  const candidate = file.lfs?.sha256 ?? file.lfs?.oid;
+  return typeof candidate === "string" && /^[a-f0-9]{64}$/i.test(candidate) ? candidate.toLowerCase() : undefined;
+}
+
+function toGgufArtifact(file: HubGgufFile, role: GgufArtifact["role"]): GgufArtifact {
+  const sha256 = hubFileSha256(file);
+  return { filename: file.rfilename, role, sizeBytes: (file.lfs?.size ?? file.size)!, ...(sha256 ? { sha256 } : {}) };
+}
+
+function contextLengthFromCard(card: string): number | undefined {
+  const patterns = [
+    /\bsupports?\s+up\s+to\s+([\d,]+)\s+tokens?\s+of\s+context\b/i,
+    /\b(?:maximum|max)\s+context(?:\s+(?:length|window))?\s*[:=]\s*([\d,]+)\s*(?:tokens?)?\b/i,
+    /\bcontext(?:\s+(?:length|window))?\s*[:=]\s*(?:full\s+)?([\d,]+)\s+tokens?\b/i
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(card);
+    if (!match) continue;
+    const value = Number(match[1]!.replaceAll(",", ""));
+    if (Number.isSafeInteger(value) && value > 0 && value <= 10_000_000) return value;
+  }
+  return undefined;
+}
+
+function baseModelFromCard(card: string): string | undefined {
+  const frontMatter = card.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\s|$)/)?.[1];
+  if (!frontMatter) return undefined;
+  const field = frontMatter.match(/^base_model:[ \t]*([^\r\n]*)$/m);
+  const value = field?.[1]?.trim() || frontMatter.match(/^base_model:[ \t]*\r?\n\s*-\s*([^\r\n#]+)\s*$/m)?.[1]?.trim();
+  const repository = value?.replace(/^['"]|['"]$/g, "");
+  return repository && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ? repository : undefined;
+}
+
+function declaredContextFromConfig(records: Record<string, unknown>[]): number | undefined {
+  const value = records.flatMap((config) => ["max_position_embeddings", "max_sequence_length", "max_seq_len", "seq_length", "n_positions", "model_max_length"].map((key) => config[key]))
+    .find((candidate) => typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate > 0);
+  return typeof value === "number" ? value : undefined;
 }
 
 function findDownloadedModel<T extends { key: string }>(models: T[], repository: string): { model?: T; status: "verified" | "not_found" | "ambiguous" } {
@@ -87,7 +127,7 @@ export class ModelAcquisitionService {
     const modelDirectory = await this.modelDirectory();
     const allowedLicenses = this.deps.config.resolve<string[]>("models.allowedLicenses", scopes)?.value ?? [];
     const [diskAvailableBytes, tempDiskAvailableBytes] = await Promise.all([this.diskSpace(modelDirectory), this.diskSpace(tmpdir())]);
-    const found = await this.deps.huggingFace.search(query, { limit: 8, ...(signal ? { signal } : {}) });
+    const found = await this.deps.huggingFace.search(query, { limit: 20, ...(signal ? { signal } : {}) });
     const recommendations: Array<Record<string, unknown>> = [];
     for (const result of found) {
       if (result.private || result.gated) continue;
@@ -98,15 +138,42 @@ export class ModelAcquisitionService {
       const pinnedRevision = /^[a-f0-9]{40,64}$/i.test(metadata.sha ?? "") ? metadata.sha! : undefined;
       const modelConfig = pinnedRevision ? await this.deps.huggingFace.modelConfig(metadata.id, pinnedRevision, signal).catch((error) => { if (signal?.aborted) throw error; return undefined; }) : undefined;
       const configRecords = modelConfig ? [modelConfig, ...[modelConfig.text_config, modelConfig.llm_config].filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))] : [];
-      const contextValue = configRecords.flatMap((config) => ["max_position_embeddings", "max_sequence_length", "max_seq_len", "seq_length", "n_positions", "model_max_length"].map((key) => config[key])).find((value) => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
-      const declaredContextTokens = typeof contextValue === "number" ? contextValue : undefined;
+      let contextConfigRecords = configRecords;
+      let declaredContextTokens = declaredContextFromConfig(configRecords);
+      let contextMetadataSource: string | undefined = declaredContextTokens ? "pinned model config" : undefined;
+      if (declaredContextTokens === undefined && pinnedRevision) {
+        const card = await this.deps.huggingFace.card(metadata.id, pinnedRevision, signal).catch((error) => { if (signal?.aborted) throw error; return undefined; });
+        if (typeof card === "string") {
+          const baseModel = baseModelFromCard(card);
+          if (baseModel && baseModel.toLowerCase() !== metadata.id.toLowerCase()) {
+            try {
+              const baseMetadata = await this.deps.huggingFace.model(baseModel, signal);
+              if (!baseMetadata.private && !baseMetadata.gated && typeof baseMetadata.sha === "string" && /^[a-f0-9]{40,64}$/i.test(baseMetadata.sha)) {
+                const baseConfig = await this.deps.huggingFace.modelConfig(baseModel, baseMetadata.sha, signal);
+                if (baseConfig) {
+                  const baseRecords = [baseConfig, ...[baseConfig.text_config, baseConfig.llm_config].filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))];
+                  declaredContextTokens = declaredContextFromConfig(baseRecords);
+                  if (declaredContextTokens !== undefined) {
+                    contextConfigRecords = baseRecords;
+                    contextMetadataSource = `pinned base-model config (${baseModel}@${baseMetadata.sha})`;
+                  }
+                }
+              }
+            } catch (error) { if (signal?.aborted) throw error; }
+          }
+          if (declaredContextTokens === undefined) {
+            declaredContextTokens = contextLengthFromCard(card);
+            if (declaredContextTokens !== undefined) contextMetadataSource = "pinned model card";
+          }
+        }
+      }
       if (requirements.minimumContextTokens !== undefined && (declaredContextTokens === undefined || declaredContextTokens < requirements.minimumContextTokens)) continue;
       const assumedContextTokens = requirements.minimumContextTokens ?? Math.min(declaredContextTokens ?? 4096, 4096);
       const candidates = buildGgufArtifactSets(files, requirements.visionRequired === true).flatMap((set) => {
         const { quantization, sizeBytes } = set;
         if (sizeBytes > maxDownloadBytes || requirements.minimumContextTokens !== undefined && (!pinnedRevision || set.files.some((file) => !/^[a-f0-9]{64}$/i.test(file.sha256 ?? "")))) return [];
         const estimatedWeightMemoryBytes = Math.ceil(sizeBytes * 1.25);
-        const architectureValue = (keys: string[]) => configRecords.flatMap((config) => keys.map((key) => config[key])).find((value) => typeof value === "number" && Number.isSafeInteger(value) && value > 0) as number | undefined;
+        const architectureValue = (keys: string[]) => contextConfigRecords.flatMap((config) => keys.map((key) => config[key])).find((value) => typeof value === "number" && Number.isSafeInteger(value) && value > 0) as number | undefined;
         const layers = architectureValue(["num_hidden_layers", "n_layer", "num_layers", "n_layers"]);
         const attentionHeads = architectureValue(["num_attention_heads", "n_head"]);
         const kvHeads = architectureValue(["num_key_value_heads", "num_kv_heads", "n_head_kv"]) ?? attentionHeads;
@@ -147,7 +214,7 @@ export class ModelAcquisitionService {
         estimatedFullOffloadGpuMemoryBytes: selected.estimatedMemoryBytes,
         ...(gpuFreeBytes !== undefined ? { maxSingleGpuFreeBytes: gpuFreeBytes, estimatedFullOffloadFitsCurrentGpuMemory: selected.estimatedMemoryBytes <= gpuFreeBytes } : { gpuMemoryStatus: resources?.nvidiaGpuMemory.status ?? "unavailable" }),
         concurrentMemoryFitsBudget: selected.estimatedConcurrentMemoryBytes <= memoryBudgetBytes,
-        ...(declaredContextTokens !== undefined ? { declaredContextTokens } : {}),
+        ...(declaredContextTokens !== undefined ? { declaredContextTokens, contextMetadataSource } : {}),
         diskAvailableBytes, diskRequiredBytes: Math.ceil(selected.sizeBytes * 1.05),
         tempDiskAvailableBytes, tempDiskRequiredBytes: Math.ceil(selected.sizeBytes * 1.05),
         diskSufficient: diskAvailableBytes >= Math.ceil(selected.sizeBytes * 1.05) && tempDiskAvailableBytes >= Math.ceil(selected.sizeBytes * 1.05),
@@ -185,7 +252,7 @@ export class ModelAcquisitionService {
       downloads: metadata.downloads, likes: metadata.likes, updatedAt: metadata.lastModified,
       private: metadata.private, gated: metadata.gated,
       license: typeof metadata.cardData?.license === "string" ? metadata.cardData.license : metadata.tags?.find((tag) => tag.startsWith("license:"))?.slice("license:".length),
-      files: files.map((file) => ({ name: file.rfilename, sizeBytes: file.lfs?.size ?? file.size, sha256: file.lfs?.sha256 }))
+        files: files.map((file) => ({ name: file.rfilename, sizeBytes: file.lfs?.size ?? file.size, sha256: hubFileSha256(file) }))
     };
   }
   async card(repository: string, signal?: AbortSignal) {
@@ -338,13 +405,11 @@ export class ModelAcquisitionService {
         bundleInstalled = true;
       }
       const models = await this.deps.lmStudio.models(signal);
-      let match = models.find((candidate) => candidate.key.toLowerCase() === repository.toLowerCase());
-      if (!match) {
-        const basename = repository.split("/").at(-1)!.toLowerCase(); const matches = models.filter((candidate) => candidate.key.toLowerCase().split("/").at(-1) === basename);
-        if (matches.length === 1) match = matches[0];
-        else throw new Error(matches.length ? `Import completed but inventory match is ambiguous for ${repository}` : `Import completed but ${repository} is not yet visible in LM Studio inventory`);
-      }
-      if (!match) throw new Error(`Import completed but ${repository} is not visible in LM Studio inventory`);
+      const inventoryMatch = findDownloadedModel(models, repository);
+      const match = inventoryMatch.model;
+      if (!match) throw new Error(inventoryMatch.status === "ambiguous"
+        ? `Import completed but inventory match is ambiguous for ${repository}`
+        : `Import completed but ${repository} is not yet visible in LM Studio inventory`);
       const primaryVerification = verifiedFiles.find((file) => file.filename === artifact);
       const completedDetails = { ...details, state: "completed", importedModelKey: match.key, verifiedFiles, ...(primaryVerification ? { verifiedSha256: primaryVerification.sha256 } : {}), ...(imported ? { importer: { stdout: imported.stdout.slice(-4000), durationMs: imported.durationMs } } : { installedPaths }) };
       this.deps.store.db.prepare("UPDATE model_downloads SET state='completed',details_json=?,updated_at=? WHERE id=?").run(JSON.stringify(completedDetails), new Date().toISOString(), id);
@@ -566,8 +631,8 @@ function buildGgufArtifactSets(files: HubGgufFile[], visionRequired: boolean): G
       if (!selectedProjector) return [];
     }
     const selectedFiles = [
-      ...core.files.map((file, index): GgufArtifact => ({ filename: file.rfilename, role: core.files.length > 1 && index > 0 ? "model-shard" : "model", sizeBytes: (file.lfs?.size ?? file.size)!, ...(file.lfs?.sha256 ? { sha256: file.lfs.sha256 } : {}) })),
-      ...(selectedProjector ? [{ filename: selectedProjector.rfilename, role: "vision-projector" as const, sizeBytes: (selectedProjector.lfs?.size ?? selectedProjector.size)!, ...(selectedProjector.lfs?.sha256 ? { sha256: selectedProjector.lfs.sha256 } : {}) }] : [])
+      ...core.files.map((file, index) => toGgufArtifact(file, core.files.length > 1 && index > 0 ? "model-shard" : "model")),
+      ...(selectedProjector ? [toGgufArtifact(selectedProjector, "vision-projector")] : [])
     ];
     const sizeBytes = selectedFiles.reduce((total, file) => total + file.sizeBytes, 0);
     if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) return [];
