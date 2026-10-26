@@ -175,6 +175,18 @@ function pathContains(parent: string, child: string): boolean {
   return path === "" || (path !== ".." && !path.startsWith(`..${sep}`));
 }
 
+async function realpathForNewPath(path: string): Promise<string> {
+  let cursor = resolve(path);
+  const missing: string[] = [];
+  while (!existsSync(cursor)) {
+    const parent = dirname(cursor);
+    if (parent === cursor) break;
+    missing.unshift(basename(cursor));
+    cursor = parent;
+  }
+  return resolve(await realpath(cursor), ...missing);
+}
+
 export type DatabaseRecoveryReport = {
   status: "healthy";
   database: string;
@@ -195,14 +207,18 @@ export async function recoverCorruptDatabaseProfile(databasePath: string, archiv
   if (!existsSync(dataDirectory)) throw new Error(`Xyst data directory does not exist: ${dataDirectory}`);
   if (existsSync(archive)) throw new Error(`Recovery archive already exists: ${archive}`);
 
-  await mkdir(dirname(archive), { recursive: true });
   const sourceReal = await realpath(dataDirectory);
-  const archiveParentReal = await realpath(dirname(archive));
-  const archiveReal = resolve(archiveParentReal, basename(archive));
+  const archiveReal = await realpathForNewPath(archive);
   if (pathContains(sourceReal, archiveReal) || pathContains(archiveReal, sourceReal)) {
     throw new Error("Recovery archive must be outside and separate from the Xyst data directory");
   }
 
+  await mkdir(dirname(archive), { recursive: true });
+  const archiveParentReal = await realpath(dirname(archive));
+  const createdArchivePath = resolve(archiveParentReal, basename(archive));
+  if (pathContains(sourceReal, createdArchivePath) || pathContains(createdArchivePath, sourceReal)) {
+    throw new Error("Recovery archive must be outside and separate from the Xyst data directory");
+  }
   const snapshotPath = join(archive, "profile");
   await mkdir(archive);
   let snapshotVerified: ProfileTreeDigest | undefined;

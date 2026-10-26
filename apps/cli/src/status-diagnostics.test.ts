@@ -177,6 +177,12 @@ test("database recover snapshots the complete corrupt profile before quarantinin
     assert.match(JSON.parse(insideProfile.stdout).data.error, /outside and separate/);
     assert.equal(createHash("sha256").update(readFileSync(databasePath)).digest("hex"), hashes.get("xyst.sqlite"));
 
+    const nestedParent = resolve(dataDirectory, "new-subdirectory");
+    const nestedArchive = runCli(dataHome, workspace, "database", "recover", resolve(nestedParent, "recovery"));
+    assert.equal(nestedArchive.status, 1);
+    assert.match(JSON.parse(nestedArchive.stdout).data.error, /outside and separate/);
+    assert.equal(existsSync(nestedParent), false, "refusing an in-profile target must not create parent directories");
+
     const existing = runCli(dataHome, workspace, "database", "recover", existingArchive);
     assert.equal(existing.status, 1);
     assert.match(JSON.parse(existing.stdout).data.error, /already exists/);
