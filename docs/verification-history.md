@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Session compaction schema repair and live acceptance (2026-10-26)
+
+- A local LM Studio compaction attempt previously returned content outside the required schema. Xyst now retries one time with a format-repair instruction and the same local JSON Schema. If the retry remains invalid, it returns an error without inserting a compaction record or modifying transcript messages.
+- Runtime tests verify both recovery after one malformed response and fail-safe behavior after two malformed responses. The full runtime suite passed with 144 tests passed, 2 host-dependent skips, and no failures; runtime TypeScript typecheck passed.
+- Live acceptance used already-loaded `qwen3-0.6b` and an isolated synthetic session. Xyst compacted 6 of 10 messages, retained the latest 4, and preserved the exact primary goal, explicit later decisions/dependency, and outstanding actions. Session `ec8ff691-0220-4c31-8b4e-e89f8c1251b3`. No existing user session or loaded-model state was changed.
+- One earlier request to already-loaded `qwen/qwen3.5-9b` ended with a transient LM Studio connection failure; the server remained running and responded to a later request. The successful 0.6B result is the live acceptance evidence for this change.
+
 ## Live API access reverified from the current shared runtime (2026-10-26)
 
 - Rebuilt `@xyst/runtime` from the PR worktree source and called its actual policy-enforced `web_fetch` tool with a new isolated Xyst data directory. Open-Meteo returned HTTP 200 JSON from `https://api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.0060&current=temperature_2m,relative_humidity_2m,weather_code&temperature_unit=fahrenheit&timezone=America%2FNew_York`.

@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Resume checkpoint · resilient session compaction (2026-10-26)
+
+- Fixed compaction recovery when LM Studio ignores the requested JSON Schema: Xyst now makes one bounded, JSON-only format repair attempt, validates the second response, and fails without saving a compaction if it is still invalid. The original transcript stays intact.
+- Full runtime suite passed: 144 passed, 2 host-dependent skips, 0 failed. Runtime typecheck passed. A live compaction with already-loaded `qwen3-0.6b` on an isolated synthetic session compacted 6 messages, retained 4, and preserved the exact primary objective, later user decisions, a dependency, and outstanding work. Session `ec8ff691-0220-4c31-8b4e-e89f8c1251b3`; no user's saved sessions were changed.
+- The earlier attempt using `qwen/qwen3.5-9b` ended with a transient connection failure; the local LM Studio server subsequently responded again, and the live acceptance succeeded on the smaller already-loaded model. No model was loaded or unloaded.
+- PR head `f7f9f47` passed current-head Cross-platform CI run `40276742247` and Desktop packages run `40276742260`, including clean Windows installation/renderer smoke and Linux AppImage packaging. The compaction change is the current local follow-up and needs its own hosted run after push.
+
 ## Resume checkpoint · live API access reverified (2026-10-26)
 
 - Rebuilt the PR worktree's current shared runtime and invoked its policy-enforced `web_fetch` against Open-Meteo's live current-conditions JSON API. The exact endpoint returned HTTP 200, `application/json`, an untruncated response, and Xyst `retrieved_at=2026-10-26T05:53:31.772Z`; New York's observation was `2026-10-26T01:45` local, 44.9 °F, 71% relative humidity, WMO code 0. The request used a fresh isolated Xyst data directory under `.xyst-live-acceptance/`.

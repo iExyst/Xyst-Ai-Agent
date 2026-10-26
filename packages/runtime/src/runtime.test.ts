@@ -481,10 +481,11 @@ test("session compaction persists a resumable summary and preserves raw history 
   const callId = "tool-pair-1"; const now = new Date().toISOString(); let capturedPayload: Record<string, unknown> | undefined;
   const append = (role: "user" | "assistant" | "tool", value: Record<string, unknown>) => sessions.addMessage(sessionId, role, `__xyst_api_message__:${JSON.stringify(value)}`);
   const response = { choices: [{ message: { content: JSON.stringify({ decisions: ["Use persistent summaries"], dependencies: [], completed_work: ["Reviewed the prior turns"], outstanding_actions: [], durable_facts: ["Original transcript remains available"] }) } }] };
+  let summaryAttempts = 0;
   const provider = {
     isLocalServer: () => true,
     models: async () => [{ type: "llm", key: "local-test", size_bytes: 1_000_000, loaded_instances: [], max_context_length: 8192 }],
-    structuredOutput: async (options: { messages: Array<{ role: string; content: string }> }) => { capturedPayload = JSON.parse(options.messages[1]!.content) as Record<string, unknown>; return response; },
+    structuredOutput: async (options: { messages: Array<{ role: string; content: string }> }) => { capturedPayload = JSON.parse(options.messages[1]!.content) as Record<string, unknown>; summaryAttempts++; return summaryAttempts === 1 ? { choices: [{ message: { content: "The model ignored the JSON schema." } }] } : response; },
     redact: (value: string) => value
   };
   try {
@@ -504,6 +505,7 @@ test("session compaction persists a resumable summary and preserves raw history 
     const before = sessions.messages(sessionId) as Array<{ id: string; role: string; content: string }>;
     const compactor = new SessionCompactor(store, sessions, provider as never);
     const result = await compactor.compact(sessionId, "local-test");
+    assert.equal(summaryAttempts, 2, "one malformed provider response receives exactly one format-repair retry");
     const summary = (result.summary as Record<string, unknown>);
     assert.equal(summary.primary_goal, "Please finish the Xyst build and retain this primary goal.");
     assert.ok((summary.user_goals as string[]).some((goal) => goal.includes("Decision: keep original session messages")));
@@ -521,6 +523,26 @@ test("session compaction persists a resumable summary and preserves raw history 
     assert.equal((exported.messages as unknown[]).length, before.length);
     assert.equal((exported.compactions as unknown[]).length, 1);
     assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE session_id=?").get(sessionId) as { count: number }).count, 2);
+  } finally { store.close(); }
+}));
+
+test("session compaction keeps the transcript untouched when schema repair also fails", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "session-compaction-invalid-output.sqlite")); const sessions = new SessionStore(store); const sessionId = sessions.create("Invalid compaction output");
+  for (let index = 0; index < 5; index++) { sessions.addMessage(sessionId, "user", `Keep working on the objective, turn ${index}.`); sessions.addMessage(sessionId, "assistant", `Completed turn ${index}.`); }
+  const before = sessions.messages(sessionId);
+  let attempts = 0;
+  const provider = {
+    isLocalServer: () => true,
+    models: async () => [{ type: "llm", key: "local-test", size_bytes: 1, loaded_instances: [], max_context_length: 8192 }],
+    structuredOutput: async () => { attempts++; return { choices: [{ message: { content: "not json" } }] }; },
+    redact: (value: string) => value
+  };
+  try {
+    const compactor = new SessionCompactor(store, sessions, provider as never);
+    await assert.rejects(compactor.compact(sessionId, "local-test"), /did not match the required schema after one retry/);
+    assert.equal(attempts, 2);
+    assert.equal(sessions.compactions(sessionId).length, 0);
+    assert.deepEqual(sessions.messages(sessionId), before, "failed compaction retains the original transcript");
   } finally { store.close(); }
 }));
 
