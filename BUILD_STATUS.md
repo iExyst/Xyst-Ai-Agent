@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Resume checkpoint · direct live API access reverified (2026-10-26)
+
+- The installed Xyst global setting reports `network.enabled=true`; no global access-profile override is configured. A fresh isolated agent session using the already-loaded `qwen3-0.6b` called Xyst `web_fetch` on Open-Meteo: HTTP 200 JSON, untruncated, exact source URL persisted, and `retrieved_at=2026-10-26T07:39:00.243Z`. The API observation was `2026-10-26T03:30` America/New_York, 43.8 °F, 74% humidity, WMO code 0. Session `a55bf826-6eb5-43a6-b833-bb233657077a`; persisted `task_complete` verified the fetch.
+- This confirms public live HTTP/JSON data is available without a search API key. Brave web search still requires its vault token; authenticated/private APIs use configured integrations or MCP. Live current/changing facts are prompted to use sources and expose source/retrieval time. Scheduled polling and GitHub webhooks are available; Xyst does not claim a universal always-on feed.
+- The model's final prose omitted the exact source, retrieval time, observation time, and weather code even though persisted fetch evidence contained them. The API access passed; answer-quality reliability remains an open acceptance item. Verification used an isolated APPDATA profile because the normal Windows Xyst database is malformed; that existing database remains untouched.
+
 ## Resume checkpoint · clearer tool-path and completion evidence prompts (2026-10-26)
 
 - Agent prompts now say file-tool paths are relative to the current workspace and must not repeat the workspace directory. Completion guidance explains that an evidence index should be repeated for each criterion supported by the same result.
