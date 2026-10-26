@@ -473,6 +473,30 @@ export class ModelAcquisitionService {
       state = String(current.status ?? row.state);
       details = { ...details, ...current };
     }
+    if (["uncertain", "importing"].includes(state)
+      && typeof details.artifact === "string"
+      && typeof details.artifactSetIdentity === "string"
+      && typeof details.sha256 === "string" && /^[a-f0-9]{64}$/i.test(details.sha256)) {
+      try {
+        const models = await this.deps.lmStudio.models(signal);
+        const match = findDownloadedModel(models, row.repository);
+        if (match.status === "verified" && match.model) {
+          state = "completed";
+          details = {
+            ...details,
+            state,
+            verifiedSha256: details.sha256,
+            recoveredAfterImport: true,
+            importedModelKey: match.model.key,
+            inventoryVerification: { status: "verified", modelKey: match.model.key, checkedAt: new Date().toISOString() }
+          };
+        } else if (match.status === "ambiguous") {
+          details.inventoryVerification = { status: "ambiguous", checkedAt: new Date().toISOString() };
+        }
+      } catch (error) {
+        details.inventoryVerification = { status: "unavailable", error: error instanceof Error ? error.message : String(error), checkedAt: new Date().toISOString() };
+      }
+    }
     if (["completed", "already_downloaded"].includes(state) && !details.inventoryVerification) {
       try {
         const models = await this.deps.lmStudio.models(signal);
@@ -484,7 +508,7 @@ export class ModelAcquisitionService {
     }
     this.deps.store.db.prepare("UPDATE model_downloads SET state=?,details_json=?,updated_at=? WHERE id=?").run(state, JSON.stringify(details), new Date().toISOString(), row.id);
     const inventoryVerification = details.inventoryVerification as { status?: string } | undefined;
-    return { ...row, state, details, ...(inventoryVerification ? { inventoryVerified: inventoryVerification.status === "verified" } : {}) };
+    return { ...row, state, details_json: JSON.stringify(details), details, ...(inventoryVerification ? { inventoryVerified: inventoryVerification.status === "verified" } : {}) };
   }
   async verify(id: string, signal?: AbortSignal, requirements: { visionRequired?: boolean } = {}) {
     const row = this.deps.store.db.prepare("SELECT * FROM model_downloads WHERE id=? OR lm_job_id=?").get(id, id) as { id: string; repository: string; revision: string; quantization: string | null; state: string; total_size_bytes: number | null; details_json: string } | undefined;

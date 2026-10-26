@@ -634,7 +634,19 @@ export class AgentRunner {
             catch (error) { throw new Error(`Completion evidence ${evidenceId}: ${error instanceof Error ? error.message : String(error)}`); }
           }
           const inferredTool = [...inferredToolEvidence].find(([, requiredCriterion]) => requiredCriterion === criterion)?.[0];
-          if (inferredTool && evidence.name !== inferredTool) throw new Error(`Completion evidence for explicitly requested tool ${inferredTool} must come from ${inferredTool}, not ${evidence.name}`);
+          if (inferredTool && evidence.name !== inferredTool) {
+            const matchingIndexes = currentEvidence.flatMap((candidate, candidateIndex) => {
+              if (candidate.name !== inferredTool) return [];
+              try {
+                const output = asRecord(JSON.parse(candidate.output_json ?? "null") as unknown);
+                return typeof output.error === "string" || output.success === false ? [] : [candidateIndex + 1];
+              } catch { return []; }
+            });
+            const correction = matchingIndexes.length
+              ? ` Use successful ${inferredTool} evidence index${matchingIndexes.length === 1 ? "" : "es"} ${matchingIndexes.join(", ")} for this criterion.`
+              : ` No successful ${inferredTool} evidence is available; run the requested tool first.`;
+            throw new Error(`Completion evidence for explicitly requested tool ${inferredTool} must come from ${inferredTool}, not ${evidence.name}.${correction}`);
+          }
           const requestedUrl = [...requestedUrlCriteria].find(([, requiredCriterion]) => requiredCriterion === criterion)?.[0];
           if (requestedUrl) {
             let evidenceInput: unknown;

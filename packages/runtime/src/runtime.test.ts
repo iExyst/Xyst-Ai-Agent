@@ -2491,6 +2491,31 @@ test("recommended model acquisition pins and hashes the artifact before importin
   } finally { store.close(); }
 }));
 
+test("model acquisition status reconciles an uncertain import only after a unique inventory match", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "recovered-import.sqlite")); const config = new ConfigStore(store);
+  const repository = "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF";
+  const details = { artifact: "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf", artifactSetIdentity: "a".repeat(64), sha256: "b".repeat(64), state: "uncertain" };
+  store.db.prepare("INSERT INTO model_downloads(id,repository,revision,quantization,state,total_size_bytes,details_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+    .run("uncertain-import", repository, "c".repeat(40), "Q4_K_M", "uncertain", 1024, JSON.stringify(details), new Date(0).toISOString(), new Date(0).toISOString());
+  let inventory = [
+    { key: "qwen/qwen2.5-coder-1.5b-instruct_gguf" },
+    { key: "qwen/qwen2.5-coder-1.5b-instruct.gguf" }
+  ];
+  const service = new ModelAcquisitionService({ store, config, huggingFace: {} as never, lmStudio: { models: async () => inventory } as never });
+  try {
+    const ambiguous = await service.status("uncertain-import");
+    assert.equal(ambiguous.state, "uncertain", "ambiguous aliases must not claim a successful import");
+    assert.equal((ambiguous.details as Record<string, any>).inventoryVerification.status, "ambiguous");
+    inventory = [{ key: "qwen/qwen2.5-coder-1.5b-instruct" }];
+    const recovered = await service.status("uncertain-import");
+    assert.equal(recovered.state, "completed");
+    assert.equal((recovered.details as Record<string, any>).recoveredAfterImport, true);
+    assert.equal((recovered.details as Record<string, any>).verifiedSha256, details.sha256);
+    assert.equal((recovered.details as Record<string, any>).importedModelKey, "qwen/qwen2.5-coder-1.5b-instruct");
+    assert.equal(JSON.parse(recovered.details_json).state, "completed");
+  } finally { store.close(); }
+}));
+
 test("recommended multi-file GGUF acquisition verifies every file and installs a bundle without single-file import", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "bundle-model.sqlite")); const config = new ConfigStore(store);
   const payloads = new Map([
