@@ -223,12 +223,26 @@ test("local model performance aggregates and informs automatic selection without
 test("automatic selection deprioritizes a model with observed zero task completions when an eligible model is unmeasured", () => {
   const models = [
     { type: "llm" as const, publisher: "test", key: "observed-failures", display_name: "Observed Failures", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
-    { type: "llm" as const, publisher: "test", key: "unmeasured", display_name: "Unmeasured", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
+    { type: "llm" as const, publisher: "test", key: "unmeasured", display_name: "Unmeasured", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: {} }
   ];
   const performance = { "observed-failures": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 2000, tokensPerSecond: 20, taskSamples: 2, taskSuccesses: 0, taskSuccessRate: 0 } };
   const choice = chooseAgentModel(models, { performanceByModel: performance });
   assert.equal(choice.model.key, "unmeasured");
   assert.match(choice.reason, /local task completion reliability is unmeasured/);
+});
+
+test("automatic selection prioritizes a verified task success over an unmeasured tool-use declaration", () => {
+  const models = [
+    { type: "llm" as const, publisher: "test", key: "unmeasured-tool-tag", display_name: "Tagged but unmeasured", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
+    { type: "llm" as const, publisher: "test", key: "verified-tools", display_name: "Verified tools", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: {} }
+  ];
+  const performance = {
+    "verified-tools": { samples: 2, successes: 2, successRate: 1, medianLatencyMs: 3000, tokensPerSecond: 15, taskSamples: 1, taskSuccesses: 1, taskSuccessRate: 1 }
+  };
+  const choice = chooseAgentModel(models, { performanceByModel: performance });
+  assert.equal(choice.model.key, "verified-tools");
+  assert.match(choice.reason, /selected model lacks a tool-use declaration/);
+  assert.match(choice.reason, /observed locally over 1 tasks: 1\/1 verified completions/);
 });
 
 test("mission scheduler explores an unmeasured RAM-fitting model after every GPU-fit model has zero verified task outcomes", () => {

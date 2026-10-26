@@ -56,7 +56,10 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
   if (!contextSatisfied && requirements.requireDeclaredContext) throw new Error(`No installed model declares enough context for the estimated ${requirements.requiredContextTokens} token requirement`);
   const contextPool = contextSatisfied ? contextEligible : candidates;
   const toolCapable = contextPool.filter((model) => model.capabilities?.trained_for_tool_use === true);
-  const suitable = toolCapable.length ? toolCapable : contextPool;
+  // Treat LM Studio's tool-use flag as a ranking hint, not a hard filter. The
+  // metadata is absent for some models that can still call tools, and local
+  // task outcomes are stronger evidence than a missing capability declaration.
+  const suitable = contextPool;
   const memoryBudget = Math.max(1_500_000_000, Math.min(freemem() * 0.4, totalmem() * 0.25, 8_000_000_000));
   const fitting = suitable.filter((model) => model.size_bytes <= memoryBudget);
   const pool = (fitting.length ? fitting : suitable).slice();
@@ -69,9 +72,10 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
     // it is smaller when an eligible model has no local task evidence yet. Keep
     // unknown reliability distinct from measured reliability; don't invent a
     // publisher score for candidates without samples.
-    if (aTaskRate === 0 && bTaskRate === null) return 1;
-    if (bTaskRate === 0 && aTaskRate === null) return -1;
+    if (aTaskRate !== null && bTaskRate === null) return aTaskRate > 0 ? -1 : 1;
+    if (bTaskRate !== null && aTaskRate === null) return bTaskRate > 0 ? 1 : -1;
     if (aTaskRate !== null && bTaskRate !== null && aTaskRate !== bTaskRate) return bTaskRate - aTaskRate;
+    if ((a.capabilities?.trained_for_tool_use === true) !== (b.capabilities?.trained_for_tool_use === true)) return Number(b.capabilities?.trained_for_tool_use === true) - Number(a.capabilities?.trained_for_tool_use === true);
     if (aMeasured && bMeasured && aMeasured.samples >= 3 && bMeasured.samples >= 3) {
       if (aMeasured.successRate !== bMeasured.successRate) return bMeasured.successRate - aMeasured.successRate;
       if (aMeasured.tokensPerSecond !== null && bMeasured.tokensPerSecond !== null && aMeasured.tokensPerSecond !== bMeasured.tokensPerSecond) return bMeasured.tokensPerSecond - aMeasured.tokensPerSecond;
@@ -85,7 +89,7 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
   const model = pool[0]!;
   const reasons = [
     ...(requirements.vision ? ["declares vision support for the attached image"] : []),
-    ...(toolCapable.length ? ["declares tool-use support"] : ["no installed model declares tool-use support"]),
+    ...(model.capabilities?.trained_for_tool_use === true ? ["declares tool-use support"] : [toolCapable.length ? "selected model lacks a tool-use declaration; metadata is treated as a ranking hint" : "no installed model declares tool-use support"]),
     model.loaded_instances.length ? "already loaded" : "available in the local inventory",
     model.size_bytes <= memoryBudget ? `model file size ${model.size_bytes} bytes is within the approximate ${memoryBudget} byte memory budget` : `smallest suitable model exceeds the approximate ${memoryBudget} byte memory budget`,
     ...(typeof requirements.requiredContextTokens === "number" ? [contextSatisfied ? `estimated task context ${requirements.requiredContextTokens} tokens; ${effectiveContextLength(model) === undefined ? "selected model context is undeclared" : `selected model supports ${effectiveContextLength(model)} tokens`}` : `no candidate declares enough context for the estimated ${requirements.requiredContextTokens} token requirement; selected the best available model (${effectiveContextLength(model) ?? "context unknown"} tokens)`] : [(model.max_context_length ?? 0) > 0 ? `declares up to ${model.max_context_length} context tokens` : "context length not declared"]),
