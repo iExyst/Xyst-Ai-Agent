@@ -1,4 +1,10 @@
-# Xyst resume checkpoint · 2026-10-25 (refreshed)
+# Xyst resume checkpoint · 2026-10-26 (refreshed)
+
+## Current-source package live-data mission acceptance
+
+- The current-source Windows package completed a two-task mission through the shared runtime using the loaded LM Studio Qwen 3.5 9B model. It fetched GitHub REST API JSON live (HTTP 200, timestamped), saved and re-read `source.json`, then generated and re-read a dependent `report.md`; both tasks and the mission were verified complete. Details: [verification history](docs/verification-history.md#current-source-packaged-multi-step-live-api-mission-2026-10-26).
+- All eight hosted CI checks passed on PR head `4ff8681`: Windows and Ubuntu verification and Windows and Linux packaging in both push and pull-request workflows. PR #1 remains open.
+- The full build goal remains active. Remaining acceptance includes bare-metal Linux live-model mission execution, physical Linux desktop, clean Windows install/profile recovery, signing and update-feed trust, authenticated integrations, and broader model/resource and mission-recovery coverage.
 
 ## Continuation · resume criteria and live API access (2026-10-26)
 
