@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Latest continuation · GPU-aware selection consistency (2026-10-26)
+
+- Fixed automatic GPU-aware model selection so LM Studio's `trained_for_tool_use` declaration remains a ranking hint instead of becoming a hard filter for alternate models. Candidate filtering preserves vision requirements and the best loaded or declared context for the current task.
+- Added a regression with live resource-estimate fixtures: a model with verified task outcomes and no tool-use declaration now remains eligible and wins when it fits free VRAM; an unsuitable higher-ranked model is skipped.
+- Verification on this PR worktree: `npm run typecheck` passed; `npm test --workspace @xyst/runtime` passed with 143 tests, 2 host-dependent skips, and 0 failures; `git diff --check` passed. Hosted cross-platform tests and Windows/Linux packages will run on the updated PR head.
+- PR #1 remains a draft. The full specification remains active; remaining acceptance includes physical bare-metal Linux/service behavior, trusted production update signing and feed, native Linux keyring unlock prompts, an optional Brave Search credential, and broader model/task coverage.
+
 ## Latest checkpoint · LM Studio context instances (2026-10-26)
 
 - Agent runs can select a currently loaded LM Studio instance ID, choose the smallest loaded instance with enough applied context, or load a separate larger-context instance while preserving existing ones. The inference request uses the selected instance ID while session/model-decision records retain the canonical model key. Context is rechecked as the conversation grows, and LM Studio's load response/inventory are read back before generation.

@@ -298,6 +298,38 @@ test("automatic local model selection prefers LM Studio GPU estimates that fit c
   } finally { store.close(); }
 }));
 
+test("GPU-aware automatic selection keeps measured tool-capability-unknown models eligible", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "gpu-selection-tool-hint.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.autoSelect", true);
+  const insert = store.db.prepare("INSERT INTO usage(id,session_id,provider,model,input_tokens,output_tokens,duration_ms,details_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
+  for (const [model, outcomes] of [["preferred-over-vram", ["verified_success", "verified_success"]], ["unlabeled-fit", ["verified_success", "failed"]]] as const) {
+    outcomes.forEach((taskOutcome, index) => insert.run(randomUUID(), `${model}-${index}`, "lm-studio", model, 10, 10, 1000, JSON.stringify({ outcome: "success", task_outcome: taskOutcome }), new Date().toISOString()));
+  }
+  const models = [
+    { type: "llm" as const, publisher: "test", key: "preferred-over-vram", display_name: "Preferred", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: {} },
+    { type: "llm" as const, publisher: "test", key: "unlabeled-fit", display_name: "Measured fallback", size_bytes: 450_000_000, loaded_instances: [], max_context_length: 8192, capabilities: {} },
+    { type: "llm" as const, publisher: "test", key: "tool-tagged-fit", display_name: "Tool-tagged fallback", size_bytes: 400_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
+  ];
+  let loaded = "";
+  const inventory = () => models.map((model) => ({ ...model, loaded_instances: loaded === model.key ? [{ id: model.key, config: { context_length: 8192 } }] : [] }));
+  const provider = {
+    isLocalServer: () => true,
+    supportsLocalCliModelLifecycle: () => true,
+    models: async () => inventory(),
+    estimateLoad: async (model: string) => ({ output: `Estimated GPU Memory: ${model === "preferred-over-vram" ? 8 : model === "unlabeled-fit" ? 2 : 3} GiB` }),
+    load: async (model: string) => { loaded = model; return { status: "loaded" }; },
+    redact: (text: string) => text,
+    streamChatWithTools: async () => ({ choices: [{ message: { role: "assistant", content: "done" } }], usage: { prompt_tokens: 10, completion_tokens: 1 } })
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never, resourceStatsReader: async () => ({ source: "Xyst host", checkedAt: new Date().toISOString(), systemMemory: { totalBytes: 16 * 1024 ** 3, usedBytes: 8 * 1024 ** 3, availableBytes: 8 * 1024 ** 3, usedPercent: 50 }, nvidiaGpuMemory: { status: "available", source: "nvidia-smi", devices: [{ name: "GPU", totalBytes: 16 * 1024 ** 3, usedBytes: 12 * 1024 ** 3, freeBytes: 4 * 1024 ** 3 }] } }) });
+  try {
+    const result = await agent.run("Do a small task", { workspace: root });
+    assert.equal(result.model, "unlabeled-fit", "a model without a tool-use declaration can still win on measured task success when it fits VRAM");
+    assert.match(result.selectionReason, /estimates 2 GiB GPU memory.*4 GiB NVIDIA VRAM is currently free/);
+    assert.equal(loaded, "unlabeled-fit");
+  } finally { store.close(); }
+}));
+
 test("automatic model selection filters declared context limits using a bounded task estimate", () => {
   assert.equal(modelLoadContextLength(32_768, 6144), 8192, "local model loads reserve bounded room for additional tool results");
   assert.equal(modelLoadContextLength(8192, 6144), 8192, "headroom is capped at the model's declared maximum");

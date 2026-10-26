@@ -253,11 +253,12 @@ export class AgentRunner {
               : undefined;
             if (availableGpuBytes === undefined) gpuResourceReason = "NVIDIA free VRAM telemetry is unavailable; used the regular model selection criteria";
             if (availableGpuBytes !== undefined) {
-              const toolModels = inventory.some((candidate) => candidate.type === "llm" && candidate.capabilities?.trained_for_tool_use === true);
-              const eligible = inventory.filter((candidate) => candidate.type === "llm"
-                && (!visionRequired || candidate.capabilities?.vision === true)
-                && (!toolModels || candidate.capabilities?.trained_for_tool_use === true)
-                && (!(typeof candidate.max_context_length === "number") || candidate.max_context_length >= requiredContextTokens));
+              const eligible = inventory.filter((candidate) => {
+                if (candidate.type !== "llm" || (visionRequired && candidate.capabilities?.vision !== true)) return false;
+                const loadedContexts = candidate.loaded_instances.map((instance) => instanceContextLength(instance, candidate.max_context_length)).filter((value): value is number => typeof value === "number");
+                const availableContext = loadedContexts.length ? Math.max(...loadedContexts) : candidate.max_context_length ?? undefined;
+                return availableContext === undefined ? !requirements.requireDeclaredContext : availableContext >= requiredContextTokens;
+              });
               const alternatives = [...eligible].sort((left, right) => Number(right.loaded_instances.length > 0) - Number(left.loaded_instances.length > 0) || left.size_bytes - right.size_bytes);
               const estimateCandidates = [choice.model, ...alternatives].filter((candidate, index, all) => all.findIndex((entry) => entry.key === candidate.key) === index).slice(0, 3);
               const estimates = new Map<string, number>();
