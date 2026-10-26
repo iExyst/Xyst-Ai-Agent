@@ -764,12 +764,13 @@ test("agent completion requires successful persisted tool evidence", async () =>
 test("completion evidence does not require a tool the objective explicitly prohibits", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "negated-tool-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
-  const originalFetch = globalThis.fetch; const url = "https://8.8.8.8/api/live"; let turn = 0;
+  const originalFetch = globalThis.fetch; const url = "https://8.8.8.8/api/live"; let turn = 0; let systemPrompt = "";
   globalThis.fetch = async () => new Response(JSON.stringify({ status: "live" }), { status: 200, headers: { "content-type": "application/json" } });
   const provider = {
     redact: (value: string) => value,
-    streamChatWithTools: async () => {
+    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
       turn++;
+      systemPrompt ||= String(request.messages.find((message) => message.role === "system")?.content ?? "");
       if (turn === 1) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "required-live-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } }] } }] };
       return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "complete-live-fetch", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
     }
@@ -779,6 +780,7 @@ test("completion evidence does not require a tool the objective explicitly prohi
       .run(`Use web_fetch to retrieve exactly ${url}; do not use web_search.`, { workspace: root, maxTurns: 2 });
     assert.equal(result.status, "completed");
     assert.equal(turn, 2);
+    assert.match(systemPrompt, /complete URL or API endpoint, call web_fetch directly with that exact URL/);
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
