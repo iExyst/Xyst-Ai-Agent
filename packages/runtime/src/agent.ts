@@ -516,6 +516,12 @@ export class AgentRunner {
     };
     const refreshEvidenceRequirements = (criteria: string[]) => {
       for (const [tool, criterion] of inferExplicitToolEvidence(criteria, Object.keys(tools))) { inferredToolEvidence.set(tool, criterion); addCompletionCriterion(criterion); }
+      const directUrlFetchRequested = criteria.some((criterion) => /\b(?:fetch|retrieve|request|query)\b/i.test(criterion) && inferRequestedUrls([criterion]).length > 0);
+      const directUrlFetchProhibited = criteria.some((criterion) => /\b(?:do\s+not|don't|dont|never|avoid)\s+(?:fetch|retrieve|request|query)\b/i.test(criterion) || /\b(?:do\s+not|don't|dont|never|avoid)\s+(?:use|call|invoke)\s+(?:the\s+)?(?:web_fetch|`web_fetch`)\b/i.test(criterion));
+      if (directUrlFetchRequested && !directUrlFetchProhibited && !inferredToolEvidence.has("web_fetch") && Object.hasOwn(tools, "web_fetch")) {
+        inferredToolEvidence.set("web_fetch", "Required evidence from direct retrieval of the user-supplied URL");
+        addCompletionCriterion("Required evidence from direct retrieval of the user-supplied URL");
+      }
       if (inferredToolEvidence.has("web_fetch")) {
         for (const url of inferRequestedUrls(criteria)) {
           const criterion = `Required live fetch from requested URL: ${url}`;

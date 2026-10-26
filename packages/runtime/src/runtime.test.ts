@@ -777,10 +777,12 @@ test("completion evidence does not require a tool the objective explicitly prohi
   };
   try {
     const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
-      .run(`Use web_fetch to retrieve exactly ${url}; do not use web_search.`, { workspace: root, maxTurns: 2 });
+      .run(`Fetch live API data from exactly ${url}; do not use web_search.`, { workspace: root, maxTurns: 2 });
     assert.equal(result.status, "completed");
     assert.equal(turn, 2);
     assert.match(systemPrompt, /complete URL or API endpoint, call web_fetch directly with that exact URL/);
+    assert.match(systemPrompt, /Required evidence from direct retrieval of the user-supplied URL/);
+    assert.match(systemPrompt, new RegExp(`Required live fetch from requested URL: ${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
