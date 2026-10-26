@@ -6,7 +6,7 @@ import { runProcess, type ProcessResult } from "@xyst/runtime";
 export const MISSION_SERVICE_NAME = "xyst-mission-daemon";
 export const WINDOWS_TASK_NAME = "Xyst Mission Daemon";
 
-export interface MissionServiceSpec { executable: string; cliEntry: string; workingDirectory: string }
+export interface MissionServiceSpec { executable: string; cliEntry: string; workingDirectory: string; daemonArguments?: string[] }
 export type ServiceCommand = (command: string, args: string[]) => Promise<ProcessResult>;
 const defaultCommand: ServiceCommand = (command, args) => runProcess(command, args, { timeoutMs: 30_000, maxOutputChars: 4000 });
 
@@ -20,18 +20,29 @@ function systemdEnvironment(name: string, value: string): string {
 
 function powershellQuote(value: string): string { return `'${value.replaceAll("'", "''")}'`; }
 
+function windowsCommandLineQuote(value: string): string {
+  let output = '"'; let slashes = 0;
+  for (const character of value) {
+    if (character === "\\") { slashes++; continue; }
+    if (character === '"') { output += "\\".repeat(slashes * 2 + 1) + '"'; slashes = 0; continue; }
+    output += "\\".repeat(slashes) + character; slashes = 0;
+  }
+  return output + "\\".repeat(slashes * 2) + '"';
+}
+
 function encodedPowerShell(script: string): string[] { return ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")]; }
 
 export function renderSystemdMissionUnit(spec: MissionServiceSpec): string {
   const workingDirectory = spec.workingDirectory.startsWith("/") ? spec.workingDirectory : resolve(spec.workingDirectory);
-  return `[Unit]\nDescription=Xyst persistent mission scheduler\nAfter=default.target\n\n[Service]\nType=simple\nWorkingDirectory=~\n${`Environment=${systemdEnvironment("XYST_ROOT", workingDirectory)}\n`}ExecStart=${unitQuote(spec.executable)} ${unitQuote(spec.cliEntry)} mission daemon\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=infinity\n\n[Install]\nWantedBy=default.target\n`;
+  const command = [spec.executable, spec.cliEntry, "mission", "daemon", ...(spec.daemonArguments ?? [])].map(unitQuote).join(" ");
+  return `[Unit]\nDescription=Xyst persistent mission scheduler\nAfter=default.target\n\n[Service]\nType=simple\nWorkingDirectory=~\n${`Environment=${systemdEnvironment("XYST_ROOT", workingDirectory)}\n`}ExecStart=${command}\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=infinity\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 export function renderWindowsMissionTaskScript(spec: MissionServiceSpec, operation: "install" | "uninstall" | "status"): string {
   const name = powershellQuote(WINDOWS_TASK_NAME);
   if (operation === "uninstall") return `$ErrorActionPreference = 'Stop'\n$task = Get-ScheduledTask -TaskName ${name} -ErrorAction SilentlyContinue\nif ($null -ne $task) { Stop-ScheduledTask -TaskName ${name} -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName ${name} -Confirm:$false }\n`;
   if (operation === "status") return `$ErrorActionPreference = 'Stop'\n$task = Get-ScheduledTask -TaskName ${name} -ErrorAction SilentlyContinue\nif ($null -eq $task) { @{ installed = $false } | ConvertTo-Json -Compress; exit 0 }\n$info = Get-ScheduledTaskInfo -TaskName ${name}\n@{ installed = $true; state = [string]$task.State; lastRunTime = $info.LastRunTime.ToString('o'); lastTaskResult = $info.LastTaskResult } | ConvertTo-Json -Compress\n`;
-  const argumentsText = `"${spec.cliEntry.replaceAll('"', '\\"')}" mission daemon`;
+  const argumentsText = [spec.cliEntry, "mission", "daemon", ...(spec.daemonArguments ?? [])].map(windowsCommandLineQuote).join(" ");
   return `$ErrorActionPreference = 'Stop'\n$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name\n$action = New-ScheduledTaskAction -Execute ${powershellQuote(spec.executable)} -Argument ${powershellQuote(argumentsText)} -WorkingDirectory ${powershellQuote(resolve(spec.workingDirectory))}\n$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user\n$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited\n$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)\nRegister-ScheduledTask -TaskName ${name} -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Xyst durable mission scheduler' -Force | Out-Null\nStart-ScheduledTask -TaskName ${name}\n`;
 }
 

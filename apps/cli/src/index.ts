@@ -13,9 +13,11 @@ import { authenticateMcpOAuth, createMcpTools, createRuntime, createText, delete
 import { parseLoadOptions } from "./load-options.js";
 import { parseChatOptions } from "./chat-options.js";
 import { parseResponsesRequest } from "./responses-options.js";
-import { installMissionService, missionServiceStatus, uninstallMissionService } from "./mission-service.js";
+import { installMissionService, missionServiceStatus, uninstallMissionService, type MissionServiceSpec } from "./mission-service.js";
 import { getMissionTemplate, MISSION_TEMPLATES } from "./mission-templates.js";
 import { createAgentUserMessage } from "./attachments.js";
+import { closeWebhookServer, parseGitHubWebhookOptions, startGitHubWebhookServer } from "./webhook-server.js";
+import type { Server } from "node:http";
 
 const args = process.argv.slice(2);
 const separatorIndex = args.indexOf("--");
@@ -242,7 +244,8 @@ Usage: xyst [--json] <command>
   mission task pause|resume|retry <mission-id> <task-id>
   mission worktree remove <id> <run-id> <task-id> [--force]
   mission reconcile <mission-id> <run-id> <task-id> <tool-call-id> completed|retry
-  mission run|pause|cancel|resume|archive <id> | daemon | service install|uninstall|status
+  mission run|pause|cancel|resume|archive <id> | daemon [--webhook] [--webhook-host HOST] [--webhook-port PORT] [--webhook-path PATH]
+  mission service install [--webhook] [--webhook-host HOST] [--webhook-port PORT] [--webhook-path PATH] | uninstall|status
   git status|diff|log|branches
   git branch <name> | add <path...> | commit -m <message> -- <path...>
   git clone <https-or-ssh-or-file-url> <destination> | fetch [remote] [branch] | push [remote] [branch]
@@ -824,16 +827,34 @@ try {
       else if (subcommand === "archive") { runtime.missions.archive(id); output({ missionId: id, status: "archived" }); }
       else output(await runtime.missions.resume(id, controller.signal, approveExternalAction));
     } else if (subcommand === "daemon") {
-      await runtime.missions.startScheduler();
+      let webhookServer: Server | undefined;
+      const webhookOptions = parseGitHubWebhookOptions(rest);
+      if (webhookOptions) {
+        runtime.access.assertCapability("network");
+        runtime.access.assertCapability("integrations");
+        await runtime.missions.startScheduler();
+        try { webhookServer = await startGitHubWebhookServer(runtime.githubWebhookHandler, webhookOptions); }
+        catch (error) { await runtime.missions.shutdownScheduler(); throw error; }
+        const listening = webhookServer.address();
+        const endpoint = listening && typeof listening !== "string" ? `${listening.address}:${listening.port}` : "configured address";
+        if (!json) process.stdout.write(`GitHub webhook receiver listening on ${endpoint}${webhookOptions.path}\n`);
+      }
+      if (!webhookServer) await runtime.missions.startScheduler();
       if (!json) process.stdout.write("Mission scheduler running. Press Ctrl+C to stop.\n");
       while (!controller.signal.aborted) await new Promise((resolve) => setTimeout(resolve, 250));
+      if (webhookServer) await closeWebhookServer(webhookServer);
       await runtime.missions.shutdownScheduler(); output({ scheduler: "stopped", drained: true });
     } else if (subcommand === "service") {
       const operation = rest[0];
-      const spec = { executable: process.execPath, cliEntry: fileURLToPath(import.meta.url), workingDirectory: resolve(process.env.XYST_ROOT ?? process.cwd()) };
+      const spec: MissionServiceSpec = { executable: process.execPath, cliEntry: fileURLToPath(import.meta.url), workingDirectory: resolve(process.env.XYST_ROOT ?? process.cwd()) };
       if (operation === "install") {
         runtime.access.assertCapability("backgroundJobs");
         runtime.access.assertExecutable(process.platform === "win32" ? "powershell.exe" : "systemctl");
+        const webhookOptions = parseGitHubWebhookOptions(rest.slice(1));
+        if (webhookOptions) {
+          runtime.access.assertCapability("network"); runtime.access.assertCapability("integrations");
+          spec.daemonArguments = ["--webhook", "--webhook-host", webhookOptions.host, "--webhook-port", String(webhookOptions.port), "--webhook-path", webhookOptions.path];
+        }
         output(await installMissionService(process.platform, spec));
       } else if (operation === "uninstall") {
         runtime.access.assertCapability("backgroundJobs");

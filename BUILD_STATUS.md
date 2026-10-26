@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Latest continuation · persistent GitHub webhook receiver on PR branch (2026-10-26)
+
+- Ported the opt-in built-in GitHub webhook listener and persistent service configuration into the attached PR branch `codex/resume-completion`. It binds loopback by default, validates custom routes, requires network/integration access, and persists listener arguments in systemd and Task Scheduler service definitions.
+- PR-branch CLI tests passed 18/18; CLI typecheck and compiled build passed. The built CLI's isolated loopback smoke returned 404 for an unconfigured path and the expected 503 when the webhook secret was absent, then drained cleanly on Ctrl+C. No external webhook was sent.
+- Full build remains active. Bare-metal Linux, production signing/hosting, an empty-model automatic-acquisition run, target-specific auth, and a configured LM Studio plugin remain unverified.
+
 ## Latest continuation · live API acceptance and agent reasoning control (2026-10-26)
 
 - Closed the agent-loop gap in `inference.reasoning`: scoped `off`, `low`, `medium`, `high`, and `on` now reach LM Studio's documented OpenAI-compatible `reasoning_effort` field (`off` → `none`, `on` → `medium`). Updated configuration/support docs and added scoped-resolution plus HTTP request-body regressions.
