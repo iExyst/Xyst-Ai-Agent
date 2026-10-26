@@ -1,5 +1,10 @@
 # Xyst verification history
 
+## Linux mission service preserves a configured data home (2026-10-26)
+
+- `mission service install` now passes the configured Linux `XDG_DATA_HOME` into its generated `systemd --user` unit, so a daemon started by systemd opens the same Xyst profile as the CLI and desktop. The systemd formatter normalizes data-home paths with POSIX semantics, including when deterministic tests run on Windows.
+- Added regression checks for a data path containing spaces and for installation writing the configured environment into the unit. Focused service tests passed (2/2); full Windows `npm test` passed (153 runtime passes, 2 host-dependent skips, 21 CLI passes), and `npm run typecheck` passed all workspaces. Exact current-CI Linux AppImage service lifecycle verification remains pending.
+
 ## Resumed LM Studio live API task (2026-10-26)
 
 - In a temporary isolated APPDATA/workspace profile, Xyst diagnosed the configured LM Studio endpoint `http://127.0.0.1:1235` successfully and reported 51 available models. The exact current-source CLI used `qwen3-0.6b` to fetch this complete public API URL through `web_fetch`: `https://api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.0060&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FNew_York`.

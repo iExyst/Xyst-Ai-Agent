@@ -884,7 +884,7 @@ try {
       await runtime.missions.shutdownScheduler(); output({ scheduler: "stopped", drained: true });
     } else if (subcommand === "service") {
       const operation = rest[0];
-      const spec: MissionServiceSpec = { executable: process.execPath, cliEntry: fileURLToPath(import.meta.url), workingDirectory: resolve(process.env.XYST_ROOT ?? process.cwd()) };
+      const spec: MissionServiceSpec = { executable: process.execPath, cliEntry: fileURLToPath(import.meta.url), workingDirectory: resolve(process.env.XYST_ROOT ?? process.cwd()), ...(process.platform === "linux" && process.env.XDG_DATA_HOME ? { dataHome: resolve(process.env.XDG_DATA_HOME) } : {}) };
       if (operation === "install") {
         runtime.access.assertCapability("backgroundJobs");
         runtime.access.assertExecutable(process.platform === "win32" ? "powershell.exe" : "systemctl");

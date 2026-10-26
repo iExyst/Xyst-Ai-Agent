@@ -109,10 +109,11 @@ test("LM Studio load options reject invalid values and unknown flags", () => {
 test("mission service definitions preserve executable paths and restart policy", () => {
   const spec = { executable: "C:\\Program Files\\Xyst\\node.exe", cliEntry: "C:\\Program Files\\Xyst\\cli.js", workingDirectory: "C:\\Users\\Operator\\Project" };
   const daemonArguments = ["--webhook", "--webhook-host", "127.0.0.1", "--webhook-port", "8787", "--webhook-path", "/github/webhook"];
-  const unit = renderSystemdMissionUnit({ ...spec, executable: "/opt/Xyst Runtime/node", cliEntry: "/opt/Xyst App/cli.js", workingDirectory: "/home/operator/Xyst Project", daemonArguments });
+  const unit = renderSystemdMissionUnit({ ...spec, executable: "/opt/Xyst Runtime/node", cliEntry: "/opt/Xyst App/cli.js", workingDirectory: "/home/operator/Xyst Project", dataHome: "/home/operator/Xyst Data", daemonArguments });
   assert.match(unit, /ExecStart="\/opt\/Xyst Runtime\/node" "\/opt\/Xyst App\/cli\.js" "mission" "daemon" "--webhook" "--webhook-host" "127\.0\.0\.1" "--webhook-port" "8787" "--webhook-path" "\/github\/webhook"/);
   assert.match(unit, /WorkingDirectory=~/);
   assert.match(unit, /Environment="XYST_ROOT=\/home\/operator\/Xyst Project"/);
+  assert.match(unit, /Environment="XDG_DATA_HOME=\/home\/operator\/Xyst Data"/);
   assert.match(unit, /Restart=on-failure/);
   assert.match(unit, /TimeoutStopSec=infinity/);
   const windows = renderWindowsMissionTaskScript({ ...spec, daemonArguments }, "install");
@@ -133,11 +134,12 @@ test("Linux mission service install, status, and removal manage only the request
     return { code: 0, signal: null, stdout: args.includes("show") ? "LoadState=loaded\nActiveState=active\nSubState=running\n" : "", stderr: "", durationMs: 1 };
   };
   try {
-    const spec = { executable: "/usr/bin/node", cliEntry: "/opt/xyst/cli.js", workingDirectory: "/home/operator/project", daemonArguments: ["--webhook", "--webhook-host", "127.0.0.1", "--webhook-port", "8787", "--webhook-path", "/github/webhook"] };
+    const spec = { executable: "/usr/bin/node", cliEntry: "/opt/xyst/cli.js", workingDirectory: "/home/operator/project", dataHome: "/home/operator/.local/share", daemonArguments: ["--webhook", "--webhook-host", "127.0.0.1", "--webhook-port", "8787", "--webhook-path", "/github/webhook"] };
     const installed = await installMissionService("linux", spec, run, env);
     const path = systemdMissionUnitPath(env);
     assert.equal(installed.installed, true);
     assert.match(await readFile(path, "utf8"), /ExecStart=.*"mission" "daemon" "--webhook".*"--webhook-port" "8787"/);
+    assert.match(await readFile(path, "utf8"), /Environment="XDG_DATA_HOME=\/home\/operator\/\.local\/share"/);
     const status = await missionServiceStatus("linux", run, env);
     assert.deepEqual([status.installed, status.activeState, status.subState], [true, "active", "running"]);
     const removed = await uninstallMissionService("linux", run, env);

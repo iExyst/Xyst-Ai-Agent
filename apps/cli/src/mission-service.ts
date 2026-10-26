@@ -1,12 +1,12 @@
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { runProcess, type ProcessResult } from "@xyst/runtime";
 
 export const MISSION_SERVICE_NAME = "xyst-mission-daemon";
 export const WINDOWS_TASK_NAME = "Xyst Mission Daemon";
 
-export interface MissionServiceSpec { executable: string; cliEntry: string; workingDirectory: string; daemonArguments?: string[] }
+export interface MissionServiceSpec { executable: string; cliEntry: string; workingDirectory: string; dataHome?: string; daemonArguments?: string[] }
 export type ServiceCommand = (command: string, args: string[]) => Promise<ProcessResult>;
 const defaultCommand: ServiceCommand = (command, args) => runProcess(command, args, { timeoutMs: 30_000, maxOutputChars: 4000 });
 
@@ -35,7 +35,9 @@ function encodedPowerShell(script: string): string[] { return ["-NoProfile", "-N
 export function renderSystemdMissionUnit(spec: MissionServiceSpec): string {
   const workingDirectory = spec.workingDirectory.startsWith("/") ? spec.workingDirectory : resolve(spec.workingDirectory);
   const command = [spec.executable, spec.cliEntry, "mission", "daemon", ...(spec.daemonArguments ?? [])].map(unitQuote).join(" ");
-  return `[Unit]\nDescription=Xyst persistent mission scheduler\nAfter=default.target\n\n[Service]\nType=simple\nWorkingDirectory=~\n${`Environment=${systemdEnvironment("XYST_ROOT", workingDirectory)}\n`}ExecStart=${command}\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=infinity\n\n[Install]\nWantedBy=default.target\n`;
+  const dataHome = spec.dataHome ? posix.resolve(spec.dataHome) : undefined;
+  const environment = [`Environment=${systemdEnvironment("XYST_ROOT", workingDirectory)}`, ...(dataHome ? [`Environment=${systemdEnvironment("XDG_DATA_HOME", dataHome)}`] : [])].join("\n");
+  return `[Unit]\nDescription=Xyst persistent mission scheduler\nAfter=default.target\n\n[Service]\nType=simple\nWorkingDirectory=~\n${environment}\nExecStart=${command}\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=infinity\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 export function renderWindowsMissionTaskScript(spec: MissionServiceSpec, operation: "install" | "uninstall" | "status"): string {

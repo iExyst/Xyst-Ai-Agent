@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-26 (refreshed)
 
+## Latest continuation · preserve custom XDG data path in Linux mission service (2026-10-26)
+
+- Fixed a shared-state issue in service installation: when `XDG_DATA_HOME` is configured, `mission service install` now writes that exact data home into the generated `systemd --user` unit alongside `XYST_ROOT`. The formatter uses POSIX path normalization even when unit-generation tests run on Windows. This keeps the headless daemon on the same SQLite profile as the CLI and desktop.
+- Added unit and install-path regression assertions and documented the behavior in the mission guide. Focused service tests passed (2/2); full `npm test` passed (153 runtime passes, 2 host-dependent skips, 21 CLI passes), and all runtime/CLI/desktop typechecks passed. Exact current CI Linux package lifecycle verification is next.
+- The working change is local to the PR checkout at this checkpoint; the existing PR and untracked `.help recover`/`.xyst-live-acceptance/` artifacts are preserved.
+
 ## Latest continuation · verified LM Studio live API run and Windows validation (2026-10-26)
 
 - Confirmed the configured LM Studio server at `http://127.0.0.1:1235` responds successfully and exposes 51 models. In an isolated temporary Xyst profile, the current PR source used the authorized `qwen3-0.6b` model to call `web_fetch` against the exact Open-Meteo current-conditions URL. The complete JSON response returned HTTP 200 with observation time `2026-10-26T19:15` in `America/New_York`: 60.3 °F, 52% relative humidity, 56.3 °F apparent temperature, and 5.2 mph wind. Xyst persisted `retrieved_at=2026-10-26T23:18:50.519Z`, the exact query URL, status, content type, and `truncated=false`.
