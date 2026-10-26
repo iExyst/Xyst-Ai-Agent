@@ -1242,6 +1242,42 @@ test("agent selects the smallest loaded LM Studio instance that actually fits th
   } finally { store.close(); }
 }));
 
+test("agent refreshes a model instance after LM Studio idle-unloads it between turns", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "idle-unloaded-instance.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "idle-unload-model");
+  const model = { type: "llm" as const, key: "idle-unload-model", max_context_length: 32768, size_bytes: 1_000_000_000, loaded_instances: [{ id: "idle-unload-model:2", config: { context_length: 32768 } }] };
+  let calls = 0; let loads = 0; const inferenceModels: string[] = [];
+  const provider = {
+    redact: (value: string) => value,
+    isLocalServer: () => true,
+    models: async () => [{ ...model, loaded_instances: model.loaded_instances.map((instance) => ({ ...instance, config: { ...instance.config } })) }],
+    load: async (_key: string, options: { context_length?: number }) => {
+      loads++;
+      const instanceId = `idle-unload-model:${loads + 2}`;
+      model.loaded_instances.push({ id: instanceId, config: { context_length: options.context_length ?? 32768 } });
+      return { instance_id: instanceId, load_config: { context_length: options.context_length ?? 32768 } };
+    },
+    streamChatWithTools: async (request: { model: string }) => {
+      inferenceModels.push(request.model); calls++;
+      if (calls === 1) {
+        model.loaded_instances = [];
+        return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "idle-unload-list", type: "function", function: { name: "file_list", arguments: JSON.stringify({ path: root }) } }] } }] };
+      }
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "idle-unload-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const result = await agent.run("Use file_list to inspect the workspace, then report the result.", { workspace: root, maxTurns: 3 });
+    assert.equal(result.status, "completed");
+    assert.deepEqual(inferenceModels, ["idle-unload-model:2", "idle-unload-model:3"], "the next request uses the newly prepared loaded instance");
+    assert.equal(loads, 1, "the idle-unloaded model is reloaded exactly once");
+    assert.match(result.selectionReason, /no longer reported idle instance idle-unload-model:2/);
+    const decision = store.db.prepare("SELECT reason FROM model_decisions WHERE session_id=?").get(result.sessionId) as { reason: string };
+    assert.match(decision.reason, /prepared idle-unload-model:3 for this turn/);
+  } finally { store.close(); }
+}));
+
 test("aborting an in-flight inference ends the session as cancelled instead of failed", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "cancel-agent.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

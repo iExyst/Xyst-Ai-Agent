@@ -1,5 +1,13 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Continuation · live LM Studio idle-unload recovery (2026-10-26)
+
+- Re-read the full user build specification and confirmed the current `codex/resume-full-build` worktree is clean except for preserved untracked acceptance artifacts. PR #1 remains open, draft, and clean at `03556f61c18e0cc83421ba4047fd77e98f365647`.
+- Continued the isolated automatic-selection GitHub API acceptance. The Qwen3-0.6B attempt fetched HTTP 200 data but failed completion. Automatic selection then switched to an already-loaded Qwen3-4B instance. It created and read back the exact `repo-live.json`, but after two slow inference turns LM Studio stopped advertising that loaded instance; the verifier request failed with HTTP 400 `model_not_found` for the stale `:2` identifier. Persisted session `7b953450-481b-4319-9c13-dfa88a1c98c1` ended `failed`; this is not counted as a completed task.
+- Fixed the lifecycle gap in `AgentRunner`: refresh local LM Studio model inventory before each inference turn; if the selected instance was unloaded, reuse an adequate loaded instance or prepare the selected model again when automatic loading permits it. The selection reason and event record the re-prepared instance.
+- Added the regression `agent refreshes a model instance after LM Studio idle-unloads it between turns`. Focused regression passed (1/1), runtime suite passed (150 passed, 2 host-dependent skips), and CLI suite passed (19/19). `npm run typecheck`, `npm run desktop:build`, and `git diff --check` passed. Cross-platform hosted CI/package checks remain pending until this source is pushed.
+- Full build remains active. Live public API access remains independently verified by the completed Qwen3.5-9B session above. Open full-spec gates remain physical Linux/native service, trusted production signing/update hosting, configured private/search credentials, clean installed-profile recovery, and broad model/mission acceptance.
+
 ## Continuation · session workspace persistence and live data (2026-10-26)
 
 - Reconfirmed live data access remains available in the full-access profile: public HTTPS JSON/REST through `web_fetch` with source URL, HTTP status, UTC retrieval time, and truncation state; scheduled mission polling and optional signed GitHub webhooks cover periodic and event-triggered updates. Private APIs and Brave Search still need configured credentials/integrations.

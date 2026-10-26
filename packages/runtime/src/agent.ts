@@ -749,15 +749,31 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
         drainUserMessages();
         const conversation = sessionMessages();
         requiredContextTokens = Math.max(requiredContextTokens, estimateRequiredContextTokens(conversation));
-        if (requiredContextTokens > contextPreparedForTokens) {
-          const prepared = await prepareModel(selected, activeProvider);
-          selected = prepared.modelKey; inferenceModel = prepared.inferenceModel; contextPreparedForTokens = requiredContextTokens;
+        // LM Studio can idle-unload an instance between agent turns. Refresh its
+        // inventory before every inference so a stale instance ID is never sent
+        // to the OpenAI-compatible endpoint; prepareModel will reuse another
+        // adequate loaded instance or reload the selected model when permitted.
+        if (activeProvider === this.deps.provider && typeof activeProvider.models === "function") {
+          inventory = await activeProvider.models(options.signal);
         }
         const selectedModelInfo = inventory?.find((candidate) => candidate.key === selected);
-        if (selectedModelInfo) {
-          const selectedInstance = selectedModelInfo.loaded_instances.find((instance) => instance.id === inferenceModel);
-          const loadedContexts = selectedInstance ? [instanceContextLength(selectedInstance, selectedModelInfo.max_context_length)].filter((value): value is number => typeof value === "number") : selectedModelInfo.loaded_instances.map((instance) => instanceContextLength(instance, selectedModelInfo.max_context_length)).filter((value): value is number => typeof value === "number");
-          const activeContext = loadedContexts.length ? Math.max(...loadedContexts) : selectedModelInfo.max_context_length;
+        const selectedInstanceIsLoaded = selectedModelInfo?.loaded_instances.some((instance) => instance.id === inferenceModel) === true;
+        const instanceWasUnloaded = activeProvider === this.deps.provider && typeof activeProvider.models === "function" && !selectedInstanceIsLoaded;
+        if (requiredContextTokens > contextPreparedForTokens || instanceWasUnloaded) {
+          const previousInstance = inferenceModel;
+          const prepared = await prepareModel(selected, activeProvider);
+          selected = prepared.modelKey; inferenceModel = prepared.inferenceModel; contextPreparedForTokens = requiredContextTokens;
+          if (instanceWasUnloaded && previousInstance !== inferenceModel) {
+            selectionReason += `; LM Studio no longer reported idle instance ${previousInstance}, prepared ${inferenceModel} for this turn`;
+            this.deps.store.db.prepare("UPDATE model_decisions SET reason=? WHERE id=?").run(selectionReason, decisionId);
+            this.deps.events.emit("model.selected", { model: selected, modelInstanceId: inferenceModel, reason: selectionReason, previousInstance }, sessionId);
+          }
+        }
+        const currentSelectedModelInfo = inventory?.find((candidate) => candidate.key === selected);
+        if (currentSelectedModelInfo) {
+          const selectedInstance = currentSelectedModelInfo.loaded_instances.find((instance) => instance.id === inferenceModel);
+          const loadedContexts = selectedInstance ? [instanceContextLength(selectedInstance, currentSelectedModelInfo.max_context_length)].filter((value): value is number => typeof value === "number") : currentSelectedModelInfo.loaded_instances.map((instance) => instanceContextLength(instance, currentSelectedModelInfo.max_context_length)).filter((value): value is number => typeof value === "number");
+          const activeContext = loadedContexts.length ? Math.max(...loadedContexts) : currentSelectedModelInfo.max_context_length;
           if (typeof activeContext === "number" && activeContext < requiredContextTokens) {
             throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${selected} provides ${activeContext}. The session is saved; resume it with a model or LM Studio context setting that can fit the expanded conversation.`);
           }
