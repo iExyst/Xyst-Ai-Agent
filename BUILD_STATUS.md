@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-26 (refreshed)
 
+## Continuation · default profile recovery and live API acceptance (2026-10-26)
+
+- The default `%APPDATA%\xyst\xyst.sqlite` failed SQLite integrity. Before changing the active database, copied the full 689-file, 761,566,301-byte Xyst data directory to `%LOCALAPPDATA%\XystRecovery\default-profile-20261026-1949`; the copied database hash matches the original (`B7A2EDE69B24E502DBB7C09C6EA5078669489DF3ED8F3577D5D9B1D03D9EE025`). Preserved the corrupt database as `xyst.sqlite.corrupt-20261026`. The active database now passes `quick_check` and CLI `status` reports `runtime: ready`, `database: ready`, and `profile: full`; its session and mission counts are zero. A healthy database-only snapshot of this active profile is also in the recovery directory.
+- Saved `integrations.lmStudio.baseUrl=http://127.0.0.1:1235` globally to match the running loopback LM Studio server. With no environment override, `xyst lm diagnose` returns 38 models. The active full-access profile permits network and integrations; `network.enabled` inherits its true default.
+- A fresh default-profile Xyst CLI agent task using the already-loaded `qwen3-0.6b` fetched the exact GitHub REST URL at `2026-10-26T19:52:04.180Z` (HTTP 200), and persisted `task_complete verified:true` for the live fetch. Session `5e8d720f-ab44-4140-be8e-0cbb5779a9d4`. The model omitted the requested `default_branch` in its final prose, so this verifies real API access and evidence persistence, not answer completeness. The separately observed API field was `default_branch=main`.
+- The full build remains active. The corrupted database and full snapshot are preserved; model answer reliability, bare-metal Linux acceptance, signing/update hosting, and configured Brave/private API credentials remain open.
+
 ## Recovery hardening · verified SQLite backup command (2026-10-26)
 
 - Added `xyst database backup <new-path>`. It uses SQLite's backup API so committed WAL data is included, verifies the copied database, and refuses corrupt sources and existing destinations. It remains available before normal runtime startup. It is a database-only backup; full profile copies remain necessary for workspaces and external files.
