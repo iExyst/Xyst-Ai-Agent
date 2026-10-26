@@ -73,7 +73,9 @@ export async function searchFiles(rootPath: string, query: string, options: { ma
 }
 
 export async function createText(path: string, content: string, overwrite = false): Promise<string> {
-  const absolute = normalizeUserPath(path); await mkdir(dirname(absolute), { recursive: true });
+  const absolute = normalizeUserPath(path);
+  if (resolve(absolute) === resolve(dirname(absolute))) throw new Error("File path resolves to a filesystem root; provide a filename");
+  await mkdir(dirname(absolute), { recursive: true });
   if (!overwrite) { const exists = await lstat(absolute).then(() => true, () => false); if (exists) throw new Error(`File already exists: ${absolute}`); }
   const temp = `${absolute}.${randomUUID()}.tmp`; await writeFile(temp, content, { flag: "wx" });
   try { if (overwrite) await rename(temp, absolute); else { await link(temp, absolute); await unlink(temp); } }

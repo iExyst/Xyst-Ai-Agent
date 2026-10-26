@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile as readFileAsync, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { Cron } from "croner";
@@ -698,6 +698,29 @@ test("external action approval blocks side effects when denied and permits one a
   } finally { store.close(); }
 }));
 
+test("a file-create request for a filesystem root is a definite failure, not an uncertain side effect", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "root-file-create.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model"); let round = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      round++;
+      return round === 1
+        ? { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "create-filesystem-root", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: parse(root).root, content: "must not write" }) } }] } }] }
+        : { choices: [{ message: { role: "assistant", content: "The invalid path was rejected." } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Create a file at the provided path.", { workspace: root, maxTurns: 1 });
+    assert.equal(result.status, "limit");
+    const action = store.db.prepare("SELECT status,output_json FROM tool_calls WHERE id='create-filesystem-root'").get() as { status: string; output_json: string };
+    assert.equal(action.status, "failed");
+    assert.match(action.output_json, /filesystem root/);
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE status='uncertain'").get() as { count: number }).count, 0);
+  } finally { store.close(); }
+}));
+
 test("agent completion requires successful persisted tool evidence", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "completion-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
@@ -735,6 +758,27 @@ test("agent completion requires successful persisted tool evidence", async () =>
     assert.equal(JSON.parse((store.db.prepare("SELECT details_json FROM usage WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(verified.sessionId) as { details_json: string }).details_json).task_outcome, "verified_success");
     const checked = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='completed'").get(verified.sessionId) as { output_json: string };
     assert.equal(JSON.parse(checked.output_json).verified, true);
+  } finally { store.close(); }
+}));
+
+test("wrong tool completion evidence points the model to the successful required tool index", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "completion-tool-correction.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model"); let turn = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "write-required-file", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "generated", content: "VERIFIED" }) } }] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-required-file", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "generated" }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "wrong-evidence-completion", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Use the file_create tool to create the output with VERIFIED content.", { workspace: root, maxTurns: 3 });
+    assert.equal(result.status, "limit");
+    const failure = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete'").get(result.sessionId) as { output_json: string };
+    assert.match(failure.output_json, /Use successful file_create evidence index 2/);
   } finally { store.close(); }
 }));
 
@@ -1278,6 +1322,12 @@ test("file patch rejects stale edits and preserves UTF-8 BOM and CRLF", async ()
   await assert.rejects(() => patchText(path, read.sha256, "gamma", "delta"), /changed since it was read/);
   await createText(join(root, "new.txt"), "safe"); await assert.rejects(() => createText(join(root, "new.txt"), "overwrite"), /already exists/);
   assert.equal(patched.path, path);
+}));
+
+test("file creation rejects filesystem roots before creating anything", async () => withTemp(async (root) => {
+  const filesystemRoot = parse(root).root;
+  await assert.rejects(() => createText(filesystemRoot, "must not be written"), /File path resolves to a filesystem root/);
+  assert.equal(existsSync(filesystemRoot), true);
 }));
 
 test("text search ignores dependency and build output directories", async () => withTemp(async (root) => {
