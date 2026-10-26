@@ -55,7 +55,8 @@ function inferExplicitToolEvidence(criteria: string[], availableTools: string[])
     if (tool === "task_complete") continue;
     const escaped = tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const explicitRequest = new RegExp(`\\b(?:use|call|invoke|via|through|using)\\s+(?:the\\s+)?(?:\\x60)?${escaped}(?:\\x60)?\\b`, "i");
-    if (criteria.some((criterion) => explicitRequest.test(criterion))) required.set(tool, `Required evidence from explicitly requested tool: ${tool}`);
+    const negatedRequest = new RegExp(`\\b(?:do\\s+not|don't|dont|never|avoid|without)\\s+(?:use|call|invoke|using|calling)\\s+(?:the\\s+)?(?:\\x60)?${escaped}(?:\\x60)?\\b`, "i");
+    if (criteria.some((criterion) => explicitRequest.test(criterion) && !negatedRequest.test(criterion))) required.set(tool, `Required evidence from explicitly requested tool: ${tool}`);
   }
   return required;
 }
@@ -353,12 +354,12 @@ export class AgentRunner {
       const requestedInstance = key === candidate.key ? undefined : candidate.loaded_instances.find((instance) => instance.id === key);
       if (key !== candidate.key && !requestedInstance) throw new Error(`Loaded LM Studio model instance ${key} is no longer available`);
       const availableInstances = requestedInstance ? [requestedInstance] : candidate.loaded_instances;
-      // Token estimates include small template/serialization overhead. Leave a
-      // small margin so a model that is effectively at the requested limit is
-      // not rejected for a handful of estimated tokens.
+      // A loaded instance reports its applied context limit. It must fit the
+      // estimated prompt exactly; tolerance is only appropriate for declared
+      // limits where serialization overhead is approximate.
       const contextTolerance = Math.min(128, Math.ceil(requiredContextTokens * 0.01));
       const adequateInstance = availableInstances.map((instance) => ({ instance, contextLength: instanceContextLength(instance, candidate.max_context_length) }))
-        .filter((item): item is { instance: LMStudioModel["loaded_instances"][number]; contextLength: number } => typeof item.contextLength === "number" && item.contextLength + contextTolerance >= requiredContextTokens)
+        .filter((item): item is { instance: LMStudioModel["loaded_instances"][number]; contextLength: number } => typeof item.contextLength === "number" && item.contextLength >= requiredContextTokens)
         .sort((left, right) => left.contextLength - right.contextLength)[0];
       if (adequateInstance) return { modelKey: candidate.key, inferenceModel: adequateInstance.instance.id };
       const loadedContexts = availableInstances.map((instance) => instanceContextLength(instance)).filter((value): value is number => typeof value === "number");
@@ -408,7 +409,7 @@ export class AgentRunner {
       const loadedWithEnoughContext = [returnedInstance, ...newInstances, ...loadedModel.loaded_instances]
         .filter((instance): instance is LMStudioModel["loaded_instances"][number] => Boolean(instance))
         .map((instance) => ({ instance, contextLength: instanceContextLength(instance, loadedModel.max_context_length) }))
-        .find((item) => typeof item.contextLength === "number" && item.contextLength + contextTolerance >= requiredContextTokens);
+        .find((item) => typeof item.contextLength === "number" && item.contextLength >= requiredContextTokens);
       if (!loadedWithEnoughContext) {
         const appliedContexts = loadedModel.loaded_instances.map((instance) => instanceContextLength(instance, loadedModel.max_context_length)).filter((value): value is number => typeof value === "number");
         const appliedContext = appliedContexts.length ? Math.max(...appliedContexts) : undefined;

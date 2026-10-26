@@ -761,6 +761,27 @@ test("agent completion requires successful persisted tool evidence", async () =>
   } finally { store.close(); }
 }));
 
+test("completion evidence does not require a tool the objective explicitly prohibits", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "negated-tool-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const originalFetch = globalThis.fetch; const url = "https://8.8.8.8/api/live"; let turn = 0;
+  globalThis.fetch = async () => new Response(JSON.stringify({ status: "live" }), { status: 200, headers: { "content-type": "application/json" } });
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "required-live-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "complete-live-fetch", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run(`Use web_fetch to retrieve exactly ${url}; do not use web_search.`, { workspace: root, maxTurns: 2 });
+    assert.equal(result.status, "completed");
+    assert.equal(turn, 2);
+  } finally { globalThis.fetch = originalFetch; store.close(); }
+}));
+
 test("wrong tool completion evidence points the model to the successful required tool index", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "completion-tool-correction.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model"); let turn = 0;
@@ -1157,6 +1178,28 @@ test("agent loads a larger-context LM Studio instance without replacing an exist
     assert.deepEqual(model.loaded_instances.map((instance) => instance.id), ["context-model", "context-model:2"]);
     const decision = store.db.prepare("SELECT model FROM model_decisions WHERE session_id=?").get(result.sessionId) as { model: string };
     assert.equal(decision.model, "context-model");
+  } finally { store.close(); }
+}));
+
+test("agent selects the smallest loaded LM Studio instance that actually fits the conversation", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "loaded-context-selection.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  const model = { type: "llm" as const, key: "context-model", max_context_length: 32768, size_bytes: 1_000_000_000, loaded_instances: [
+    { id: "context-model", config: { context_length: 8448 } },
+    { id: "context-model:2", config: { context_length: 11520 } }
+  ] };
+  const generationModels: string[] = [];
+  const provider = {
+    redact: (value: string) => value,
+    isLocalServer: () => true,
+    models: async () => [model],
+    streamChatWithTools: async (request: { model: string }) => { generationModels.push(request.model); return { choices: [{ message: { role: "assistant", content: "Live API evidence recorded." } }] }; }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const task = "Fetch live JSON from https://api.github.com/repos/iExyst/Xyst-Ai-Agent. Create github-live-check.json in the current workspace with the exact source URL, retrieval timestamp returned by Xyst, HTTP status, default_branch, and pushed_at. Read the file back and finish with task_complete using the successful evidence for both the API fetch and exact file output.";
+    const result = await agent.run(`${task} ${"context boundary ".repeat(465)}`, { workspace: root, maxTurns: 1 });
+    assert.equal(result.model, "context-model");
+    assert.deepEqual(generationModels, ["context-model:2"], "the smaller loaded instance cannot satisfy the full task context estimate");
   } finally { store.close(); }
 }));
 

@@ -1,5 +1,13 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Latest continuation · live public API and context-selection fixes (2026-10-26)
+
+- Fresh isolated Windows CLI acceptance used LM Studio at `http://127.0.0.1:1235` with already-loaded `qwen3-0.6b:2`. Xyst `web_fetch` retrieved `https://api.github.com/repos/iExyst/Xyst-Ai-Agent` live at `2026-10-26T11:04:01.598Z` (HTTP 200, complete JSON); the returned fields were `default_branch=main` and `pushed_at=2026-10-26T10:43:29Z`. Persisted `task_complete` evidence is `verified:true` in session `3cf2ce8f-631a-40d9-847e-9106459a1783`. In the same isolated workspace, Xyst CLI `file create` and `file read` verified `github-live-check.json` with the exact URL, retrieval timestamp, status, and API fields.
+- Fixed loaded-instance selection so reported applied context limits must actually meet the estimated conversation size; declared-limit estimation margins remain for approximate metadata. Added a regression test where the 8448-token instance is too small and the 11520-token instance is selected.
+- Fixed completion evidence inference so a tool mentioned in a negative instruction (for example, “do not use web_search”) is not incorrectly required. Regression coverage, both focused context-instance tests, runtime build, and CLI build passed.
+- Public HTTP(S) APIs can be read through Xyst `web_fetch` without a search-provider credential. Brave `web_search` requires a Brave API token; private/authenticated APIs need their configured credentials. Scheduled missions support polling and signed GitHub webhooks provide opt-in event-driven updates. The live acceptance used an isolated profile and did not modify the registered user profile.
+- Full build remains active. Existing release/platform gates below remain open; this continuation does not claim full-spec completion.
+
 ## Latest continuation · automatic vision-model acquisition (2026-10-26)
 
 - On current source `9d56f413b2aa361c728c32f09e80dbb4f798f53`, isolated Xyst automatically discovered, downloaded, integrity-checked, imported, and loaded Hugging Face `prithivMLmods/Qwen3-VisionCaption-2B-GGUF` (revision `f6915a16edd170c5515373b42e3f4cb1007c3f51`, Q8_0, 2.28 GB including its vision projector; Apache-2.0 per model-card metadata). A vision task read an unseen token from an attached image, wrote it to a file, and read the exact content back. Persisted task-completion evidence is `verified:true`; details and hashes are in [verification history](docs/verification-history.md#live-automatic-model-acquisition-and-vision-task-acceptance-2026-10-26).
