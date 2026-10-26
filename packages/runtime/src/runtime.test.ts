@@ -935,6 +935,8 @@ test("declared outputs require exact readback and the refreshed evidence list id
     assert.match(completionCalls[0]!.output_json, /file_read completed after the displayed evidence list was sent/);
     assert.equal(completionCalls[1]?.status, "completed");
     assert.match(prompts[0]!, /Available persisted evidence call indexes \(newest-first/);
+    assert.match(prompts[0]!, /File-tool paths are resolved relative to the current workspace/);
+    assert.match(prompts[0]!, /Repeat an index at each position when the same successful result supports multiple criteria/);
     assert.match(prompts[1]!, /1: "file_read" path=/);
     assert.match(prompts[1]!, /2: "file_create" path=/);
   } finally { store.close(); }

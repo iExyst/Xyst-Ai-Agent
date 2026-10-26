@@ -1,5 +1,13 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Resume checkpoint · clearer tool-path and completion evidence prompts (2026-10-26)
+
+- Agent prompts now say file-tool paths are relative to the current workspace and must not repeat the workspace directory. Completion guidance explains that an evidence index should be repeated for each criterion supported by the same result.
+- Current Windows verification passed: runtime 144 passed, 2 host-dependent skips, CLI 18 passed, no failures; runtime, CLI, and desktop typechecks passed.
+- Isolated local-model mission attempts confirmed the path correction: Qwen 0.6B wrote and reread `phase.txt` at the exact mission workspace path and passed persisted `task_complete` evidence. Follow-on tasks still failed model-backed completion: one had correct file reads but omitted an evidence index; another wrote a misspelled marker and did not verify it. These are not counted as completed mission acceptance.
+- Full build remains active. Current hosted CI and package workflows on PR head `31f4e3c` pass for Windows and Ubuntu. Bare-metal Linux, production signing/update hosting, configured LM Studio plugin permissions, target-specific credentials, and broader live-model mission reliability remain open.
+
+
 ## Resume checkpoint · resilient session compaction (2026-10-26)
 
 - Fixed compaction recovery when LM Studio ignores the requested JSON Schema: Xyst now makes one bounded, JSON-only format repair attempt, validates the second response, and fails without saving a compaction if it is still invalid. The original transcript stays intact.
@@ -7,6 +15,7 @@
 - The earlier attempt using `qwen/qwen3.5-9b` ended with a transient connection failure; the local LM Studio server subsequently responded again, and the live acceptance succeeded on the smaller already-loaded model. No model was loaded or unloaded.
 - Compaction commit `e69671b` passed current-head Cross-platform CI run `40277961687` and Desktop packages run `40277961667` on Windows and Ubuntu 24.04, including the clean Windows installation/renderer smoke and Linux AppImage packaging.
 - The actual CLI command `xyst session compact <id> --model qwen3-0.6b` also passed on an isolated profile: six older messages were summarized, four recent messages remained active, `session summary` reloaded the saved snapshot, and the exact primary objective plus explicit decisions/dependency were present. CLI fixture session `17cd4231-972d-4c38-8343-611800b24718`; compaction `6f8475b7-4e2d-4cb6-85e7-09b519789e2a`.
+
 
 ## Resume checkpoint · live API access reverified (2026-10-26)
 
@@ -49,6 +58,7 @@
 - Verification on this PR worktree: `npm run typecheck` passed; `npm test` passed with runtime 141 passed, 2 host-dependent skips, 0 failed, and CLI 15 passed. The targeted context-growth, remote-fallback, automatic-switching, and new larger-instance tests passed.
 - The feature is prepared on `codex/resume-completion`; the existing draft PR remains open. Physical/bare-metal Linux, native desktop/service acceptance, trusted publisher signing/update hosting, and Brave web-search credentials are still outside this local check. Continue to track scope and gates below.
 
+
 ## Resume checkpoint · live data source behavior (2026-10-25)
 
 - Confirmed network access defaults on globally and full-access profiles permit network and configured integrations. Current-source and packaged acceptance already proved live GitHub repository API and Open-Meteo weather retrieval; Hugging Face discovery and authenticated GitHub are configured.
@@ -60,6 +70,7 @@
 - Fixed completion recovery so a successful read-only tool result (including `web_fetch`) also triggers a `task_complete` reminder when the model returns prose. Added regression coverage for that path and updated the queued-user-guidance test. `npm test`: runtime 137 passed, 2 host-dependent skips; CLI 15 passed. `npm run typecheck` passed.
 - Current limitation: general web search is not configured until a Brave API key is stored in the OS credential vault. The source offers a working Brave integration, while public APIs and configured GitHub/Hugging Face integrations remain available. Full build gates remain open as listed below.
 
+
 ## Resume checkpoint · live data verified on patched source (2026-10-25)
 
 - Exact hosted packages from commit `1c885c9` passed live-data agent tasks. The Windows NSIS artifact (264,144,936 bytes) matched `latest.yml`; its isolated session `9b56341e-1605-467b-aadb-fd50f9a7495e` fetched GitHub API `pushed_at: 2026-10-25T22:54:35Z`, wrote/read it, and completed with verified evidence. The Ubuntu AppImage (325,050,624 bytes) matched `latest-linux.yml`; its isolated session `89116597-302c-468e-9ccd-90fa4f9d24c1` fetched Open-Meteo current New York conditions (2026-10-25 19:00 America/New_York, 54.7 °F) and completed with verified evidence. Both package SQLite checks returned healthy.
@@ -69,6 +80,7 @@
 - LM Studio compaction was attempted on the earlier long session but the provider returned a summary outside the required schema, so Xyst saved no compaction. The successful live session was kept short. Temporary Qwen3.5-9B was unloaded afterward; the preloaded Qwen3-4B remained idle.
 - The build remains active. Current-source live API access works; Brave Search still needs a vault key. Remaining acceptance gates include physical Linux desktop/service behavior, trusted publisher signing/update delivery, target-install integration credentials, and broader live-model recovery/selection cases.
 
+
 ## Resume checkpoint · live-source completion evidence hardening (2026-10-25)
 
 - Re-read the supplied ordered build plan and resumed draft PR #1 at `2223b46`. Verified existing live-data capability in prior acceptance: Xyst retrieved current GitHub repository metadata and Open-Meteo conditions via `web_fetch`; Hugging Face discovery and authenticated GitHub also work. Direct JSON/vendor `+json` retrieval is implemented with bounded output, SSRF/redirect checks, and untrusted-content marking. Brave Search still requires its API key in the OS credential vault.
@@ -76,6 +88,7 @@
 - Added regression coverage reproducing an unrelated `file_list` being submitted as completion evidence for a live API/file task; Xyst now leaves that run unverified. `npm test`: runtime 136 passed, 2 host-dependent skips; CLI 15 passed. `npm run typecheck` and `git diff --check` passed.
 - Unloaded temporary `qwen/qwen3.5-9b`; verified the preloaded Qwen3-4B remained idle and loaded. Acceptance artifacts under `.xyst-live-acceptance/` are preserved.
 - Full build remains active; this source fix is ready for the existing draft PR. Physical Linux desktop/service, trusted signed updater delivery, target-install credentials, and broader live-model recovery/selection acceptance remain open.
+
 
 ## Resume checkpoint · live API agent acceptance and diagnostics (2026-10-25)
 
@@ -180,10 +193,12 @@ Progress estimate is approximately 94% by implementation and verified coverage; 
 - Resume: continue the broad specification audit and close host-, credential-, feed-, and signer-dependent gates when available. Workspace is `master`, has no remote, and contains uncommitted changes; generated releases are ignored.
 - Updater-smoke cleanup: the disposable Ubuntu guest is shut down. Its isolated WSL `/tmp` guest/staging directories remain because execution policy rejected recursive deletion; no Windows install, model, or host credential was changed.
 
+
 ## Resume checkpoint · final package manifest recheck (2026-10-25)
 
 - Read both referenced build specifications and resumed the active goal. Independently recomputed Windows NSIS and Ubuntu AppImage byte counts and SHA-512 digests from `release/`; each matched both size and digest in its updater manifest. Current values are recorded above and in [platform support](docs/platform-support.md). `git diff --check` passes; only Git's existing LF/CRLF normalization warnings appeared.
 - Full-plan estimate remains approximately 82% and subjective. The ordered sequence covers the substantive requirements in both specs; condensed bullet lists preserve their implementation intent and acceptance gates. Full completion is still blocked on clean Windows install access, native bare-metal Linux desktop acceptance, hosted CI/updater trust/signing, live authenticated integration checks, and representative current-package mission acceptance. No model was loaded or queried.
+
 
 ## Resume checkpoint · current source verification on Windows and Linux (2026-10-25)
 
@@ -226,6 +241,7 @@ Progress estimate is approximately 94% by implementation and verified coverage; 
 | Delivery and final acceptance | Windows NSIS and Ubuntu x64 AppImage exist with matching manifests and hashes; hosted Windows/Ubuntu package builds and CI pass; hosted clean Windows installation and renderer smoke passed; docs cover install/configuration/recovery. | Packages unsigned; hosted updater trust/signing, native Linux install, and representative live-model missions remain required. |
 
 The full specification is not complete until its final clean-install and representative-mission checks pass on both Windows and Linux, and each remaining integration limitation is either verified or explicitly bounded in the support matrix.
+
 
 ## Resume checkpoint (2026-10-25)
 
@@ -400,25 +416,30 @@ The full specification is not complete until its final clean-install and represe
 - Release manifests match package bytes. Windows NSIS: 267,515,235 bytes, SHA-512 Base64 `OSg08IiCBmeYqleiwO8xudiAhuOqry5zfS/Rsus+lTfFh/D1CPHBbUyr+0rurmgrUfIS6sasOUOPBFfNTgJqrA==`, embedded `app.asar` SHA-256 `AA4AF35DC8F9BC165871A78AB033B091AAF4C526BE13D0B2BFB992CCA1DC78A8`. Linux AppImage: 323,062,773 bytes, SHA-512 Base64 `8LMhnwfbOtWLZRuf13NVvzkN2PpSzG5oRjrHBQ5ejGXdRSXWTZpiTiVDMB/M32gsDictGqGQxEmq1u2sO6Bg7w==`, embedded `app.asar` SHA-256 `90cda16a3699a16c428ae53c4617538cc0a0a9221a5229991846ce69b748434d`.
 - Overall plan estimate remains about 82%. Clean Windows installation, native/bare-metal Linux acceptance, hosted CI/signing, authenticated LM Studio checks, and representative live-model mission remain open. Current Windows GUI remains unverified.
 
+
 ## Resume checkpoint · Windows installer VM retry (2026-10-25)
 
 - Clean Windows install investigation advanced from an unavailable VM attempt: Ubuntu 24.04 WSL has QEMU/KVM and the user-provided Windows 11 ISO. The ISO was copied into WSL storage; a fresh QEMU VM with OVMF Secure Boot and a temporary TPM 2.0 reached the Windows boot-from-CD prompt, then returned to UEFI after Enter. Windows Setup did not appear. No VM disk was attached, no license was accepted, and host installation/data were untouched. Exact evidence is in [verification history](docs/verification-history.md). This gate remains open.
 - Full-plan estimate remains about 82%. Other open gates remain native bare-metal Linux acceptance, hosted CI/updater/signing, authenticated integration checks, representative current-package mission acceptance, and clean Windows installation/GUI verification.
 
+
 ## Resume checkpoint · Windows ISO and legacy VM boot (2026-10-25)
 
 - The Windows 11 ISO source and WSL copy now have matching SHA-256 `bd4307df32bc8af33b39ccecb1174aeb345386630f89a2b86c7a4e36b55ea650`. A fresh SeaBIOS/TCG VM with an isolated TPM reached the Windows logo/spinner, then remained black for over four minutes; Windows Setup did not render. The VM and TPM are stopped. No install disk was attached and no license was accepted. Details are in [verification history](docs/verification-history.md). Clean Windows installation and packaged GUI acceptance remain open.
+
 
 ## Resume checkpoint · mission lifecycle CLI smoke (2026-10-25)
 
 - Re-read the primary build specification and verified current workspace state. Built the CLI successfully, then used a new temporary Windows `APPDATA` to run create, rename, portable export, fork, list, and delete against isolated SQLite state. Export retained configured schedule/GitHub trigger metadata and omitted the local ID; fork received a fresh ID and removed unattended triggers. Both missions were deleted; no task ran and no model was loaded or queried.
 - This closes the CLI command smoke for mission lifecycle operations; it does not replace runtime unit coverage or package acceptance. Remaining release/acceptance gates are listed in the milestone table above. Full objective remains active; progress estimate is still approximately 82%.
 
+
 ## Resume checkpoint · refreshed cross-platform mission payloads (2026-10-25)
 
 - Rebuilt Windows NSIS and Ubuntu x64 AppImage from current source. The current Windows and Linux updater manifests match exact package size/SHA-512; embedded archive hashes are recorded in `docs/platform-support.md`. The AppImage's embedded archive was streamed from SquashFS and compared byte-for-byte with the Linux unpacked payload.
 - Both package CLI payloads passed isolated mission create, rename, export, fork, list, and delete. Windows source suite: runtime 127/129 (2 host-specific skips), CLI 13/13; Ubuntu 24.04 WSL: runtime 126/129 (3 Windows-only skips), CLI 13/13. Typecheck and production packaging passed on both build environments.
 - No tasks were run for these CLI checks; no model was loaded or queried. Existing Windows registration was not changed, and the installer was not run. Remaining gates stay open: hosted CI/updater TLS and signing, a clean Windows install, native Linux desktop acceptance, and representative live-model mission runs. The full goal remains active at approximately 82%.
+
 ## Resume checkpoint · active access profile display and current Wayland UI (2026-10-25)
 
 - The exact current Ubuntu AppImage rendered the Missions page under Weston/Wayland with one isolated, unrun mission. Rename/Fork/Export/Delete appeared; the sidebar showed the active `full` access profile. I visually inspected the screenshot. LM Studio used an unreachable loopback endpoint, no inference was sent, and no task or terminal was started.

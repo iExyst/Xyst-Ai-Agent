@@ -1,5 +1,13 @@
 # Xyst verification history
 
+## Current-source live mission and completion prompts (2026-10-26)
+
+- Clarified the shared agent prompt: file-tool paths are workspace-relative, and tool calls must not prefix the workspace directory. Completion guidance now explicitly tells the model to repeat an evidence index when the same tool result supports multiple required criteria. Added a regression assertion for both instructions.
+- Current Windows source checks passed: runtime 144 passed, 2 host-dependent skips; CLI 18 passed; runtime, CLI, and desktop typechecks passed; `git diff --check` passed.
+- In isolated profile/workspace `.xyst-live-acceptance/current-live-mission-fixed-prompt-20261026`, Qwen 0.6B initially stalled under the 9B model attempt, then resumed the saved mission on the already-loaded 0.6B. Task `write-phase-marker` wrote and reread exactly `phase.txt` and passed persisted completion evidence. The dependent task wrote and reread the exact `result.txt` content, but the model submitted only two evidence indexes for three required criteria; it remained unverified. Retrying with the loaded 4B model still did not complete the runtime evidence check.
+- A separate clean-profile run with a single declared output criterion showed a different small-model limitation: Qwen 0.6B wrote `YST_LIVE_MISSION_RESULT=verified` (missing the first `X`) and returned without passing completion evidence. The run correctly remained failed. These unsuccessful runs remain isolated and are not claimed as accepted.
+- Current-head live model-backed multi-step mission acceptance therefore remains open; earlier package and hosted mission evidence remains version-specific as listed below.
+
 ## Session compaction schema repair and live acceptance (2026-10-26)
 
 - A local LM Studio compaction attempt previously returned content outside the required schema. Xyst now retries one time with a format-repair instruction and the same local JSON Schema. If the retry remains invalid, it returns an error without inserting a compaction record or modifying transcript messages.
