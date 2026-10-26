@@ -17,8 +17,6 @@ import type { HuggingFaceProvider } from "./huggingface.js";
 type HubGgufFile = { rfilename: string; size?: number; lfs?: { size?: number; sha256?: string } };
 type GgufArtifact = { filename: string; role: "model" | "model-shard" | "vision-projector"; sizeBytes: number; sha256?: string };
 type GgufArtifactSet = { artifact: string; quantization: string; sizeBytes: number; files: GgufArtifact[] };
-const unsupportedChatPipelines = new Set(["automatic-speech-recognition", "audio-classification", "audio-to-audio", "depth-estimation", "fill-mask", "image-classification", "image-to-text", "object-detection", "text-ranking", "text-to-audio", "text-to-speech", "token-classification", "zero-shot-classification"]);
-const nonChatModelName = /(?:^|[-_.\/])(?:asr|embedding|embeddings|rerank(?:er|ing)?|retrieval|retriever|reward)(?:[-_.\/]|$)/i;
 
 function normalizeModelRepositoryKey(value: string): string {
   const parts = value.trim().toLowerCase().split("/");
@@ -95,8 +93,6 @@ export class ModelAcquisitionService {
       if (result.private || result.gated) continue;
       const metadata = await this.deps.huggingFace.model(result.id, signal);
       if (metadata.private || metadata.gated) continue;
-      if (typeof metadata.pipeline_tag === "string" && unsupportedChatPipelines.has(metadata.pipeline_tag)) continue;
-      if (nonChatModelName.test(metadata.id)) continue;
       const license = typeof metadata.cardData?.license === "string" ? metadata.cardData.license : metadata.tags?.find((tag) => tag.startsWith("license:"))?.slice("license:".length);
       const files = await this.deps.huggingFace.files(result.id, metadata.sha ?? "main", signal);
       const pinnedRevision = /^[a-f0-9]{40,64}$/i.test(metadata.sha ?? "") ? metadata.sha! : undefined;
@@ -136,11 +132,9 @@ export class ModelAcquisitionService {
       });
       const selected = candidates[0];
       if (!selected) continue;
-      if (nonChatModelName.test(selected.artifact)) continue;
       const publishedEvaluationEvidence = summarizePublishedEvaluations(metadata.cardData);
       recommendations.push({
         repository: metadata.id, revision: metadata.sha ?? "main", artifact: selected.artifact,
-        ...(metadata.pipeline_tag ? { pipeline: metadata.pipeline_tag } : {}),
         sha256: selected.files.find((file) => file.filename === selected.artifact)?.sha256,
         artifacts: selected.files,
         ...(requirements.visionRequired ? { visionRequired: true, companionFiles: selected.files.filter((file) => file.role === "vision-projector").map((file) => file.filename) } : {}),

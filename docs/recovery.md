@@ -20,6 +20,30 @@ The default database is `%APPDATA%\xyst\xyst.sqlite` on Windows. On Linux it is 
 
 `database check` diagnoses integrity; it does not repair a damaged database. Do not delete or replace the only copy of a database that fails the check. Session JSON exports preserve one session and its journal, but do not replace a full data-directory backup of settings, missions, jobs, and other state. Credentials are held separately in the operating-system credential store and are not included in SQLite backups.
 
+## Optional manual salvage
+
+If no known-good backup exists, SQLite provides a best-effort `.recover` command. Treat its output as an untrusted salvage copy: SQLite warns that rows can be missing, altered, resurrected from deleted pages, or assigned to the wrong table. Review recovered records before using them. Never run recovery against the only copy or write its output over the original profile.
+
+With all Xyst processes stopped and a verified full-directory backup made, install the official SQLite command-line tools and work only on a copy of `xyst.sqlite`:
+
+```powershell
+sqlite3.exe .\xyst-copy.sqlite ".recover --ignore-freelist" > .\recovery.sql
+sqlite3.exe .\xyst-salvaged.sqlite ".read .\recovery.sql"
+sqlite3.exe .\xyst-salvaged.sqlite "PRAGMA quick_check;"
+sqlite3.exe .\xyst-salvaged.sqlite "PRAGMA foreign_key_check;"
+```
+
+```sh
+sqlite3 ./xyst-copy.sqlite '.recover --ignore-freelist' > ./recovery.sql
+sqlite3 ./xyst-salvaged.sqlite '.read ./recovery.sql'
+sqlite3 ./xyst-salvaged.sqlite 'PRAGMA quick_check;'
+sqlite3 ./xyst-salvaged.sqlite 'PRAGMA foreign_key_check;'
+```
+
+`--ignore-freelist` avoids deliberately scanning pages SQLite considers reusable, which could reintroduce deleted records. A clean integrity result alone does not prove the recovered application data is complete. Compare table counts and inspect sessions, messages, jobs, missions, settings, and tool-call relationships. Keep the original, backup, and salvage candidate separately until the recovered contents are reviewed and Xyst starts against an isolated copy. Only then consider restoring the candidate, with another backup in hand.
+
+The command syntax is documented by the [SQLite recovery guide](https://www.sqlite.org/recovery.html). Its recovery API describes `.recover` as best-effort salvage and details the possibility of missing, altered, or resurrected rows.
+
 
 ## Verification evidence
 

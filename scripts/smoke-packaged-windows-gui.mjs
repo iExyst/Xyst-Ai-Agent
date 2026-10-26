@@ -2,18 +2,28 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { resolve, join, relative, isAbsolute, basename } from "node:path";
 
 if (process.platform !== "win32") throw new Error("The packaged Windows UI smoke only runs on Windows.");
 
 const root = process.cwd();
 const version = JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
-const installer = join(root, "release", `Xyst Setup ${version}.exe`);
+const packageDir = resolve(process.env.XYST_PACKAGE_DIR ?? join(root, "release"));
+const installer = join(packageDir, `Xyst Setup ${version}.exe`);
 const scratch = await mkdtemp(join(tmpdir(), "xyst-clean-install-"));
+const scratchRoot = resolve(tmpdir());
+const scratchPath = resolve(scratch);
+const scratchRelative = relative(scratchRoot, scratchPath);
+if (!scratchRelative || scratchRelative.startsWith("..") || isAbsolute(scratchRelative) || !basename(scratchPath).startsWith("xyst-clean-install-")) {
+  throw new Error(`Refusing to use an unexpected clean-install scratch directory: ${scratchPath}`);
+}
+const installDir = join(scratch, "installed-app");
+const installedExe = join(installDir, "Xyst.exe");
 const dataDir = join(scratch, "data");
 const workDir = join(scratch, "workspace");
 const env = {
   ...process.env,
+  LOCALAPPDATA: join(scratch, "localappdata"),
   APPDATA: join(scratch, "appdata"),
   XYST_ROOT: dataDir,
   LM_STUDIO_BASE_URL: "http://127.0.0.1:9"
@@ -73,34 +83,34 @@ async function waitForUi(page, timeoutMs = 45_000) {
   let snapshot;
   while (Date.now() < deadline) {
     try {
-      snapshot = JSON.parse(await evaluate(page, "JSON.stringify({ title: document.title, buttons: document.querySelectorAll('button').length, width: window.innerWidth, height: window.innerHeight })", 1));
-      if (snapshot.title === "Xyst Control Room" && snapshot.buttons >= 10) return snapshot;
+      snapshot = JSON.parse(await evaluate(page, "JSON.stringify({ title: document.title, buttons: document.querySelectorAll('button').length, width: window.innerWidth, height: window.innerHeight, body: document.body.innerText.slice(0, 4000) })", 1));
+      if (snapshot.title === "Xyst Control Room" && snapshot.buttons >= 10 && snapshot.body.includes("RUNTIME READY")) return { title: snapshot.title, buttons: snapshot.buttons, width: snapshot.width, height: snapshot.height };
     } catch {}
     await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
   throw new Error(`Packaged renderer did not reach the expected control room UI: ${JSON.stringify(snapshot ?? {})}`);
 }
 
+function stopInstalledCopies(executable) {
+  const escaped = executable.replace(/'/g, "''");
+  const command = `$target = '${escaped}'; Get-CimInstance Win32_Process -Filter "Name='Xyst.exe'" | Where-Object { $_.ExecutablePath -eq $target } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
+  return spawnSync("powershell.exe", ["-NoProfile", "-EncodedCommand", Buffer.from(command, "utf16le").toString("base64")], { stdio: "ignore", windowsHide: true });
+}
+
 try {
   await access(installer);
   await mkdir(workDir, { recursive: true });
   await mkdir(env.APPDATA, { recursive: true });
-  const setup = spawnSync(installer, ["/S"], { cwd: root, env, stdio: "inherit", timeout: 180_000, windowsHide: true });
+  const setup = spawnSync(installer, ["/S", `/D=${installDir}`], { cwd: root, env, stdio: "inherit", timeout: 180_000, windowsHide: true });
   if (setup.error) throw setup.error;
   if (setup.status !== 0) throw new Error(`Silent clean installation failed with exit code ${setup.status}`);
 
   // NSIS can launch the app after installation. Stop that copy, then start the
   // installed executable with an isolated profile and DevTools enabled.
-  spawnSync("taskkill.exe", ["/IM", "Xyst.exe", "/T", "/F"], { stdio: "ignore", windowsHide: true });
+  stopInstalledCopies(installedExe);
   await new Promise((resolveWait) => setTimeout(resolveWait, 800));
-  const candidates = [
-    join(process.env.LOCALAPPDATA ?? "", "Programs", "Xyst", "Xyst.exe"),
-    join(process.env.LOCALAPPDATA ?? "", "Programs", "xyst", "Xyst.exe")
-  ];
   let executable;
-  for (const candidate of candidates) {
-    try { await access(candidate); executable = candidate; break; } catch {}
-  }
+  try { await access(installedExe); executable = installedExe; } catch {}
   assert.ok(executable, `Installed Xyst.exe was not found under ${process.env.LOCALAPPDATA}`);
 
   const port = 9222;
@@ -115,10 +125,15 @@ try {
   const snapshot = await waitForUi(page);
   const screenshot = await cdpCommand(page, "Page.captureScreenshot", { format: "png", fromSurface: true }, 2);
   assert.ok(screenshot?.data, "Packaged renderer did not return a screenshot");
-  await writeFile(join(root, "release", "windows-gui-smoke.png"), Buffer.from(screenshot.data, "base64"));
+  await writeFile(join(packageDir, "windows-gui-smoke.png"), Buffer.from(screenshot.data, "base64"));
   process.stdout.write(`Clean Windows install UI smoke passed: ${JSON.stringify(snapshot)}\n`);
 } finally {
   if (app?.pid) spawnSync("taskkill.exe", ["/PID", String(app.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-  spawnSync("taskkill.exe", ["/IM", "Xyst.exe", "/T", "/F"], { stdio: "ignore", windowsHide: true });
-  await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  if (app?.pid) stopInstalledCopies(installedExe);
+  const finalScratchPath = resolve(scratch);
+  const finalScratchRelative = relative(scratchRoot, finalScratchPath);
+  if (finalScratchPath !== scratchPath || !finalScratchRelative || finalScratchRelative.startsWith("..") || isAbsolute(finalScratchRelative) || !basename(finalScratchPath).startsWith("xyst-clean-install-")) {
+    throw new Error(`Refusing to remove an unexpected clean-install scratch directory: ${finalScratchPath}`);
+  }
+  await rm(finalScratchPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

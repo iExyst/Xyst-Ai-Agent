@@ -5,6 +5,7 @@ import { open, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
+import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { totalmem } from "node:os";
 import { spawn } from "node:child_process";
@@ -17,7 +18,6 @@ import { installMissionService, missionServiceStatus, uninstallMissionService, t
 import { getMissionTemplate, MISSION_TEMPLATES } from "./mission-templates.js";
 import { createAgentUserMessage } from "./attachments.js";
 import { closeWebhookServer, parseGitHubWebhookOptions, startGitHubWebhookServer } from "./webhook-server.js";
-import type { Server } from "node:http";
 
 const args = process.argv.slice(2);
 const separatorIndex = args.indexOf("--");

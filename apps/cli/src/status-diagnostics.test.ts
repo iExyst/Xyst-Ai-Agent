@@ -30,7 +30,8 @@ test("status and desktop snapshot report corrupt SQLite without changing it or s
   const root = mkdtempSync(resolve(tmpdir(), "xyst-status-corrupt-"));
   const dataHome = resolve(root, "data");
   const workspace = resolve(root, "workspace");
-  const databasePath = resolve(dataHome, "xyst", "xyst.sqlite");
+  const appDataName = process.platform === "win32" ? "xyst" : "xyst";
+  const databasePath = resolve(dataHome, appDataName, "xyst.sqlite");
   mkdirSync(dirname(databasePath), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(databasePath, Buffer.from("deliberately-invalid-sqlite-fixture"));

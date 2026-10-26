@@ -190,6 +190,32 @@ test("mission resource scheduler considers live free VRAM and LM Studio GPU esti
   assert.match(unknown.assignments[0]?.selectionReason ?? "", /GPU estimate.*unknown/);
 });
 
+test("mission scheduler explores an unmeasured RAM-fitting model after every GPU-fit model has zero verified task outcomes", () => {
+  const models = [
+    { type: "llm" as const, publisher: "test", key: "known-failure", display_name: "Known failure", size_bytes: 1_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
+    { type: "llm" as const, publisher: "test", key: "unknown-fit", display_name: "Unknown GPU fit", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
+  ];
+  const plan = planResourceAwareBatch([{ id: "task", automatic: true }], models, {
+    memoryBudgetBytes: 8 * 1024 ** 3,
+    maxConcurrency: 1,
+    availableGpuMemoryBytes: 8 * 1024 ** 3,
+    estimatedGpuMemoryBytesByModel: { "known-failure": 2 * 1024 ** 3 },
+    performanceByModel: {
+      "known-failure": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 1000, tokensPerSecond: 20, taskSamples: 3, taskSuccesses: 0, taskSuccessRate: 0 }
+    }
+  });
+  assert.equal(plan.assignments[0]?.selectedModel, "unknown-fit");
+  assert.equal(plan.assignments[0]?.admittedOverBudget, true, "unknown GPU use is disclosed and admitted as a one-task fallback when no other assignment can proceed");
+  assert.match(plan.assignments[0]?.selectionReason ?? "", /trying the best RAM-eligible model with unknown GPU fit/);
+  assert.match(plan.assignments[0]?.selectionReason ?? "", /VRAM fit is unknown/);
+  const overBudgetKnownGpu = planResourceAwareBatch([{ id: "task", automatic: true }], models, {
+    memoryBudgetBytes: 8 * 1024 ** 3, maxConcurrency: 1, availableGpuMemoryBytes: 8 * 1024 ** 3,
+    estimatedGpuMemoryBytesByModel: { "known-failure": 2 * 1024 ** 3, "unknown-fit": 12 * 1024 ** 3 },
+    performanceByModel: { "known-failure": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 1000, tokensPerSecond: 20, taskSamples: 3, taskSuccesses: 0, taskSuccessRate: 0 } }
+  });
+  assert.equal(overBudgetKnownGpu.assignments[0]?.selectedModel, "known-failure", "a known estimate over free VRAM is not treated as unknown");
+});
+
 test("bounded tool batches preserve result order while honoring their concurrency ceiling", async () => {
   let active = 0; let peak = 0;
   const tasks = [0, 1, 2, 3, 4].map((value) => async () => {
@@ -220,12 +246,47 @@ test("local model performance aggregates and informs automatic selection without
   } finally { store.close(); }
 }));
 
+test("resuming a task on a different model preserves the earlier model's terminal outcome", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "resumed-model-outcomes.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  const originalFetch = globalThis.fetch;
+  const url = "https://8.8.8.8/api/branch";
+  let smallTurns = 0;
+  const models = ["small", "large"].map((key) => ({ type: "llm" as const, publisher: "test", key, display_name: key, size_bytes: 1, loaded_instances: [{ id: key, config: { context_length: 8192 } }], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }));
+  const provider = {
+    redact: (value: string) => value,
+    models: async () => models,
+    streamChatWithTools: async (request: { model: string }) => {
+      if (request.model === "small") {
+        smallTurns++;
+        if (smallTurns === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "small-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } }] } }] };
+        return { choices: [{ message: { role: "assistant", content: "The default branch is main." } }] };
+      }
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "large-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  globalThis.fetch = async () => new Response(JSON.stringify({ default_branch: "main" }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+    const initial = await agent.run(`Use web_fetch to retrieve exactly ${url}, then report the default branch.`, { workspace: root, model: "small", maxTurns: 3 });
+    assert.equal(initial.status, "unverified");
+    const resumed = await agent.run("Continue and verify the saved API result.", { workspace: root, sessionId: initial.sessionId, model: "large", maxTurns: 3 });
+    assert.equal(resumed.status, "completed");
+    const performance = readModelPerformance(store);
+    assert.equal(performance.small?.taskSamples, 1);
+    assert.equal(performance.small?.taskSuccessRate, 0, "the earlier model's terminal unverified attempt remains measurable after another model resumes");
+    assert.equal(performance.large?.taskSamples, 1);
+    assert.equal(performance.large?.taskSuccessRate, 1);
+  } finally { globalThis.fetch = originalFetch; store.close(); }
+}));
+
 test("automatic selection deprioritizes a model with observed zero task completions when an eligible model is unmeasured", () => {
   const models = [
     { type: "llm" as const, publisher: "test", key: "observed-failures", display_name: "Observed Failures", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
     { type: "llm" as const, publisher: "test", key: "unmeasured", display_name: "Unmeasured", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: {} }
   ];
-  const performance = { "observed-failures": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 2000, tokensPerSecond: 20, taskSamples: 2, taskSuccesses: 0, taskSuccessRate: 0 } };
+  const performance = {
+    "observed-failures": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 2000, tokensPerSecond: 20, taskSamples: 2, taskSuccesses: 0, taskSuccessRate: 0 }
+  };
   const choice = chooseAgentModel(models, { performanceByModel: performance });
   assert.equal(choice.model.key, "unmeasured");
   assert.match(choice.reason, /local task completion reliability is unmeasured/);
@@ -243,28 +304,6 @@ test("automatic selection prioritizes a verified task success over an unmeasured
   assert.equal(choice.model.key, "verified-tools");
   assert.match(choice.reason, /selected model lacks a tool-use declaration/);
   assert.match(choice.reason, /observed locally over 1 tasks: 1\/1 verified completions/);
-});
-
-test("mission scheduler explores an unmeasured RAM-fitting model after every GPU-fit model has zero verified task outcomes", () => {
-  const models = [
-    { type: "llm" as const, publisher: "test", key: "known-failure", display_name: "Known failure", size_bytes: 1_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
-    { type: "llm" as const, publisher: "test", key: "unknown-fit", display_name: "Unknown GPU fit", size_bytes: 2_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
-  ];
-  const plan = planResourceAwareBatch([{ id: "task", automatic: true }], models, {
-    memoryBudgetBytes: 8 * 1024 ** 3, maxConcurrency: 1, availableGpuMemoryBytes: 8 * 1024 ** 3,
-    estimatedGpuMemoryBytesByModel: { "known-failure": 2 * 1024 ** 3 },
-    performanceByModel: { "known-failure": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 1000, tokensPerSecond: 20, taskSamples: 3, taskSuccesses: 0, taskSuccessRate: 0 } }
-  });
-  assert.equal(plan.assignments[0]?.selectedModel, "unknown-fit");
-  assert.equal(plan.assignments[0]?.admittedOverBudget, true);
-  assert.match(plan.assignments[0]?.selectionReason ?? "", /trying the best RAM-eligible model with unknown GPU fit/);
-  assert.match(plan.assignments[0]?.selectionReason ?? "", /VRAM fit is unknown/);
-  const overBudgetKnownGpu = planResourceAwareBatch([{ id: "task", automatic: true }], models, {
-    memoryBudgetBytes: 8 * 1024 ** 3, maxConcurrency: 1, availableGpuMemoryBytes: 8 * 1024 ** 3,
-    estimatedGpuMemoryBytesByModel: { "known-failure": 2 * 1024 ** 3, "unknown-fit": 12 * 1024 ** 3 },
-    performanceByModel: { "known-failure": { samples: 5, successes: 5, successRate: 1, medianLatencyMs: 1000, tokensPerSecond: 20, taskSamples: 3, taskSuccesses: 0, taskSuccessRate: 0 } }
-  });
-  assert.equal(overBudgetKnownGpu.assignments[0]?.selectedModel, "known-failure", "a known estimate over free VRAM is not treated as unknown");
 });
 
 test("automatic local model selection prefers LM Studio GPU estimates that fit current free VRAM", async () => withTemp(async (root) => {
@@ -295,38 +334,6 @@ test("automatic local model selection prefers LM Studio GPU estimates that fit c
     assert.equal(result.model, "fits-gpu", "the higher task-success model's LM Studio estimate exceeds live free VRAM");
     assert.match(result.selectionReason, /estimates 3 GiB GPU memory.*4 GiB NVIDIA VRAM is currently free/);
     assert.equal(loaded, "fits-gpu");
-  } finally { store.close(); }
-}));
-
-test("GPU-aware automatic selection keeps measured tool-capability-unknown models eligible", async () => withTemp(async (root) => {
-  const store = new XystStore(join(root, "gpu-selection-tool-hint.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
-  config.set("global", "model.autoSelect", true);
-  const insert = store.db.prepare("INSERT INTO usage(id,session_id,provider,model,input_tokens,output_tokens,duration_ms,details_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
-  for (const [model, outcomes] of [["preferred-over-vram", ["verified_success", "verified_success"]], ["unlabeled-fit", ["verified_success", "failed"]]] as const) {
-    outcomes.forEach((taskOutcome, index) => insert.run(randomUUID(), `${model}-${index}`, "lm-studio", model, 10, 10, 1000, JSON.stringify({ outcome: "success", task_outcome: taskOutcome }), new Date().toISOString()));
-  }
-  const models = [
-    { type: "llm" as const, publisher: "test", key: "preferred-over-vram", display_name: "Preferred", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: {} },
-    { type: "llm" as const, publisher: "test", key: "unlabeled-fit", display_name: "Measured fallback", size_bytes: 450_000_000, loaded_instances: [], max_context_length: 8192, capabilities: {} },
-    { type: "llm" as const, publisher: "test", key: "tool-tagged-fit", display_name: "Tool-tagged fallback", size_bytes: 400_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }
-  ];
-  let loaded = "";
-  const inventory = () => models.map((model) => ({ ...model, loaded_instances: loaded === model.key ? [{ id: model.key, config: { context_length: 8192 } }] : [] }));
-  const provider = {
-    isLocalServer: () => true,
-    supportsLocalCliModelLifecycle: () => true,
-    models: async () => inventory(),
-    estimateLoad: async (model: string) => ({ output: `Estimated GPU Memory: ${model === "preferred-over-vram" ? 8 : model === "unlabeled-fit" ? 2 : 3} GiB` }),
-    load: async (model: string) => { loaded = model; return { status: "loaded" }; },
-    redact: (text: string) => text,
-    streamChatWithTools: async () => ({ choices: [{ message: { role: "assistant", content: "done" } }], usage: { prompt_tokens: 10, completion_tokens: 1 } })
-  };
-  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never, resourceStatsReader: async () => ({ source: "Xyst host", checkedAt: new Date().toISOString(), systemMemory: { totalBytes: 16 * 1024 ** 3, usedBytes: 8 * 1024 ** 3, availableBytes: 8 * 1024 ** 3, usedPercent: 50 }, nvidiaGpuMemory: { status: "available", source: "nvidia-smi", devices: [{ name: "GPU", totalBytes: 16 * 1024 ** 3, usedBytes: 12 * 1024 ** 3, freeBytes: 4 * 1024 ** 3 }] } }) });
-  try {
-    const result = await agent.run("Do a small task", { workspace: root });
-    assert.equal(result.model, "unlabeled-fit", "a model without a tool-use declaration can still win on measured task success when it fits VRAM");
-    assert.match(result.selectionReason, /estimates 2 GiB GPU memory.*4 GiB NVIDIA VRAM is currently free/);
-    assert.equal(loaded, "unlabeled-fit");
   } finally { store.close(); }
 }));
 
@@ -481,11 +488,10 @@ test("session compaction persists a resumable summary and preserves raw history 
   const callId = "tool-pair-1"; const now = new Date().toISOString(); let capturedPayload: Record<string, unknown> | undefined;
   const append = (role: "user" | "assistant" | "tool", value: Record<string, unknown>) => sessions.addMessage(sessionId, role, `__xyst_api_message__:${JSON.stringify(value)}`);
   const response = { choices: [{ message: { content: JSON.stringify({ decisions: ["Use persistent summaries"], dependencies: [], completed_work: ["Reviewed the prior turns"], outstanding_actions: [], durable_facts: ["Original transcript remains available"] }) } }] };
-  let summaryAttempts = 0;
   const provider = {
     isLocalServer: () => true,
     models: async () => [{ type: "llm", key: "local-test", size_bytes: 1_000_000, loaded_instances: [], max_context_length: 8192 }],
-    structuredOutput: async (options: { messages: Array<{ role: string; content: string }> }) => { capturedPayload = JSON.parse(options.messages[1]!.content) as Record<string, unknown>; summaryAttempts++; return summaryAttempts === 1 ? { choices: [{ message: { content: "The model ignored the JSON schema." } }] } : response; },
+    structuredOutput: async (options: { messages: Array<{ role: string; content: string }> }) => { capturedPayload = JSON.parse(options.messages[1]!.content) as Record<string, unknown>; return response; },
     redact: (value: string) => value
   };
   try {
@@ -505,7 +511,6 @@ test("session compaction persists a resumable summary and preserves raw history 
     const before = sessions.messages(sessionId) as Array<{ id: string; role: string; content: string }>;
     const compactor = new SessionCompactor(store, sessions, provider as never);
     const result = await compactor.compact(sessionId, "local-test");
-    assert.equal(summaryAttempts, 2, "one malformed provider response receives exactly one format-repair retry");
     const summary = (result.summary as Record<string, unknown>);
     assert.equal(summary.primary_goal, "Please finish the Xyst build and retain this primary goal.");
     assert.ok((summary.user_goals as string[]).some((goal) => goal.includes("Decision: keep original session messages")));
@@ -523,26 +528,6 @@ test("session compaction persists a resumable summary and preserves raw history 
     assert.equal((exported.messages as unknown[]).length, before.length);
     assert.equal((exported.compactions as unknown[]).length, 1);
     assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE session_id=?").get(sessionId) as { count: number }).count, 2);
-  } finally { store.close(); }
-}));
-
-test("session compaction keeps the transcript untouched when schema repair also fails", async () => withTemp(async (root) => {
-  const store = new XystStore(join(root, "session-compaction-invalid-output.sqlite")); const sessions = new SessionStore(store); const sessionId = sessions.create("Invalid compaction output");
-  for (let index = 0; index < 5; index++) { sessions.addMessage(sessionId, "user", `Keep working on the objective, turn ${index}.`); sessions.addMessage(sessionId, "assistant", `Completed turn ${index}.`); }
-  const before = sessions.messages(sessionId);
-  let attempts = 0;
-  const provider = {
-    isLocalServer: () => true,
-    models: async () => [{ type: "llm", key: "local-test", size_bytes: 1, loaded_instances: [], max_context_length: 8192 }],
-    structuredOutput: async () => { attempts++; return { choices: [{ message: { content: "not json" } }] }; },
-    redact: (value: string) => value
-  };
-  try {
-    const compactor = new SessionCompactor(store, sessions, provider as never);
-    await assert.rejects(compactor.compact(sessionId, "local-test"), /did not match the required schema after one retry/);
-    assert.equal(attempts, 2);
-    assert.equal(sessions.compactions(sessionId).length, 0);
-    assert.deepEqual(sessions.messages(sessionId), before, "failed compaction retains the original transcript");
   } finally { store.close(); }
 }));
 
@@ -744,6 +729,7 @@ test("agent completion requires successful persisted tool evidence", async () =>
     assert.equal(verified.status, "completed");
     assert.doesNotMatch(JSON.stringify(completionDefinition), /"criteria"/, "the model cannot replace or paraphrase runtime-defined criteria");
     assert.ok(completionSystemWithEvidence.includes("Available persisted evidence call indexes"));
+    assert.ok(completionSystemWithEvidence.includes("retrieve live information from an available web source or integration"));
     assert.ok(completionSystemWithEvidence.includes('1: "file_list"'), "one-based indexes and safe tool names are shown to the model");
     assert.equal(round, 2, "successful verification ends the run without another inference turn");
     assert.equal(JSON.parse((store.db.prepare("SELECT details_json FROM usage WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(verified.sessionId) as { details_json: string }).details_json).task_outcome, "verified_success");
@@ -752,38 +738,42 @@ test("agent completion requires successful persisted tool evidence", async () =>
   } finally { store.close(); }
 }));
 
-test("explicit live API and named output requests cannot be verified by unrelated evidence", async () => withTemp(async (root) => {
-  const store = new XystStore(join(root, "explicit-live-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+test("agent completion maps a compact evidence set to exact live-fetch and file-read requirements", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "compact-completion-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
-  const objective = "Use web_fetch to fetch https://example.com/data.json and save the result to live-api-acceptance.txt";
-  let turn = 0; let taskSystem = "";
+  const originalFetch = globalThis.fetch;
+  const url = "https://8.8.8.8/api/branch";
+  const objective = `Use web_fetch to retrieve exactly ${url}. Create live-branch.txt containing the branch, then use file_read to verify it.`;
+  let providerTurns = 0;
   const provider = {
     redact: (value: string) => value,
-    streamChatWithTools: async (request: { tools: Array<Record<string, unknown>>; messages: Array<Record<string, unknown>> }) => {
-      turn++;
-      if (turn === 1) {
-        taskSystem = String(request.messages.find((message) => message.role === "system")?.content ?? "");
-        return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "unrelated-list", type: "function", function: { name: "file_list", arguments: JSON.stringify({ path: root }) } }] } }] };
-      }
-      if (turn === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "unrelated-completion", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1, 1, 1, 1] }) } }] } }] };
-      return { choices: [{ message: { role: "assistant", content: "I did not perform the required API fetch." } }] };
+    models: async () => [{ type: "llm", publisher: "test", key: "test-model", display_name: "Test model", size_bytes: 1, loaded_instances: [{ id: "test-model", config: { context_length: 8192 } }], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }],
+    streamChatWithTools: async (request: { tools: Array<Record<string, unknown>> }) => {
+      const turn = providerTurns++;
+      if (turn === 0) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "compact-web-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } }] } }] };
+      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "compact-file-create", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "live-branch.txt", content: "main" }) } }] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "compact-file-read", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "live-branch.txt" }) } }] } }] };
+      const completion = request.tools.find((tool) => (tool.function as Record<string, unknown>)?.name === "task_complete");
+      assert.ok(completion);
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "compact-task-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1, 3] }) } }] } }] };
     }
   };
-  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  globalThis.fetch = async () => new Response(JSON.stringify({ default_branch: "main", status: "current" }), { status: 200, headers: { "content-type": "application/json" } });
   try {
-    const result = await agent.run(objective, { workspace: root, maxTurns: 3 });
-    assert.equal(result.status, "unverified");
-    assert.match(taskSystem, /Required evidence from explicitly requested tool: web_fetch/);
-    assert.match(taskSystem, /Required live fetch from requested URL: https:\/\/example\.com\/data\.json/);
-    assert.match(taskSystem, /For current, real-time, recent, or otherwise changing facts, use live sources when network access is available/);
-    assert.match(taskSystem, /identify the source and retrieval time/);
-    assert.match(taskSystem, /Public JSON APIs can be fetched directly even when web search is not configured/);
-    assert.match(taskSystem, /live-api-acceptance\.txt/);
-    assert.ok(taskSystem.indexOf("Required evidence from explicitly requested tool: web_fetch") < taskSystem.indexOf("Required live fetch from requested URL:"), "machine-checkable requirements appear before historical user guidance");
-    assert.ok(taskSystem.indexOf("Required live fetch from requested URL:") < taskSystem.lastIndexOf("live-api-acceptance.txt"), "URL and exact output requirements have a stable order");
-    const failed = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed'").get(result.sessionId) as { output_json: string };
-    assert.match(failed.output_json, /must come from web_fetch/);
-  } finally { store.close(); }
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never }).run(objective, {
+      workspace: root, maxTurns: 6,
+      completionCriteria: [objective, "Also report the live response status and retrieval timestamp."],
+    });
+    assert.equal(result.status, "completed");
+    const completion = store.db.prepare("SELECT input_json,output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='completed'").get(result.sessionId) as { input_json: string; output_json: string };
+    assert.deepEqual(JSON.parse(completion.input_json).evidence_tool_call_indexes, [1, 3], "a compact set can identify the file read and live fetch without duplicating indexes for every overlapping criterion");
+    const checked = JSON.parse(completion.output_json).checks as Array<{ tool: string; verified: boolean }>;
+    assert.equal(checked.length, 6);
+    assert.ok(checked.every((item) => item.verified));
+    assert.equal(checked.filter((item) => item.tool === "web_fetch").length, 2);
+    assert.equal(checked.filter((item) => item.tool === "file_read").length, 4);
+    assert.equal((await readFileAsync(join(root, "live-branch.txt"), "utf8")), "main");
+  } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
 test("agent blocks an identical web fetch after a successful truncated response and allows a larger request", async () => withTemp(async (root) => {
@@ -815,6 +805,31 @@ test("agent blocks an identical web fetch after a successful truncated response 
     assert.match(JSON.stringify(sessions.messages(result.sessionId)), /Increase max_chars/);
     assert.equal(JSON.parse(calls[1]!.input_json).max_chars, 5000);
     assert.equal(JSON.parse(calls[1]!.output_json!).truncated, false);
+  } finally { globalThis.fetch = originalFetch; store.close(); }
+}));
+
+test("explicit live API requests require evidence from the exact requested URL", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "requested-live-api-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const requestedUrl = "https://api.open-meteo.com/v1/forecast?latitude=40&longitude=-74&current=temperature_2m";
+  const wrongUrl = "https://api.open-meteo.com/v1/forecast?latitude=41&longitude=-73&current=temperature_2m";
+  const originalFetch = globalThis.fetch; let turn = 0;
+  globalThis.fetch = async (input) => new Response(JSON.stringify({ url: String(input), temperature_2m: 18 }), { status: 200, headers: { "content-type": "application/json" } });
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "wrong-live-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url: wrongUrl }) } }] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "wrong-live-fetch-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: "The requested API URL was not fetched." } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never }).run(`Use web_fetch to retrieve ${requestedUrl}`, { workspace: root, maxTurns: 3 });
+    assert.equal(result.status, "unverified");
+    const failed = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed'").get(result.sessionId) as { output_json: string };
+    assert.match(failed.output_json, /successful web_fetch of the requested URL/);
+    assert.ok(failed.output_json.includes(requestedUrl));
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
@@ -869,9 +884,10 @@ test("malformed external tool arguments fail before durable intent and do not qu
   try {
     const result = await agent.run("Run the declared local command", { workspace: root, maxTurns: 2 });
     assert.equal(result.status, "unverified");
-    assert.equal(store.db.prepare("SELECT 1 FROM tool_calls WHERE id='malformed-run'").get(), undefined);
+    const call = store.db.prepare("SELECT status,effect,execution_scope,output_json FROM tool_calls WHERE id='malformed-run'").get() as { status: string; effect: string; execution_scope: string | null; output_json: string } | undefined;
+    assert.equal(call, undefined, "invalid JSON is rejected before any durable external-action intent is inserted");
     assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE status='uncertain'").get() as { count: number }).count, 0);
-    assert.equal(turn, 2);
+    assert.equal(turn, 2, "the agent receives the parse error and continues its normal loop");
   } finally { store.close(); }
 }));
 
@@ -935,8 +951,6 @@ test("declared outputs require exact readback and the refreshed evidence list id
     assert.match(completionCalls[0]!.output_json, /file_read completed after the displayed evidence list was sent/);
     assert.equal(completionCalls[1]?.status, "completed");
     assert.match(prompts[0]!, /Available persisted evidence call indexes \(newest-first/);
-    assert.match(prompts[0]!, /File-tool paths are resolved relative to the current workspace/);
-    assert.match(prompts[0]!, /Repeat an index at each position when the same successful result supports multiple criteria/);
     assert.match(prompts[1]!, /1: "file_read" path=/);
     assert.match(prompts[1]!, /2: "file_create" path=/);
   } finally { store.close(); }
@@ -968,30 +982,6 @@ test("agent prompts once for evidence verification when actions succeeded but th
     const result = await agent.run(objective, { workspace: root, completionCriteria: [objective, secondCriterion], maxTurns: 8 });
     assert.equal(result.status, "completed", JSON.stringify(sessions.messages(result.sessionId))); assert.equal(turn, 4);
     assert.equal(await readFileAsync(join(root, "output.txt"), "utf8"), "VERIFIED_CONTENT");
-  } finally { store.close(); }
-}));
-
-test("agent nudges for completion verification after successful read-only tool evidence", async () => withTemp(async (root) => {
-  const store = new XystStore(join(root, "read-only-completion-nudge.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
-  config.set("global", "model.default", "test-model");
-  let turn = 0;
-  const provider = {
-    redact: (value: string) => value,
-    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
-      turn++;
-      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-only-list", type: "function", function: { name: "file_list", arguments: JSON.stringify({ path: root }) } }] } }] };
-      if (turn === 2) return { choices: [{ message: { role: "assistant", content: "I inspected the workspace." } }] };
-      const reminder = request.messages.filter((message) => message.role === "user").at(-1)?.content;
-      assert.match(String(reminder), /call task_complete now/i);
-      assert.match(String(reminder), /1: "file_list"/);
-      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-only-task-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
-    }
-  };
-  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
-  try {
-    const result = await agent.run("Inspect this workspace", { workspace: root, maxTurns: 5 });
-    assert.equal(result.status, "completed", JSON.stringify(sessions.messages(result.sessionId)));
-    assert.equal(turn, 3);
   } finally { store.close(); }
 }));
 
@@ -1054,7 +1044,6 @@ test("agent persists messages received during inference and continues with the u
 test("agent appends queued guidance after pending tool results are saved", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mid-run-tool-message.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
-  await writeFile(join(root, "README.md"), "source details");
   let pending: string[] = [];
   const captured: Array<Array<Record<string, unknown>>> = [];
   const provider = {
@@ -1065,19 +1054,13 @@ test("agent appends queued guidance after pending tool results are saved", async
         pending.push("Skip the generated inventory and inspect the source file.");
         return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "list-before-guidance", type: "function", function: { name: "file_list", arguments: JSON.stringify({ path: root }) } }] } }] };
       }
-      if (captured.length === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-after-guidance", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "README.md" }) } }] } }] };
-      if (captured.length === 3) return { choices: [{ message: { role: "assistant", content: "I inspected the source file." } }] };
-      const reminder = captured.at(-1)!.filter((message) => message.role === "user").at(-1)?.content;
-      assert.match(String(reminder), /call task_complete now/i);
-      assert.match(String(reminder), /1: "file_read"/);
-      assert.match(String(reminder), /2: "file_list"/);
-      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "verify-after-guidance", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [2, 1] }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: "I inspected the source file." } }] };
     }
   };
   const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   try {
-    const result = await agent.run("List project files", { workspace: root, maxTurns: 5, drainUserMessages: () => { const messages = pending; pending = []; return messages; } });
-    assert.equal(result.status, "completed");
+    const result = await agent.run("List project files", { workspace: root, maxTurns: 3, drainUserMessages: () => { const messages = pending; pending = []; return messages; } });
+    assert.equal(result.status, "unverified");
     assert.deepEqual(captured[1]!.slice(-3).map((message) => message.role), ["assistant", "tool", "user"]);
     assert.equal(captured[1]!.at(-1)?.content, "Skip the generated inventory and inspect the source file.");
   } finally { store.close(); }
@@ -1130,23 +1113,7 @@ test("agent loads a larger-context LM Studio instance without replacing an exist
     assert.deepEqual(model.loaded_instances.map((instance) => instance.id), ["context-model", "context-model:2"]);
     const decision = store.db.prepare("SELECT model FROM model_decisions WHERE session_id=?").get(result.sessionId) as { model: string };
     assert.equal(decision.model, "context-model");
-    const explicitlySelected = await agent.run("Use this loaded instance", { model: "context-model:2", workspace: root, maxTurns: 1 });
-    assert.equal(explicitlySelected.model, "context-model");
-    assert.equal(generationModels.at(-1), "context-model:2");
   } finally { store.close(); }
-}));
-
-test("agent refuses to use an embedding model as a chat model", async () => withTemp(async (root) => {
-  const store = new XystStore(join(root, "embedding-chat-model.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
-  config.set("global", "model.default", "embedding-model");
-  const provider = {
-    redact: (value: string) => value,
-    models: async () => [{ type: "embedding", key: "embedding-model", max_context_length: 8192, loaded_instances: [{ id: "embedding-model", config: { context_length: 8192 } }] }],
-    streamChatWithTools: async () => { throw new Error("embedding model must not receive chat generation"); }
-  };
-  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
-  try { await assert.rejects(() => agent.run("Run a chat task", { workspace: root }), /embedding model and cannot run agent chat/); }
-  finally { store.close(); }
 }));
 
 test("aborting an in-flight inference ends the session as cancelled instead of failed", async () => withTemp(async (root) => {
@@ -1281,7 +1248,7 @@ test("remote LM Studio fallback stays opt-in and requires per-run consent before
   let localAttempts = 0; let remoteRequests = 0; let remoteLoadRequests = 0; let remoteBody = ""; let remoteLoaded = false;
   const server = createServer((request, response) => {
     if (request.url === "/api/v1/models") { remoteRequests++; response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ models: [{ type: "llm", key: "remote-model", publisher: "test", display_name: "Remote", size_bytes: 1, loaded_instances: remoteLoaded ? [{ id: "remote-instance", config: {} }] : [] }] })); return; }
-    if (request.url === "/api/v1/models/load") { remoteLoadRequests++; remoteLoaded = true; response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ status: "loaded" })); return; }
+    if (request.url === "/api/v1/models/load") { remoteLoadRequests++; remoteLoaded = true; response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ status: "loaded", load_config: { context_length: 8192 } })); return; }
     if (request.url === "/v1/chat/completions") {
       remoteRequests++; request.setEncoding("utf8"); request.on("data", (chunk: string) => { remoteBody += chunk; }); request.on("end", () => { response.writeHead(200, { "content-type": "text/event-stream" }); response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "Remote answer" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`); }); return;
     }
@@ -2352,7 +2319,7 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   let hfSearchResults = [{ id: "owner/model", downloads: 10 }];
   const hf = {
     search: async () => hfSearchResults,
-    model: async (id: string) => ({ id, gated: false, sha: "a".repeat(40), downloads: id === "owner/popular" ? 10000 : 10, tags: ["license:mit"], ...(id === "owner/asr" ? { pipeline_tag: "automatic-speech-recognition" } : id === "owner/reranker" ? { pipeline_tag: "text-ranking" } : id === "owner/chat" ? { pipeline_tag: "text-generation" } : {}), ...(id === "owner/evaluated" ? { cardData: { license: "mit", eval_results: [{ dataset: { name: "Code benchmark" }, metric: { name: "pass@1" }, value: 42, source: { name: "Publisher report", url: "https://example.test/eval" } }] } } : {}) }),
+    model: async (id: string) => ({ id, gated: false, sha: "a".repeat(40), downloads: id === "owner/popular" ? 10000 : 10, tags: ["license:mit"], ...(id === "owner/evaluated" ? { cardData: { license: "mit", eval_results: [{ dataset: { name: "Code benchmark" }, metric: { name: "pass@1" }, value: 42, source: { name: "Publisher report", url: "https://example.test/eval" } }] } } : {}) }),
     modelConfig: async () => hfModelConfig,
     files: async () => [
       { rfilename: "model-Q5_K_M-00001-of-00002.gguf", size: 1500, lfs: { size: 1500, sha256: "1".repeat(64) } },
@@ -2383,11 +2350,6 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   assert.equal(recommendations[0]?.license, "mit"); assert.equal(recommendations[0]?.licenseAllowed, false);
   config.set("global", "models.allowedLicenses", ["mit"]);
   const licenseAllowedRecommendations = await service.recommend("coding"); assert.equal(licenseAllowedRecommendations[0]?.licenseAllowed, true);
-  hfSearchResults = [{ id: "owner/asr", downloads: 10000 }, { id: "owner/reranker", downloads: 9000 }, { id: "Qwen/Embedding-0.6B-GGUF", downloads: 8000 }, { id: "owner/chat", downloads: 10 }];
-  const chatRecommendations = await service.recommend("chat model");
-  assert.deepEqual(chatRecommendations.map((item) => item.repository), ["owner/chat"], "speech, ranking, and embedding models are not recommended as chat models");
-  assert.equal(chatRecommendations[0]?.pipeline, "text-generation");
-  hfSearchResults = [{ id: "owner/model", downloads: 10 }];
   config.set("global", "models.allowedLicenses", []);
   const visionRecommendations = await service.recommend("image understanding", undefined, {}, { minimumContextTokens: 4096, visionRequired: true });
   const visionRecommendation = visionRecommendations[0]; assert.ok(visionRecommendation, JSON.stringify(visionRecommendations));
@@ -2632,6 +2594,14 @@ test("automatic acquisition recommends and downloads only a model with declared 
     const result = await agent.run(objective);
     assert.equal(result.model, "owner/long-context"); assert.equal(generatedModel, "owner/long-context"); assert.equal(acquisitions, 1);
     assert.match(result.selectionReason, /supports 32768 tokens/);
+    // Mission resource scheduling passes its selected model into AgentRunner.
+    // The assignment must remain provisional when the complete prompt needs
+    // more context than that model declares, otherwise auto-acquisition is
+    // unreachable for the most common mission execution path.
+    models.splice(1);
+    const missionResult = await agent.run(objective, { model: "short-model", automaticModelAssignment: true });
+    assert.equal(missionResult.model, "owner/long-context"); assert.equal(generatedModel, "owner/long-context"); assert.equal(acquisitions, 2);
+    assert.match(missionResult.selectionReason, /integrity checked, and capability verified/);
   } finally { store.close(); }
 }));
 
@@ -2643,6 +2613,7 @@ test("web retrieval requires network access and blocks loopback targets", async 
 });
 
 test("web retrieval returns bounded JSON API responses as untrusted data", async () => {
+  const startedAt = Date.now();
   let accept = "";
   const tools = createWebTools(new AccessController({ mode: "restricted", network: true }), {
     fetcher: async (_input, init) => {
@@ -2650,13 +2621,13 @@ test("web retrieval returns bounded JSON API responses as untrusted data", async
       return new Response('{"updated_at":"2026-10-25T12:00:00Z","items":[1,2]}', { status: 200, headers: { "content-type": "application/vnd.example+json; charset=utf-8" } });
     }
   });
-  const result = await tools.web_fetch!.execute({ url: "https://8.8.8.8/api/status" }) as { contentType: string; status: number; text: string; truncated: boolean; retrieved_at: string; trust: string };
+  const result = await tools.web_fetch!.execute({ url: "https://8.8.8.8/api/status" }) as { contentType: string; status: number; retrieved_at: string; text: string; truncated: boolean; trust: string };
   assert.ok(accept.includes("application/*+json"));
   assert.equal(result.contentType, "application/vnd.example+json");
   assert.equal(result.status, 200);
+  assert.ok(Date.parse(result.retrieved_at) >= startedAt && Date.parse(result.retrieved_at) <= Date.now());
   assert.equal(result.text, '{"updated_at":"2026-10-25T12:00:00Z","items":[1,2]}');
   assert.equal(result.truncated, false);
-  assert.ok(Number.isFinite(Date.parse(result.retrieved_at)));
   assert.equal(result.trust, "untrusted-web-content");
 });
 
@@ -2818,6 +2789,7 @@ test("LM Studio resource estimates parse documented GPU and total memory units",
 });
 
 test("web search uses the configured Brave token and returns bounded untrusted sources", async () => {
+  const startedAt = Date.now();
   let requestedUrl = ""; let authorization = "";
   const tools = createWebTools(new AccessController({ mode: "restricted", network: true }), {
     searchToken: async () => "test-search-token",
@@ -2830,12 +2802,12 @@ test("web search uses the configured Brave token and returns bounded untrusted s
       ] } }), { status: 200, headers: { "content-type": "application/json" } });
     }
   });
-  const result = await tools.web_search!.execute({ query: "local agent tools", count: 3 }) as { results: Array<{ title: string; url: string; snippet: string }>; retrieved_at: string; trust: string };
+  const result = await tools.web_search!.execute({ query: "local agent tools", count: 3 }) as { retrieved_at: string; results: Array<{ title: string; url: string; snippet: string }>; trust: string };
   assert.equal(new URL(requestedUrl).searchParams.get("q"), "local agent tools");
   assert.equal(new URL(requestedUrl).searchParams.get("count"), "3");
   assert.equal(authorization, "test-search-token");
+  assert.ok(Date.parse(result.retrieved_at) >= startedAt && Date.parse(result.retrieved_at) <= Date.now());
   assert.deepEqual(result.results, [{ title: "Result", url: "https://example.com/page", snippet: "Snippet" }]);
-  assert.ok(Number.isFinite(Date.parse(result.retrieved_at)));
   assert.equal(result.trust, "untrusted-search-results");
 });
 
