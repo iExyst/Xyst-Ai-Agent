@@ -22,6 +22,18 @@ This command snapshots a healthy SQLite database, including committed WAL data, 
 
 The command refuses to back up a corrupt or unavailable database. Preserve a damaged profile by copying its full data directory and sidecars before attempting salvage; never treat an integrity-clean partial salvage as a complete restore.
 
+## Recover a corrupt default profile
+
+When `xyst status` reports a corrupt default database, first stop the desktop app and every mission runner. Then run:
+
+```sh
+xyst database recover ./xyst-recovery-2026-10-26
+```
+
+The archive path must be new and outside the Xyst data directory. The command copies and verifies the complete profile tree, checks a temporary copy of the SQLite database, and records a `recovery.json` manifest before moving anything in the active profile. It then renames the corrupt database and its WAL/SHM/journal sidecars to `.corrupt-*` files and creates a new, integrity-checked database. Other profile files remain in place. If the profile changes while the snapshot is being prepared, recovery stops and asks you to stop writers and retry. If fresh database initialization fails, it attempts to put the quarantined SQLite files back.
+
+This creates an empty database; it does not recover the damaged sessions or messages. Keep the full archive and quarantined files until any salvage or restore has been reviewed. OS-vault credentials are separate and are not copied into the profile archive.
+
 ## Preserve data before recovery
 
 1. Stop the desktop app and all Xyst mission runners so no process is writing to the database.

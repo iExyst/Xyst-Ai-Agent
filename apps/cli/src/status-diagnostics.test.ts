@@ -151,3 +151,74 @@ test("database backup preserves a healthy profile and refuses corrupt or existin
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("database recover snapshots the complete corrupt profile before quarantining SQLite files and initializing a healthy database", () => {
+  const root = mkdtempSync(resolve(tmpdir(), "xyst-database-recover-"));
+  const dataHome = resolve(root, "data");
+  const workspace = resolve(root, "workspace");
+  const dataDirectory = resolve(dataHome, "xyst");
+  const databasePath = resolve(dataDirectory, "xyst.sqlite");
+  const archiveDirectory = resolve(root, "recovery-archive");
+  const existingArchive = resolve(root, "existing-archive");
+  mkdirSync(dataDirectory, { recursive: true });
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(databasePath, Buffer.from("deliberately-invalid-sqlite-fixture"));
+  writeFileSync(`${databasePath}-wal`, Buffer.from("committed-wal-sidecar-fixture"));
+  writeFileSync(`${databasePath}-shm`, Buffer.from("shared-memory-sidecar-fixture"));
+  writeFileSync(resolve(dataDirectory, "profile-note.txt"), "preserve other profile files\n");
+  writeFileSync(existingArchive, "pre-existing destination\n");
+  const names = ["xyst.sqlite", "xyst.sqlite-wal", "xyst.sqlite-shm", "profile-note.txt"];
+  const hashes = new Map(names.map((name) => [name, createHash("sha256").update(readFileSync(resolve(dataDirectory, name))).digest("hex")]));
+  const fixtureBytes = names.reduce((sum, name) => sum + readFileSync(resolve(dataDirectory, name)).byteLength, 0);
+
+  try {
+    const insideProfile = runCli(dataHome, workspace, "database", "recover", resolve(dataDirectory, "nested-archive"));
+    assert.equal(insideProfile.status, 1);
+    assert.match(JSON.parse(insideProfile.stdout).data.error, /outside and separate/);
+    assert.equal(createHash("sha256").update(readFileSync(databasePath)).digest("hex"), hashes.get("xyst.sqlite"));
+
+    const existing = runCli(dataHome, workspace, "database", "recover", existingArchive);
+    assert.equal(existing.status, 1);
+    assert.match(JSON.parse(existing.stdout).data.error, /already exists/);
+    assert.equal(readFileSync(existingArchive, "utf8"), "pre-existing destination\n");
+    assert.equal(createHash("sha256").update(readFileSync(databasePath)).digest("hex"), hashes.get("xyst.sqlite"));
+
+    const recovered = runCli(dataHome, workspace, "database", "recover", archiveDirectory);
+    assert.equal(recovered.error, undefined, recovered.error?.message);
+    assert.equal(recovered.status, 0);
+    const result = JSON.parse(recovered.stdout).data;
+    assert.equal(result.status, "healthy");
+    assert.equal(result.database, databasePath);
+    assert.equal(result.archiveDirectory, archiveDirectory);
+    assert.equal(result.fullProfileSnapshot, resolve(archiveDirectory, "profile"));
+    assert.ok(result.snapshot.files >= names.length);
+    assert.ok(result.snapshot.bytes >= fixtureBytes);
+    assert.equal(result.quarantinedFiles.length, 3);
+
+    for (const name of names) {
+      assert.equal(createHash("sha256").update(readFileSync(resolve(archiveDirectory, "profile", name))).digest("hex"), hashes.get(name));
+    }
+    for (const path of result.quarantinedFiles as string[]) {
+      const originalName = path.slice(dataDirectory.length + 1).replace(/\.corrupt-.+$/, "");
+      assert.equal(createHash("sha256").update(readFileSync(path)).digest("hex"), hashes.get(originalName));
+    }
+    assert.equal(existsSync(databasePath), true);
+
+    const status = runCli(dataHome, workspace, "status");
+    assert.equal(status.status, 0);
+    const statusData = JSON.parse(status.stdout).data;
+    assert.equal(statusData.runtime, "ready");
+    assert.equal(statusData.databaseIntegrity.status, "healthy");
+    assert.equal(statusData.sessions, 0);
+    assert.equal(statusData.missions, 0);
+    const freshDatabaseHash = createHash("sha256").update(readFileSync(databasePath)).digest("hex");
+
+    const refuseHealthy = runCli(dataHome, workspace, "database", "recover", resolve(root, "should-not-exist"));
+    assert.equal(refuseHealthy.status, 1);
+    assert.match(JSON.parse(refuseHealthy.stdout).data.error, /requires a corrupt database/);
+    assert.equal(existsSync(resolve(root, "should-not-exist")), false);
+    assert.equal(createHash("sha256").update(readFileSync(databasePath)).digest("hex"), freshDatabaseHash);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1,9 +1,9 @@
 import Database from "better-sqlite3";
-import { existsSync } from "node:fs";
-import { link, mkdir, mkdtemp, rm, unlink } from "node:fs/promises";
+import { createReadStream, existsSync } from "node:fs";
+import { copyFile, cp, link, lstat, mkdir, mkdtemp, readlink, readdir, realpath, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { validateSettingScope, validateSettingValue } from "./settings-schema.js";
 
 const migrations = [
@@ -130,6 +130,161 @@ export async function createDatabaseBackup(sourcePath: string, destinationPath: 
     return { source, destination, status: "healthy", createdAt: new Date().toISOString() };
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+type ProfileTreeDigest = { files: number; symlinks: number; bytes: number; sha256: string };
+
+async function profileTreeDigest(root: string): Promise<ProfileTreeDigest> {
+  const hash = createHash("sha256");
+  let files = 0;
+  let symlinks = 0;
+  let bytes = 0;
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const absolute = join(directory, entry.name);
+      const name = relative(root, absolute).split(sep).join("/");
+      const info = await lstat(absolute);
+      if (info.isDirectory()) {
+        hash.update(`directory\0${name}\0`);
+        await visit(absolute);
+      } else if (info.isSymbolicLink()) {
+        const target = await readlink(absolute);
+        hash.update(`symlink\0${name}\0${target}\0`);
+        symlinks++;
+      } else if (info.isFile()) {
+        const fileHash = createHash("sha256");
+        for await (const chunk of createReadStream(absolute)) fileHash.update(chunk);
+        hash.update(`file\0${name}\0${info.size}\0${fileHash.digest("hex")}\0`);
+        files++;
+        bytes += info.size;
+      } else {
+        throw new Error(`Cannot safely snapshot special file: ${absolute}`);
+      }
+    }
+  };
+  await visit(root);
+  return { files, symlinks, bytes, sha256: hash.digest("hex") };
+}
+
+function pathContains(parent: string, child: string): boolean {
+  const path = relative(parent, child);
+  if (isAbsolute(path)) return false;
+  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`));
+}
+
+export type DatabaseRecoveryReport = {
+  status: "healthy";
+  database: string;
+  archiveDirectory: string;
+  fullProfileSnapshot: string;
+  quarantinedFiles: string[];
+  createdAt: string;
+  snapshot: ProfileTreeDigest;
+};
+
+/** Preserve a full corrupt profile, quarantine its SQLite files, and initialize a fresh database. */
+export async function recoverCorruptDatabaseProfile(databasePath: string, archiveDirectory: string): Promise<DatabaseRecoveryReport> {
+  const sourceDatabase = resolve(databasePath);
+  const dataDirectory = dirname(sourceDatabase);
+  const archive = resolve(archiveDirectory);
+  if (sourceDatabase !== join(dataDirectory, "xyst.sqlite")) throw new Error("Profile recovery only supports the default xyst.sqlite database path");
+  if (!existsSync(sourceDatabase)) throw new Error("Profile recovery requires an existing corrupt database; current status is missing");
+  if (!existsSync(dataDirectory)) throw new Error(`Xyst data directory does not exist: ${dataDirectory}`);
+  if (existsSync(archive)) throw new Error(`Recovery archive already exists: ${archive}`);
+
+  await mkdir(dirname(archive), { recursive: true });
+  const sourceReal = await realpath(dataDirectory);
+  const archiveParentReal = await realpath(dirname(archive));
+  const archiveReal = resolve(archiveParentReal, basename(archive));
+  if (pathContains(sourceReal, archiveReal) || pathContains(archiveReal, sourceReal)) {
+    throw new Error("Recovery archive must be outside and separate from the Xyst data directory");
+  }
+
+  const snapshotPath = join(archive, "profile");
+  await mkdir(archive);
+  let snapshotVerified: ProfileTreeDigest | undefined;
+  let snapshotCreatedAt: string | undefined;
+  try {
+    await cp(dataDirectory, snapshotPath, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true, verbatimSymlinks: true });
+    const [sourceDigest, snapshotDigest] = await Promise.all([profileTreeDigest(dataDirectory), profileTreeDigest(snapshotPath)]);
+    if (sourceDigest.sha256 !== snapshotDigest.sha256 || sourceDigest.files !== snapshotDigest.files || sourceDigest.symlinks !== snapshotDigest.symlinks || sourceDigest.bytes !== snapshotDigest.bytes) {
+      throw new Error("Full-profile snapshot verification failed; the original profile has not been changed");
+    }
+
+    const checkDirectory = join(archive, ".integrity-check");
+    await mkdir(checkDirectory);
+    let integrity: DatabaseIntegrityReport;
+    try {
+      for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+        const snapshotFile = `${snapshotPath}/xyst.sqlite${suffix}`;
+        if (existsSync(snapshotFile)) await copyFile(snapshotFile, join(checkDirectory, `xyst.sqlite${suffix}`));
+      }
+      integrity = inspectDatabaseIntegrity(join(checkDirectory, "xyst.sqlite"));
+    } finally {
+      await rm(checkDirectory, { recursive: true, force: true });
+    }
+    if (integrity.status !== "corrupt") throw new Error(`Profile recovery requires a corrupt database; copied profile status is ${integrity.status}`);
+
+    const createdAt = new Date().toISOString();
+    await writeFile(join(archive, "recovery.json"), `${JSON.stringify({ version: 1, createdAt, sourceDataDirectory: dataDirectory, fullProfileSnapshot: snapshotPath, snapshot: sourceDigest }, null, 2)}\n`, { flag: "wx" });
+    snapshotVerified = sourceDigest;
+    snapshotCreatedAt = createdAt;
+
+    const latestSourceDigest = await profileTreeDigest(dataDirectory);
+    if (latestSourceDigest.sha256 !== snapshotDigest.sha256) {
+      throw new Error(`Xyst profile changed during recovery preparation. Stop all Xyst apps and mission runners, then retry. Verified snapshot: ${snapshotPath}`);
+    }
+
+    const suffix = `${createdAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+    const sourceFiles = [sourceDatabase, `${sourceDatabase}-wal`, `${sourceDatabase}-shm`, `${sourceDatabase}-journal`].filter(existsSync);
+    const moves = sourceFiles.map((source) => ({ source, destination: `${source}.corrupt-${suffix}` }));
+    if (moves.some(({ destination }) => existsSync(destination))) throw new Error("Could not allocate unique quarantine filenames; the original profile has not been changed");
+
+    const moved: typeof moves = [];
+    try {
+      for (const item of moves) {
+        await rename(item.source, item.destination);
+        moved.push(item);
+      }
+    } catch (error) {
+      for (const item of moved.reverse()) await rename(item.destination, item.source).catch(() => undefined);
+      throw new Error(`Could not quarantine the corrupt SQLite files; attempted to restore the original profile. Full snapshot: ${snapshotPath}`, { cause: error });
+    }
+
+    let freshStore: XystStore | undefined;
+    try {
+      freshStore = new XystStore(sourceDatabase);
+      const checks = freshStore.db.pragma("quick_check") as Array<{ quick_check: string }>;
+      if (checks.length !== 1 || checks[0]?.quick_check !== "ok") throw new Error(`Fresh database failed integrity verification: ${checks.map((row) => row.quick_check).join("; ")}`);
+      freshStore.db.close();
+      freshStore = undefined;
+      const finalIntegrity = inspectDatabaseIntegrity(sourceDatabase);
+      if (finalIntegrity.status !== "healthy") throw new Error(`Fresh database did not remain healthy: ${finalIntegrity.error ?? finalIntegrity.status}`);
+    } catch (error) {
+      freshStore?.db.close();
+      const failedSuffix = `.recovery-failed-${suffix}`;
+      for (const current of [sourceDatabase, `${sourceDatabase}-wal`, `${sourceDatabase}-shm`, `${sourceDatabase}-journal`]) {
+        if (existsSync(current)) await rename(current, `${current}${failedSuffix}`).catch(() => undefined);
+      }
+      for (const item of moved.reverse()) {
+        if (!existsSync(item.source) && existsSync(item.destination)) await rename(item.destination, item.source).catch(() => undefined);
+      }
+      throw new Error(`Could not initialize a healthy Xyst database. The original profile is preserved at ${snapshotPath}; inspect the quarantined files before retrying. ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+    return {
+      status: "healthy", database: sourceDatabase, archiveDirectory: archive, fullProfileSnapshot: snapshotPath,
+      quarantinedFiles: moved.map(({ destination }) => destination), createdAt: snapshotCreatedAt!, snapshot: snapshotVerified!
+    };
+  } catch (error) {
+    if (!snapshotVerified) {
+      await rm(snapshotPath, { recursive: true, force: true }).catch(() => undefined);
+      await unlink(join(archive, "recovery.json")).catch(() => undefined);
+      await rmdir(archive).catch(() => undefined);
+    }
+    throw error;
   }
 }
 
