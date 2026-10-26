@@ -694,6 +694,14 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
             if (name === "task_complete" && callIndex !== toolCalls.length - 1) throw new Error("task_complete must be the final tool call in a response; verify only after all requested actions");
             if (!tool) throw new Error(`Unknown tool: ${name}`);
             const args = JSON.parse(rawArgs) as unknown;
+            if (name === "web_fetch") {
+              const priorFetches = this.deps.store.db.prepare("SELECT input_json,output_json,created_at FROM tool_calls WHERE session_id=? AND name='web_fetch' AND status='completed' AND output_json IS NOT NULL ORDER BY created_at DESC LIMIT 8").all(sessionId) as Array<{ input_json: string; output_json: string; created_at: string }>;
+              const repeatedTruncatedRequest = priorFetches.some((row) => {
+                try { return Date.now() - Date.parse(row.created_at) < 120_000 && stableJson(JSON.parse(row.input_json)) === stableJson(args) && asRecord(JSON.parse(row.output_json)).truncated === true; }
+                catch { return false; }
+              });
+              if (repeatedTruncatedRequest) throw new Error("This identical web_fetch request returned truncated content moments ago. Increase max_chars (up to 30000) or request narrower API fields instead of repeating the same request.");
+            }
             const signature = createHash("sha256").update(`${name}:${stableJson(args)}`).digest("hex");
             const repeats = (seenCalls.get(signature) ?? 0) + 1; seenCalls.set(signature, repeats);
             if (repeats >= 4) throw new Error("Repeated tool-call loop detected; revise the approach instead of repeating the same action");
