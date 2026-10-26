@@ -1080,6 +1080,19 @@ test("agent loads a larger-context LM Studio instance without replacing an exist
   } finally { store.close(); }
 }));
 
+test("agent refuses to use an embedding model as a chat model", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "embedding-chat-model.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "embedding-model");
+  const provider = {
+    redact: (value: string) => value,
+    models: async () => [{ type: "embedding", key: "embedding-model", max_context_length: 8192, loaded_instances: [{ id: "embedding-model", config: { context_length: 8192 } }] }],
+    streamChatWithTools: async () => { throw new Error("embedding model must not receive chat generation"); }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try { await assert.rejects(() => agent.run("Run a chat task", { workspace: root }), /embedding model and cannot run agent chat/); }
+  finally { store.close(); }
+}));
+
 test("aborting an in-flight inference ends the session as cancelled instead of failed", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "cancel-agent.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

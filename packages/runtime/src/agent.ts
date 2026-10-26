@@ -332,6 +332,7 @@ export class AgentRunner {
       const providerInventory = provider === this.deps.provider ? (inventory ??= await provider.models(options.signal)) : await provider.models(options.signal);
       const candidate = modelForIdentifier(providerInventory, key);
       if (!candidate) throw new Error(`Selected model ${key} is not present in the LM Studio model inventory`);
+      if (candidate.type !== "llm" && candidate.type !== "decision") throw new Error(`Selected model ${key} is an embedding model and cannot run agent chat`);
       const requestedInstance = key === candidate.key ? undefined : candidate.loaded_instances.find((instance) => instance.id === key);
       if (key !== candidate.key && !requestedInstance) throw new Error(`Loaded LM Studio model instance ${key} is no longer available`);
       const availableInstances = requestedInstance ? [requestedInstance] : candidate.loaded_instances;
