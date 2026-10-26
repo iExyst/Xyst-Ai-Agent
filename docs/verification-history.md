@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Exact current CI Linux package GUI and live API acceptance (2026-10-26)
+
+- Downloaded the `xyst-linux` artifact from successful CI run `40368740323` for PR head `cb32093df8dc71089f66755808d49601015b54c6`. The AppImage is 325,087,566 bytes; SHA-512 Base64 `Hw23maGTiaoKzJrwP3GzhUV5zfJePad6AEu/MDp6r+GU2ASAcfk9vtorJlMuYYc3zbcViTZnvxd7hEyrmrZ1pA==`; the downloaded `latest-linux.yml` matched its size and digest.
+- Copied that exact AppImage into Ubuntu 24.04 WSL's Linux filesystem, then ran `scripts/smoke-packaged-linux-gui.mjs` with the package directory and bundled Node. The WSLg renderer reached `RUNTIME READY` and displayed the control room at 1440×913 with 25 controls. The screenshot was visually inspected: [.xyst-live-acceptance/current-ci-package-cb32093/linux-gui-smoke.png](../.xyst-live-acceptance/current-ci-package-cb32093/linux-gui-smoke.png). Starting the AppImage directly from `/mnt/c` did not expose its renderer before the smoke timeout; running the identical, hash-matched file from WSL's ext4 filesystem passed.
+- The same artifact's packaged CLI, isolated `XDG_DATA_HOME`/`XDG_CONFIG_HOME` and workspace, and already-loaded LM Studio `qwen/qwen3-vl-2b:2` fetched `https://api.github.com/repos/iExyst/Xyst-Ai-Agent` through Xyst `web_fetch`: HTTP 200, `application/json`, `retrieved_at=2026-10-26T17:50:23.913Z`. Read-only SQLite inspection confirmed the exact endpoint, `full_name=iExyst/Xyst-Ai-Agent`, `default_branch=main`, `archived=false`, a successful full fetch (`max_chars=30000`), and `task_complete` with `verified:true`; database `quick_check` returned `ok`. Session: `ef60e311-4c75-4f4d-8a27-48cd0856d452`.
+- This closes current-CI Linux package WSLg renderer and live API evidence. The model's final prose omitted some requested repository fields, so it is not counted as a natural-language answer-quality pass; bare-metal Linux acceptance remains separate.
+
 ## Session workspace persistence and resume verification (2026-10-26)
 
 - Fixed resumable session workspace loss with SQLite migration 16. Agent runs persist their resolved absolute workspace; resume restores it unless `--workspace` overrides it; old sessions capture the current workspace on first resume; forks and exports retain the workspace. CLI `agent run`, `agent resume`, and `agent chat` accept `--workspace`, and `session new` records its creation directory.
