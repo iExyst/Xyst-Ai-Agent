@@ -192,11 +192,14 @@ export class AgentRunner {
     const presencePenalty = this.deps.config.resolve<number>("inference.presencePenalty", scopes)?.value;
     const frequencyPenalty = this.deps.config.resolve<number>("inference.frequencyPenalty", scopes)?.value;
     const stopSequences = this.deps.config.resolve<string | string[]>("inference.stopSequences", scopes)?.value;
+    const reasoning = this.deps.config.resolve<"off" | "low" | "medium" | "high" | "on">("inference.reasoning", scopes)?.value;
+    const reasoningEffort: "none" | "low" | "medium" | "high" | undefined = reasoning === "off" ? "none" : reasoning === "on" ? "medium" : reasoning;
     const externalApprovalRequired = this.deps.config.resolve<boolean>("autonomy.externalActionApproval", scopes)?.value === true;
     const inferenceOptions = {
       ...(temperature !== undefined ? { temperature } : {}), ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
       ...(topP !== undefined ? { top_p: topP } : {}), ...(topK !== undefined ? { top_k: topK } : {}), ...(repeatPenalty !== undefined ? { repeat_penalty: repeatPenalty } : {}), ...(presencePenalty !== undefined ? { presence_penalty: presencePenalty } : {}),
-      ...(frequencyPenalty !== undefined ? { frequency_penalty: frequencyPenalty } : {}), ...(stopSequences !== undefined ? { stop: stopSequences } : {})
+      ...(frequencyPenalty !== undefined ? { frequency_penalty: frequencyPenalty } : {}), ...(stopSequences !== undefined ? { stop: stopSequences } : {}),
+      ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {})
     };
     const performanceByModel = localMetricsEnabled ? readModelPerformance(this.deps.store) : {};
     const contextMessages = this.deps.sessions.contextMessages(sessionId).map((row) => {
@@ -921,7 +924,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
       .run(model, outcome, sessionId);
   }
 
-  private async generateWithRetry(request: { model: string; messages: ApiMessage[]; tools: unknown[]; temperature?: number; max_tokens?: number; top_p?: number; presence_penalty?: number; frequency_penalty?: number; stop?: string | string[]; ttl?: number }, onText?: (text: string) => void, signal?: AbortSignal, provider: LMStudioProvider = this.deps.provider, timeoutMs?: number): Promise<Record<string, unknown>> {
+  private async generateWithRetry(request: { model: string; messages: ApiMessage[]; tools: unknown[]; temperature?: number; max_tokens?: number; top_p?: number; presence_penalty?: number; frequency_penalty?: number; stop?: string | string[]; reasoning_effort?: "none" | "low" | "medium" | "high"; ttl?: number }, onText?: (text: string) => void, signal?: AbortSignal, provider: LMStudioProvider = this.deps.provider, timeoutMs?: number): Promise<Record<string, unknown>> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (signal?.aborted) throw new Error("Task cancelled");

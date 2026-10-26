@@ -1,5 +1,13 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Latest continuation · live API acceptance and agent reasoning control (2026-10-26)
+
+- Closed the agent-loop gap in `inference.reasoning`: scoped `off`, `low`, `medium`, `high`, and `on` now reach LM Studio's documented OpenAI-compatible `reasoning_effort` field (`off` → `none`, `on` → `medium`). Updated configuration/support docs and added scoped-resolution plus HTTP request-body regressions.
+- Verification: `npm run typecheck` passed; runtime suite passed 143 tests, 2 host-dependent skips, and 0 failures after the provider body-forwarding assertion was added; `git diff --check` passed.
+- Fresh isolated Windows CLI acceptance with the loaded Qwen3-0.6B used Xyst `web_fetch` against the exact live Open-Meteo current-conditions API; HTTP 200 JSON was persisted and `task_complete` verified the exact URL and successful fetch. Xyst retrieval time: `2026-10-26T03:47:11.170Z`; current NYC-area response: `47.4 °F`, 82% relative humidity, WMO code 0, observation time `2026-10-25T23:45` America/New_York. The isolated test profile/workspace were under `.xyst-live-acceptance/`; no normal user profile was touched.
+- Live access works via public HTTP(S)/JSON APIs without a search credential, with retrieval timestamps, bounded responses, and network/SSRF policy. General search still requires the user's Brave token; private/authenticated APIs require a configured integration or MCP server. This provides on-demand live retrieval and scheduled/webhook-triggered updates where configured, not an always-on universal data stream.
+- The live API path is verified; broader automatic-model selection quality and release gates below remain. Keep the full build goal active.
+
 ## Latest continuation · GPU-aware selection consistency (2026-10-26)
 
 - Fixed automatic GPU-aware model selection so LM Studio's `trained_for_tool_use` declaration remains a ranking hint instead of becoming a hard filter for alternate models. Candidate filtering preserves vision requirements and the best loaded or declared context for the current task.

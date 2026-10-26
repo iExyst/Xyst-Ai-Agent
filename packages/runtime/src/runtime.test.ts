@@ -1192,7 +1192,7 @@ test("agent applies scoped inference parameters to streamed LM Studio requests",
   const store = new XystStore(join(root, "inference-options.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model"); config.set("global", "inference.temperature", 0.4);
   config.set("global", "inference.maxTokens", 512); config.set("global", "inference.requestTimeoutSeconds", 180); config.set("global", "inference.topP", 0.9); config.set("global", "inference.topK", 40); config.set("global", "inference.repeatPenalty", 1.1); config.set("global", "inference.presencePenalty", 0.2);
-  config.set("global", "inference.frequencyPenalty", -0.3); config.set("global", "inference.stopSequences", ["END", "STOP"]); config.set("mission", "inference.temperature", 0.7, "mission-1"); config.set("mission", "inference.requestTimeoutSeconds", 75, "mission-1");
+  config.set("global", "inference.frequencyPenalty", -0.3); config.set("global", "inference.stopSequences", ["END", "STOP"]); config.set("global", "inference.reasoning", "off"); config.set("mission", "inference.temperature", 0.7, "mission-1"); config.set("mission", "inference.requestTimeoutSeconds", 75, "mission-1"); config.set("mission", "inference.reasoning", "high", "mission-1");
   let captured: Record<string, unknown> = {};
   let capturedTimeout: number | undefined;
   const provider = { redact: (value: string) => value, streamChatWithTools: async (request: Record<string, unknown>, _onText?: unknown, _signal?: unknown, timeoutMs?: number) => { captured = request; capturedTimeout = timeoutMs; return { choices: [{ message: { role: "assistant", content: "Done" } }] }; } };
@@ -1202,6 +1202,9 @@ test("agent applies scoped inference parameters to streamed LM Studio requests",
     assert.equal(capturedTimeout, 75_000);
     assert.equal(captured.temperature, 0.7); assert.equal(captured.max_tokens, 512); assert.equal(captured.top_p, 0.9); assert.equal(captured.top_k, 40); assert.equal(captured.repeat_penalty, 1.1);
     assert.equal(captured.presence_penalty, 0.2); assert.equal(captured.frequency_penalty, -0.3); assert.deepEqual(captured.stop, ["END", "STOP"]);
+    assert.equal(captured.reasoning_effort, "high");
+    await agent.run("Run with global inference", {});
+    assert.equal(captured.reasoning_effort, "none");
   } finally { store.close(); }
 }));
 
@@ -3254,21 +3257,27 @@ test("LM Studio tool stream deadline aborts a stalled SSE response", async () =>
 
 test("LM Studio tool streams parse tool calls and fail on server errors or empty completions", async () => {
   let mode: "tool" | "error" | "empty" = "tool";
-  const server = createServer((_request, response) => {
-    response.writeHead(200, { "content-type": "text/event-stream" });
-    if (mode === "error") response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "Invalid request: tool schema" } })}\n\n`);
-    else if (mode === "empty") response.end(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
-    else response.end([
-      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call-1", type: "function", function: { name: "dummy_echo", arguments: '{"text":' } }] }, finish_reason: null }] })}`,
-      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"ok"}' } }] }, finish_reason: "tool_calls" }] })}`,
-      "data: [DONE]", ""
-    ].join("\n\n"));
+  let requestBody: Record<string, unknown> | undefined;
+  const server = createServer((request, response) => {
+    let body = ""; request.setEncoding("utf8"); request.on("data", (chunk: string) => { body += chunk; });
+    request.on("end", () => {
+      requestBody = JSON.parse(body) as Record<string, unknown>;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      if (mode === "error") response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "Invalid request: tool schema" } })}\n\n`);
+      else if (mode === "empty") response.end(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+      else response.end([
+        `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call-1", type: "function", function: { name: "dummy_echo", arguments: '{"text":' } }] }, finish_reason: null }] })}`,
+        `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"ok"}' } }] }, finish_reason: "tool_calls" }] })}`,
+        "data: [DONE]", ""
+      ].join("\n\n"));
+    });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   try {
     const address = server.address(); assert.ok(address && typeof address !== "string");
     const provider = new LMStudioProvider({ baseUrl: `http://127.0.0.1:${address.port}` });
-    const result = await provider.streamChatWithTools({ model: "test-model", messages: [{ role: "user", content: "Call dummy_echo" }], tools: [] });
+    const result = await provider.streamChatWithTools({ model: "test-model", messages: [{ role: "user", content: "Call dummy_echo" }], tools: [], reasoning_effort: "none" });
+    assert.equal(requestBody?.reasoning_effort, "none");
     assert.deepEqual((result.choices as Array<{ message: { tool_calls: Array<{ function: { name: string; arguments: string } }> } }>)[0]?.message.tool_calls, [{ id: "call-1", type: "function", function: { name: "dummy_echo", arguments: '{"text":"ok"}' } }]);
     mode = "error";
     await assert.rejects(provider.streamChatWithTools({ model: "test-model", messages: [], tools: [] }), /Invalid request: tool schema/);
