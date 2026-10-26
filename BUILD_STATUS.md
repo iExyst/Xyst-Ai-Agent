@@ -10,7 +10,8 @@
 ## Follow-up · cross-platform regression caught and corrected (2026-10-26)
 
 - Hosted run `40319066603` on commit `d298c93` exposed that a progress question phrased “What % complete would you say the build is?” still entered resume criteria. Both Ubuntu and Windows runtime suites caught the same regression. The control-message matcher now excludes that wording; the focused resume test passes locally.
-- Full local verification after the correction: runtime 148 passed, 2 host-dependent skips, 0 failed; CLI 18 passed; `npm run build` and `git diff --check` pass. The Linux package job for `d298c93` passed. Its Windows package job was still running when recorded. The corrected source will be pushed to trigger fresh hosted verification.
+- Full local verification after the correction: runtime 148 passed, 2 host-dependent skips, 0 failed; CLI 18 passed; `npm run build` and `git diff --check` pass. Corrected source is pushed as `7f8aa90`. Fresh hosted [Windows/Ubuntu verification](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40319553930) and [Linux/Windows packaging](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40319553745) passed, including the Windows clean-install/renderer smoke.
+- The earlier Windows package job on `d298c93` also completed successfully, including its renderer smoke, but that commit’s verification workflow is failed and superseded by the passing `7f8aa90` checks.
 
 ## Latest continuation · live automatic model selection and recovery (2026-10-26)
 
