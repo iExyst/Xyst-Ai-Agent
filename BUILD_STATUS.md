@@ -3,8 +3,9 @@
 ## Latest continuation · preserve custom XDG data path in Linux mission service (2026-10-26)
 
 - Fixed a shared-state issue in service installation: when `XDG_DATA_HOME` is configured, `mission service install` now writes that exact data home into the generated `systemd --user` unit alongside `XYST_ROOT`. The formatter uses POSIX path normalization even when unit-generation tests run on Windows. This keeps the headless daemon on the same SQLite profile as the CLI and desktop.
-- Added unit and install-path regression assertions and documented the behavior in the mission guide. Focused service tests passed (2/2); full `npm test` passed (153 runtime passes, 2 host-dependent skips, 21 CLI passes), and all runtime/CLI/desktop typechecks passed. Exact current CI Linux package lifecycle verification is next.
-- The working change is local to the PR checkout at this checkpoint; the existing PR and untracked `.help recover`/`.xyst-live-acceptance/` artifacts are preserved.
+- Added unit and install-path regression assertions and documented the behavior in the mission guide. Focused service tests passed (2/2); full `npm test` passed (153 runtime passes, 2 host-dependent skips, 21 CLI passes), and all runtime/CLI/desktop typechecks passed. Exact CI Linux AppImage acceptance then verified the manifest SHA-512 and size, installed the packaged systemd user service with a unique XDG data path, confirmed the running daemon inherited both `XDG_DATA_HOME` and `XYST_ROOT`, and confirmed the CLI read a healthy database at that same location. Uninstall returned the unit to `not-found/inactive` with no daemon or SQLite sidecars left behind.
+- Commit `5233694` passed all eight hosted Windows/Ubuntu verification and Windows/Linux packaging checks across push runs `40420647233` / `40420647230` and PR runs `40420651032` / `40420651069`. Linux service lifecycle evidence is under `.xyst-live-acceptance/ci-service-5233694/`; package SHA-512 is recorded in that run's `latest-linux.yml`. Native Linux host behavior is still unverified.
+- The working change is pushed to the existing draft PR; untracked `.help recover`/`.xyst-live-acceptance/` artifacts and the separate primary checkout are preserved.
 
 ## Latest continuation · verified LM Studio live API run and Windows validation (2026-10-26)
 
