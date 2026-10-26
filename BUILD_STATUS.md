@@ -10,6 +10,7 @@
 
 ## Resume checkpoint · live API access reverified (2026-10-26)
 
+- Fresh model-backed API task passed end to end: the Xyst agent used the running `qwen3-0.6b` to call Open-Meteo `web_fetch`, then `task_complete` verified the persisted successful fetch. Retrieval was `2026-10-26T06:40:29.737Z`; New York observation `02:30`, 44.1 °F, 69% humidity, WMO code 0. Session `61f90b15-dff5-4134-9027-d3e4841bc475` used an isolated APPDATA/workspace; no files or user profile data changed.
 - Live Hugging Face discovery verified through the packaged CLI source (`hf search "Qwen3.5 9B"`) after enabling `models.onlineDiscovery` only in an isolated profile. It returned current public model IDs and metadata, including `Qwen/Qwen3.5-9B`, Apache-2.0 license, downloads, and likes; no model was downloaded.
 - Reverified a second live source through Xyst `web_fetch`: GitHub's public repository JSON API returned HTTP 200, untruncated, at `2026-10-26T06:25:41.697Z`; the live `pushed_at` value was `2026-10-26T06:24:57Z`. Together with Open-Meteo, this confirms live JSON access across unrelated public APIs.
 - Fresh isolated CLI agent acceptance completed: Qwen 3.5-9B was stopped after several minutes without persisting a result; the same Xyst session resumed on already-loaded `qwen3-0.6b`, created `live-api-agent-acceptance.txt`, read back the exact `XYST_AGENT_FILE_WRITE_OK` content, and passed persisted `task_complete` verification. Xyst marked the session completed. Profile and workspace were isolated under `.xyst-live-acceptance/`; no models were loaded/unloaded.
