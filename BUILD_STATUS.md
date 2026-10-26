@@ -3,7 +3,7 @@
 ## Resume · latest CI and live-data gate review
 
 - Re-read the complete ordered build specification from the attached text. The public live-data/API requirement is implemented and has current-source plus packaged Windows/Linux acceptance: bounded public HTTPS/JSON access with status, exact source URL, and UTC retrieval time; GitHub and Hugging Face integrations; scheduled polling; and opt-in signed GitHub webhook intake. Public APIs need no provider credential. Brave Search and private services require their own configured credentials.
-- Latest head `4f9cd3c` passed all 8 duplicated hosted checks: Windows and Ubuntu verification, plus Windows and Linux packaging, across push and PR workflows. Run IDs: `40397497598`, `40397497664`, `40397505272`, `40397505331`.
+- Latest committed head `bb64bf8` passed all 8 duplicated hosted checks: Windows and Ubuntu verification, plus Windows and Linux packaging, across push and PR workflows. Run IDs: `40399922811`, `40399922759`, `40399931950`, `40399931977`.
 - The full build is still active. Remaining gates documented in the acceptance map include bare-metal Linux desktop/service/reboot, production signing and trusted update hosting, installed LM Studio plugin permissions, broader model selection and resource coordination, configured Brave/private API credentials, and final representative mission/install acceptance. Preserve `.help recover` and `.xyst-live-acceptance/`.
 
 ## Resume · configured LM Studio plugin permission probe
@@ -11,6 +11,12 @@
 - Rechecked the installed Windows LM Studio API through an isolated Xyst profile: `lm diagnose` returned ready at `http://127.0.0.1:1235` with 38 models. The already-loaded `qwen3-0.6b:2` was used for a bounded read-only configured-plugin request; LM Studio returned HTTP 403, `Permission denied to use plugin 'mcp/xyst_local_acceptance'`.
 - The feature matrix now records this exact result. It confirms native chat and ephemeral MCP are available, while the preconfigured `mcp.json` route still requires LM Studio server-side permission and API-token authorization. No model was loaded/unloaded, no server permissions or model-catalog settings were changed, and the Xyst probe used its own isolated data directory.
 - LM Studio's app window could not be activated after two refreshed attempts, so its UI permission setting was left unchanged. Official documentation places this control in Server Settings; the installed `lms server` CLI exposes only start, stop, and status. The plugin route remains an external acceptance gate until that documented server permission and API-token authorization are verified.
+
+## Resume · isolated empty-catalog LM Studio acceptance
+
+- Imported a fresh Ubuntu 24.04 WSL distro from the previously checksum-verified rootfs (`2a790896740b14d637dbdc583cce1ba081ac53b9e9cdb46dc09a2f73abbd9934`) to keep acquisition testing separate from existing model catalogs. Installed Ubuntu's documented `libatomic1` prerequisite and ran the official LM Studio headless installer; it verified the llmster 0.0.25-1 archive checksum and installed only inside the isolated distro.
+- `lms daemon up` and `lms daemon status --json` both fail with `ENOENT` for `/root/.lmstudio/.internal/lms-key-2`. The same issue is reported upstream in [lmstudio-ai/lms #632](https://github.com/lmstudio-ai/lms/issues/632). The fresh distro has no LM model catalog; no key was copied, and the existing Windows/WSL catalogs and server processes were not changed. Consequently the exact-package empty-catalog auto-download acceptance has not yet run.
+- Brave Search and Hugging Face OS-vault credentials are not configured for this Windows user; the GitHub personal token is configured. Public APIs and public model discovery remain usable without those keys. Authenticated private API/Hugging Face access and Brave Search remain unverified until valid credentials are configured.
 
 ## Continuation · explicit corrupt-profile recovery and live-data scope
 
