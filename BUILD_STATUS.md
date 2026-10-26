@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-26 (refreshed)
 
+## Continuation · resumable current-source live API acceptance (2026-10-26)
+
+- A fresh isolated current-source Xyst CLI run against LM Studio `127.0.0.1:1235` fetched the live GitHub REST API (HTTP 200), created `verified-repo.json`, and read it back with exact fields and source timestamp. The 9B model stalled on final completion inference under 98–99% GPU load; the saved session was resumed with the already-loaded 0.6B model, and persisted `task_complete` verified both live-fetch and file-read evidence. Isolated SQLite integrity is `ok`. Details and exact session ID: [verification history](docs/verification-history.md#current-source-live-api-task-resumed-after-slow-inference-2026-10-26).
+- The extra 9B instance loaded for the stalled attempt was unloaded; the pre-existing instance remains loaded. The 0.6B model's initial HTTP 500 attempt is recorded as failed, not counted as acceptance.
+- Full build remains active. The newly verified current-source API-plus-file resume path advances model/mission acceptance; GPU contention and slow final inference remain open reliability limitations. Native Linux, release signing/update hosting, configured search/private API credentials, and complete default-profile recovery remain open.
+
 ## Continuation · live data sources and PR validation (2026-10-26)
 
 - Follow-up access check: Xyst's active profile reports `mode=full`, `network=true`, and `integrations=true`. Added a saved LM Studio base-URL setting, shown in desktop Settings and read dynamically by the provider; in an isolated APPDATA/workspace with no environment override, Xyst saved `http://127.0.0.1:1235` and `lm diagnose` returned 38 models. Typechecks, builds, and focused URL/runtime tests passed. A fresh isolated model-backed GitHub API attempt selected the already-loaded Qwen3.5-9B but produced no first inference/tool call after more than two minutes, so it was interrupted and is not counted as a new acceptance. Its data is under `.xyst-live-acceptance/realtime-github-20261026/`; the prior exact packaged live GitHub API acceptance below remains positive live-source evidence. No model was loaded/unloaded, and the default profile database was only inspected read-only (its last-write time predates this check).
