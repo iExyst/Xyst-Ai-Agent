@@ -1203,3 +1203,9 @@ The runtime creates a versioned SQLite database for sessions, messages, tool cal
 - The root-file-path regression now rejects a filesystem root before side effects and classifies the result as a definite failure instead of an uncertain external action. Focused regression coverage and the complete local suites passed.
 - The resumed installed-LM-Studio Qwen3.5-9B session `38a3d189-7a89-428e-9031-3ed8ab8e85d1` created and read back `live-agent-recovery.json`; persisted `task_complete` returned `verified:true` for its evidence checks. The earlier malformed-path attempt had no filesystem effect and was explicitly reconciled before retry.
 - Existing live API acceptance remains valid: Xyst `web_fetch` and the agent loop have returned timestamped, exact-URL-verified responses from Open-Meteo and GitHub. Public JSON APIs are available without a search API key; Brave search and private sources require their own configured credentials or integration.
+
+## Linux systemd mission-service lifecycle (WSL, 2026-10-26)
+
+- Rebuilt the current PR source in Ubuntu 24.04 WSL2 from a clean tracked-source archive using the supported Node 24.22.0 Linux binary; its official SHA-256 manifest matched. `npm ci` and runtime/CLI TypeScript builds passed with native Linux dependencies.
+- The actual WSL systemd user manager installed `xyst-mission-daemon` through the current Xyst CLI. `systemctl --user` reported the service active/running, the journal showed the Xyst scheduler start message, and isolated `xyst status` reported a ready runtime, full profile, and healthy SQLite database under `/tmp/xyst-native-linux-data-30abad5`.
+- The CLI then uninstalled the service; systemd confirmed it stopped, the unit file was removed, and the temporary user-manager data-directory override was unset. This validates the Linux systemd user-service install/start/status/stop/remove path under WSL2. It does not verify bare-metal Linux boot/reboot behavior.
