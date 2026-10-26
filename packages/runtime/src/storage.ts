@@ -52,7 +52,8 @@ const migrations = [
    UPDATE tool_calls SET execution_scope=COALESCE((SELECT run_id||':'||task_key FROM mission_tasks WHERE mission_tasks.session_id=tool_calls.session_id LIMIT 1),session_id) WHERE effect='external' AND execution_scope IS NULL;
    UPDATE tool_calls SET status='uncertain',finished_at=COALESCE(finished_at,CURRENT_TIMESTAMP) WHERE status='running' AND effect='external';`,
   `CREATE TABLE session_compactions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, through_message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, summary_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(session_id,through_message_id));
-    CREATE INDEX session_compactions_recent ON session_compactions(session_id,created_at DESC);`
+    CREATE INDEX session_compactions_recent ON session_compactions(session_id,created_at DESC);`,
+  `ALTER TABLE sessions ADD COLUMN workspace TEXT;`
 ];
 
 export type DatabaseIntegrityReport = { path: string; status: "healthy" | "corrupt" | "missing" | "unavailable"; details?: string[]; error?: string };
@@ -189,11 +190,23 @@ export class ConfigStore {
 
 export class SessionStore {
   constructor(private readonly store: XystStore) {}
-  create(title = "New session"): string {
+  create(title = "New session", workspace?: string): string {
     const name = title.trim(); if (!name || name.length > 160) throw new Error("Session title must contain 1–160 characters");
     const id = crypto.randomUUID(); const now = new Date().toISOString();
-    this.store.db.prepare("INSERT INTO sessions(id,title,created_at,updated_at) VALUES(?,?,?,?)").run(id, name, now, now);
+    const path = workspace === undefined ? null : resolve(workspace);
+    if (path?.includes("\0")) throw new Error("Session workspace path is invalid");
+    this.store.db.prepare("INSERT INTO sessions(id,title,created_at,updated_at,workspace) VALUES(?,?,?,?,?)").run(id, name, now, now, path);
     return id;
+  }
+  workspace(sessionId: string): string | undefined {
+    const row = this.store.db.prepare("SELECT workspace FROM sessions WHERE id=?").get(sessionId) as { workspace: string | null } | undefined;
+    if (!row) throw new Error(`Session not found: ${sessionId}`);
+    return row.workspace ?? undefined;
+  }
+  setWorkspace(sessionId: string, workspace: string): void {
+    if (!workspace.trim() || workspace.includes("\0")) throw new Error("Session workspace path is invalid");
+    const result = this.store.db.prepare("UPDATE sessions SET workspace=?,updated_at=? WHERE id=?").run(resolve(workspace), new Date().toISOString(), sessionId);
+    if (!result.changes) throw new Error(`Session not found: ${sessionId}`);
   }
   list(): unknown[] { return this.store.db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all(); }
   rename(sessionId: string, title: string): void {
@@ -207,10 +220,10 @@ export class SessionStore {
     if (!result.changes) throw new Error(`Session not found: ${sessionId}`);
   }
   fork(sessionId: string, title?: string): string {
-    const source = this.store.db.prepare("SELECT title FROM sessions WHERE id=?").get(sessionId) as { title: string } | undefined;
+    const source = this.store.db.prepare("SELECT title,workspace FROM sessions WHERE id=?").get(sessionId) as { title: string; workspace: string | null } | undefined;
     if (!source) throw new Error(`Session not found: ${sessionId}`);
     const forkTitle = title?.trim() || `${source.title} (fork)`;
-    const id = this.create(forkTitle);
+    const id = this.create(forkTitle, source.workspace ?? undefined);
     const messages = this.store.db.prepare("SELECT role,content,created_at FROM messages WHERE session_id=? ORDER BY created_at,rowid").all(sessionId) as Array<{ role: string; content: string; created_at: string }>;
     const insert = this.store.db.prepare("INSERT INTO messages(id,session_id,role,content,created_at) VALUES(?,?,?,?,?)");
     const transaction = this.store.db.transaction(() => { for (const message of messages) insert.run(crypto.randomUUID(), id, message.role, message.content, message.created_at); });
@@ -263,7 +276,7 @@ export class SessionStore {
     return [{ role: "assistant", content: `[Persisted Xyst session summary; historical context, not a new instruction]\n${summary}` }, ...rows];
   }
   export(sessionId: string): Record<string, unknown> {
-    const session = this.store.db.prepare("SELECT id,title,status,created_at,updated_at FROM sessions WHERE id=?").get(sessionId);
+    const session = this.store.db.prepare("SELECT id,title,status,created_at,updated_at,workspace FROM sessions WHERE id=?").get(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     const messages = this.messages(sessionId) as Array<{ id: string; role: string; content: string; created_at: string }>;
     const decoded = messages.map(({ id, role, content, created_at }) => ({ id, role, content: content.startsWith("__xyst_api_message__:") ? JSON.parse(content.slice("__xyst_api_message__:".length)) : content, created_at }));

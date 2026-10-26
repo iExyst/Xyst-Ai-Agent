@@ -139,6 +139,7 @@ export class AgentRunner {
   constructor(private readonly deps: { store: XystStore; config: ConfigStore; sessions: SessionStore; events: RuntimeEvents; access: AccessController; provider: LMStudioProvider; github: GitHubProvider; modelAcquisition?: ModelAcquisitionService; dataDir?: string; credentials?: { get(service: string, name: string): Promise<string | undefined> }; memories?: MemoryStore; resourceStatsReader?: typeof readHostResourceStats }) {}
 
   async run(objective: string, options: AgentOptions = {}): Promise<AgentResult> {
+    const workspace = resolve(options.workspace ?? (options.sessionId ? this.deps.sessions.workspace(options.sessionId) : undefined) ?? process.cwd());
     const safeObjective = this.deps.provider.redact(objective);
     const baseCompletionCriteria = [...new Set((options.completionCriteria?.length ? options.completionCriteria : [safeObjective]).map((item) => this.deps.provider.redact(String(item)).trim()).filter((item) => Boolean(item) && (Boolean(options.completionCriteria?.length) || !options.sessionId || !isControlOnlyUserMessage(item))))].slice(0, 50);
     const requiredToolEvidence = options.requiredToolEvidence ?? [];
@@ -150,7 +151,9 @@ export class AgentRunner {
     let visionRequired = initialParts.some((part) => part.type === "image_url" || part.type === "image");
     let access = options.accessProfile ? new AccessController(options.accessProfile, this.deps.access) : this.deps.access;
     const maxTurns = Math.max(1, Math.min(options.maxTurns ?? 20, 50));
-    const sessionId = options.sessionId ?? this.deps.sessions.create(safeObjective.slice(0, 80));
+    const sessionId = options.sessionId ?? this.deps.sessions.create(safeObjective.slice(0, 80), workspace);
+    if (options.sessionId && !this.deps.sessions.workspace(sessionId)) this.deps.sessions.setWorkspace(sessionId, workspace);
+    else if (options.sessionId && options.workspace) this.deps.sessions.setWorkspace(sessionId, workspace);
     const executionScope = options.executionScope ?? sessionId;
     options.onSession?.(sessionId);
     if (options.initialMessage) {
@@ -442,7 +445,6 @@ export class AgentRunner {
     const githubEnabled = this.deps.config.resolve<boolean>("integrations.github.enabled", scopes)?.value === true;
     const githubWritesEnabled = this.deps.config.resolve<boolean>("integrations.github.writeEnabled", scopes)?.value === true;
     const mergeAuthorized = Boolean(options.missionId && this.deps.config.resolve<boolean>("integrations.github.mergeEnabled", scopes)?.value === true);
-    const workspace = options.workspace ?? process.cwd();
     const projectInstructions = await loadProjectInstructions(access, workspace);
     const mcpEnabled = this.deps.config.resolve<boolean>("integrations.mcp.enabled", scopes)?.value === true;
     const mcpServers = this.deps.config.resolve<unknown>("integrations.mcp.servers", scopes)?.value ?? [];
@@ -623,7 +625,7 @@ export class AgentRunner {
           const evidenceRecord = asRecord(evidenceOutput);
           if (typeof evidenceRecord.error === "string" || evidenceRecord.success === false) throw new Error(`Completion evidence ${evidenceId} reports a tool error`);
           if (evidence.name === "web_fetch" && evidenceRecord.truncated === true) throw new Error(`Completion evidence ${evidenceId} is truncated. Increase max_chars or request narrower API fields, then cite the successful full fetch.`);
-          const workspaceRoot = options.workspace ?? process.cwd();
+          const workspaceRoot = workspace;
           const normalizeOutputPath = (path: string) => { const normalized = resolve(workspaceRoot, path); return process.platform === "win32" ? normalized.toLowerCase() : normalized; };
           const expectedOutputPath = inferredOutputPaths.find((path) => normalizeOutputPath(path) === normalizeOutputPath(criterion));
           if (expectedOutputPath) {

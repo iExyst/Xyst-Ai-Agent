@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Continuation · session workspace persistence and live data (2026-10-26)
+
+- Reconfirmed live data access remains available in the full-access profile: public HTTPS JSON/REST through `web_fetch` with source URL, HTTP status, UTC retrieval time, and truncation state; scheduled mission polling and optional signed GitHub webhooks cover periodic and event-triggered updates. Private APIs and Brave Search still need configured credentials/integrations.
+- Fixed resumable session workspace loss. SQLite migration 16 adds `sessions.workspace`; new agent sessions save their absolute workspace, resumed sessions reuse it unless `--workspace` explicitly overrides it, legacy sessions capture the current directory on first resume, and session forks preserve the workspace. CLI `agent run`, `agent resume`, and `agent chat` expose `--workspace`; `session new` records its creation directory. Session export includes the path.
+- Verification: `npm test` passed 149 runtime tests (2 host-dependent skips) and 18 CLI tests; `npm run typecheck` passed runtime, CLI, and desktop; `npm run build` and `git diff --check` passed. Runtime regressions cover workspace migration, persistence, fork propagation, and an agent resume that reads and verifies a declared output from the stored workspace without an override.
+- Full build remains active. A new isolated LM Studio run verified the live Open-Meteo fetch (HTTP 200, untruncated, retrieved at `2026-10-26T12:32:23.799Z`) but the model repeatedly guessed a file path outside the persisted workspace and did not complete. The run remains unverified and is not counted as acceptance; the deterministic resume/output-verification regression passes.
+
 ## Continuation · live data and resume acceptance criteria (2026-10-26)
 
 - Confirmed the shared runtime enables network access in the full-access profile by default. `web_fetch` supports current public HTTP(S) pages and JSON/REST endpoints, returns source URL, HTTP status, content type, UTC retrieval timestamp, and truncation state; the live GitHub and Open-Meteo API reads documented below are real current-source acceptances. `web_search` requires a Brave token; authenticated GitHub/Hugging Face routes use their configured credentials, while other authenticated services can be connected through MCP.

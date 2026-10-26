@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Session workspace persistence and resume verification (2026-10-26)
+
+- Fixed resumable session workspace loss with SQLite migration 16. Agent runs persist their resolved absolute workspace; resume restores it unless `--workspace` overrides it; old sessions capture the current workspace on first resume; forks and exports retain the workspace. CLI `agent run`, `agent resume`, and `agent chat` accept `--workspace`, and `session new` records its creation directory.
+- Added deterministic coverage for migration/reopen, session fork and export, workspace-preserving resume, and a full resumed-agent `file_read` plus declared-output completion check with no workspace override.
+- Verification: `npm test` passed 149 runtime tests and 18 CLI tests (2 host-dependent runtime skips); `npm run typecheck`, `npm run build`, and `git diff --check` passed.
+- Separate live-model attempt fetched Open-Meteo successfully (HTTP 200; retrieved `2026-10-26T12:32:23.799Z`), but the model repeatedly used a guessed path outside the isolated workspace and did not finish. The session is explicitly unverified and is excluded from acceptance; its artifact was preserved in the isolated acceptance folder.
+
 ## Live automatic model acquisition and vision task acceptance (2026-10-26)
 
 - In an isolated Ubuntu 24.04 WSL distro, current-source Xyst found no eligible installed vision model, used live Hugging Face discovery, and automatically acquired `prithivMLmods/Qwen3-VisionCaption-2B-GGUF` at revision `f6915a16edd170c5515373b42e3f4cb1007c3f51` (Q8_0, 2,279,481,536 bytes total). The Hugging Face model card declares `apache-2.0`; the repository was ungated. The model file was 1,834,427,872 bytes (SHA-256 `221a28895b1a352eb5593937f48ab2d630430ba6c93e56b9b9d5e13aa99d2f12`); its required vision projector was 445,053,664 bytes (SHA-256 `4d2059cb0fbe55faf458ebe4ae5bb387096f9317e33f5e6edb2796752364859b`). Xyst's download job `42c82c45-4918-41e5-9287-765f3c27d96e` recorded the pinned revision, component hashes, installed paths, completed inventory check, and loaded-model capability check.

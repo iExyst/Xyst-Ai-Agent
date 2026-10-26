@@ -393,13 +393,13 @@ test("SQLite migrations persist sessions and resolve config from most specific s
   assert.equal(config.reset("project", "inference.temperature", "repo-1"), true);
   assert.deepEqual(config.resolve("inference.temperature", { project: "repo-1", session: "session-1" }), { value: 0.3, source: "global", scopeId: "" });
   assert.equal(config.resetScope("global"), 1); assert.equal(config.resolve("inference.temperature"), undefined);
-  const id = sessions.create("persistence"); sessions.addMessage(id, "user", "hello");
+  const id = sessions.create("persistence", root); sessions.addMessage(id, "user", "hello");
   const version = store.db.prepare("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").get() as { version: number };
-  assert.equal(version.version, 15);
+  assert.equal(version.version, 16); assert.equal(sessions.workspace(id), root);
   const legacyCallId = randomUUID(); const legacyCloneCallId = randomUUID();
   const legacyTool = store.db.prepare("INSERT INTO tool_calls(id,name,input_json,status,created_at,effect) VALUES(?, ?, '{}', 'completed', ?, 'read')");
   legacyTool.run(legacyCallId, "git_push", new Date().toISOString()); legacyTool.run(legacyCloneCallId, "git_clone", new Date().toISOString());
-  store.db.exec("DROP TABLE session_compactions; DELETE FROM schema_migrations WHERE version>=14"); store.close();
+  store.db.exec("DROP TABLE session_compactions; ALTER TABLE sessions DROP COLUMN workspace; DELETE FROM schema_migrations WHERE version>=14"); store.close();
   store = new XystStore(path); sessions = new SessionStore(store);
   assert.equal((sessions.messages(id) as Array<{ content: string }>)[0]?.content, "hello"); store.close();
   const reopened = new XystStore(path);
@@ -449,11 +449,11 @@ test("job inspection aggregates persisted trigger, mission-run, and model-downlo
 test("interactive process schema migrations upgrade existing process-job databases", async () => withTemp(async (root) => {
   const path = join(root, "process-upgrade.sqlite"); const oldStore = new XystStore(path); const oldJobs = new JobStore(oldStore);
   const existingId = oldJobs.createProcess("node", [], root);
-  oldStore.db.exec("DROP TABLE session_compactions; DROP TABLE process_job_inputs; DROP TABLE process_job_resizes; ALTER TABLE process_job_specs DROP COLUMN pty; ALTER TABLE process_job_specs DROP COLUMN cols; ALTER TABLE process_job_specs DROP COLUMN rows; ALTER TABLE process_job_specs DROP COLUMN interactive; ALTER TABLE process_job_control DROP COLUMN stdin_close_requested; DELETE FROM schema_migrations WHERE version>=11");
+  oldStore.db.exec("DROP TABLE session_compactions; ALTER TABLE sessions DROP COLUMN workspace; DROP TABLE process_job_inputs; DROP TABLE process_job_resizes; ALTER TABLE process_job_specs DROP COLUMN pty; ALTER TABLE process_job_specs DROP COLUMN cols; ALTER TABLE process_job_specs DROP COLUMN rows; ALTER TABLE process_job_specs DROP COLUMN interactive; ALTER TABLE process_job_control DROP COLUMN stdin_close_requested; DELETE FROM schema_migrations WHERE version>=11");
   oldStore.close();
   const store = new XystStore(path); const jobs = new JobStore(store);
   try {
-    assert.equal((store.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 15);
+    assert.equal((store.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 16);
     assert.deepEqual(jobs.processSpec(existingId), { command: "node", args: [], cwd: root, interactive: false, pty: false, cols: 80, rows: 24 });
     const interactiveId = jobs.createProcess("node", [], root, true);
     jobs.sendProcessInput(interactiveId, "upgrade ok");
@@ -464,14 +464,14 @@ test("interactive process schema migrations upgrade existing process-job databas
 test("saved sessions rename, fork structured history, export, archive, and delete without breaking mission history", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "session-lifecycle.sqlite")); const sessions = new SessionStore(store);
   try {
-    const source = sessions.create("Original"); sessions.addMessage(source, "user", "task");
+    const source = sessions.create("Original", root); sessions.addMessage(source, "user", "task");
     sessions.addMessage(source, "assistant", `__xyst_api_message__:${JSON.stringify({ role: "assistant", content: "answer" })}`);
     const originalMessages = sessions.messages(source) as Array<{ id: string }>; sessions.addCompaction(source, originalMessages[1]!.id, { primary_goal: "task" });
     sessions.rename(source, "Renamed");
-    const fork = sessions.fork(source); assert.notEqual(fork, source);
+    const fork = sessions.fork(source); assert.notEqual(fork, source); assert.equal(sessions.workspace(fork), root);
     assert.deepEqual((sessions.messages(fork) as Array<{ role: string }>).map((message) => message.role), ["user", "assistant"]);
-    const exported = sessions.export(fork) as { format: string; session: { title: string }; messages: Array<{ content: unknown }> };
-    assert.equal(exported.format, "xyst-session-v1"); assert.equal(exported.session.title, "Renamed (fork)"); assert.deepEqual(exported.messages[1]!.content, { role: "assistant", content: "answer" });
+    const exported = sessions.export(fork) as { format: string; session: { title: string; workspace: string }; messages: Array<{ content: unknown }> };
+    assert.equal(exported.format, "xyst-session-v1"); assert.equal(exported.session.title, "Renamed (fork)"); assert.equal(exported.session.workspace, root); assert.deepEqual(exported.messages[1]!.content, { role: "assistant", content: "answer" });
     const now = new Date().toISOString();
     store.db.prepare("INSERT INTO missions(id,definition_json,status,created_at,updated_at) VALUES('m','{}','active',?,?)").run(now, now);
     store.db.prepare("INSERT INTO mission_runs(id,mission_id,state,trigger_type,started_at,heartbeat_at) VALUES('r','m','completed','manual',?,?)").run(now, now);
@@ -610,7 +610,7 @@ test("concurrent first-run processes serialize SQLite migrations", async () => w
   const failures = outcomes.filter((result): result is PromiseRejectedResult => result.status === "rejected");
   assert.equal(failures.length, 0, failures.map((failure) => String(failure.reason)).join("\n"));
   const store = new XystStore(path);
-  assert.equal((store.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 15);
+  assert.equal((store.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 16);
   store.close();
 }));
 
@@ -1033,6 +1033,32 @@ test("declared outputs require exact readback and the refreshed evidence list id
   } finally { store.close(); }
 }));
 
+test("resuming without a workspace override uses the persisted workspace for file tools and output verification", async () => withTemp(async (root) => {
+  const workspace = join(root, "saved-workspace"); await mkdir(workspace); await writeFile(join(workspace, "weather.json"), "{\"temperature\":46.9}");
+  const store = new XystStore(join(root, "resume-workspace.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const sessionId = sessions.create("Saved weather task", workspace); sessions.addMessage(sessionId, "user", "Create weather.json in the saved workspace and verify it.");
+  let turn = 0;
+  const provider = {
+    redact: (value: string) => value,
+    models: async () => [{ type: "llm", key: "test-model", size_bytes: 1, loaded_instances: [{ id: "loaded", config: {} }] }],
+    isLocalServer: () => true,
+    supportsLocalCliModelLifecycle: () => false,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "resume-workspace-read", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "weather.json" }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "resume-workspace-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const result = await agent.run("Continue and verify the saved weather.json output.", { sessionId, model: "test-model", maxTurns: 3, expectedOutputPaths: [join(workspace, "weather.json")], completionCriteria: [join(workspace, "weather.json")] });
+    assert.equal(result.status, "completed"); assert.equal(sessions.workspace(sessionId), workspace);
+    const read = store.db.prepare("SELECT status,input_json FROM tool_calls WHERE session_id=? AND name='file_read'").get(sessionId) as { status: string; input_json: string };
+    assert.equal(read.status, "completed"); assert.equal(JSON.parse(read.input_json).path, "weather.json");
+  } finally { store.close(); }
+}));
+
 test("agent prompts once for evidence verification when actions succeeded but the model only returned prose", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "completion-nudge.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
@@ -1076,16 +1102,17 @@ test("agent resumes incomplete user or tool turns with a valid assistant boundar
   const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   try {
     for (const ending of ["tool", "user"] as const) {
-      const sessionId = sessions.create(`resume ${ending}`);
+      const sessionId = sessions.create(`resume ${ending}`, root);
       sessions.addMessage(sessionId, "user", "The original request");
       if (ending === "tool") {
         const callId = `interrupted-${randomUUID()}`;
         sessions.addMessage(sessionId, "assistant", `__xyst_api_message__:${JSON.stringify({ role: "assistant", content: null, tool_calls: [{ id: callId, type: "function", function: { name: "file_list", arguments: "{}" } }] })}`);
         sessions.addMessage(sessionId, "tool", `__xyst_api_message__:${JSON.stringify({ role: "tool", tool_call_id: callId, content: "Saved tool result" })}`);
       }
-      const result = await agent.run("Continue with this update", { sessionId, model: "test-model", workspace: root, maxTurns: 1 });
+      const result = await agent.run("Continue with this update", { sessionId, model: "test-model", maxTurns: 1 });
       assert.equal(result.status, "unverified");
       const messages = captured.at(-1)!;
+      assert.equal(sessions.workspace(sessionId), root, "resume keeps the session workspace when no override is supplied");
       const expectedTail = ending === "tool" ? ["tool", "assistant", "user"] : ["user", "assistant", "user"];
       assert.deepEqual(messages.slice(-3).map((message) => message.role), expectedTail);
       assert.match(String(messages.at(-2)?.content), /resuming after an interrupted turn/);
@@ -3749,7 +3776,7 @@ test("memory is searchable, editable, deletable, and keeps inferred notes separa
   const updated = memories.update(preference.id, "Keep concise progress updates"); assert.match(updated.content, /progress updates/);
   assert.equal(memories.embeddings("test-embed").length, 1);
   memories.delete(inferred.id); assert.equal(memories.list().length, 1); assert.throws(() => memories.delete(inferred.id), /not found/);
-  assert.equal((store.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 15);
+  assert.equal((store.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 16);
   store.close();
 }));
 

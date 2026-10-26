@@ -232,9 +232,9 @@ Usage: xyst [--json] <command>
   process end-input <job-id>    Close an interactive process stdin stream
   process resize <job-id> <columns> <rows> Resize a PTY process
   process stop <job-id>         Request process-tree cancellation
-  agent run [--model key] [--max-turns 1-50] [--attach path]... <objective>
-  agent resume <session-id> [--model key] [--max-turns 1-50] [--attach path]... <message>
-  agent chat [--session id] [--model key] [--max-turns 1-50] [--attach path]...  Start an interactive saved chat; enter /compact or /exit
+  agent run [--workspace path] [--model key] [--max-turns 1-50] [--attach path]... <objective>
+  agent resume <session-id> [--workspace path] [--model key] [--max-turns 1-50] [--attach path]... <message>
+  agent chat [--session id] [--workspace path] [--model key] [--max-turns 1-50] [--attach path]...  Start an interactive saved chat; enter /compact or /exit
   agent list [mission-id]
   agent reconcile <session-id> <tool-call-id> completed|retry
   mission plan <objective> [--name NAME] [--workspace PATH] [--model KEY] [--max-concurrency 1-8]
@@ -444,11 +444,13 @@ try {
     if (!process.stdin.isTTY) fail("agent chat requires an interactive terminal");
     let sessionId: string | undefined;
     let model: string | undefined;
+    let workspace: string | undefined;
     let maxTurns = 20;
     const attachmentPaths: string[] = [];
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i]!;
       if (arg === "--session") { sessionId = rest[++i]; if (!sessionId) fail("--session requires a session ID"); }
+      else if (arg === "--workspace") { workspace = rest[++i]; if (!workspace) fail("--workspace requires a path"); }
       else if (arg === "--model") { model = rest[++i]; if (!model) fail("--model requires a model key"); }
       else if (arg === "--max-turns") { maxTurns = Number(rest[++i]); if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 50) fail("--max-turns must be between 1 and 50"); }
       else if (arg === "--attach") { const path = rest[++i]; if (!path || path.startsWith("--")) fail("--attach requires a file path"); attachmentPaths.push(path); }
@@ -481,7 +483,7 @@ try {
         if (!json) process.stdout.write("Xyst> ");
         const initialMessage = firstMessage && readableAttachments.length ? await createAgentUserMessage(message, readableAttachments, runtime.config.resolve<string[]>("documents.ocrLanguages", sessionId ? { session: sessionId } : {})?.value ?? ["eng"]) : undefined;
         const result = await runtime.agent.run(message, {
-          ...(sessionId ? { sessionId } : {}), ...(model ? { model } : {}), ...(initialMessage ? { initialMessage } : {}), maxTurns,
+          ...(sessionId ? { sessionId } : {}), ...(workspace ? { workspace: resolve(workspace) } : {}), ...(model ? { model } : {}), ...(initialMessage ? { initialMessage } : {}), maxTurns,
           signal: controller.signal, onSession: (id) => { const isNewSession = sessionId !== id; sessionId = id; if (isNewSession) { if (json) process.stdout.write(`${JSON.stringify({ type: "agent.session", sessionId: id })}\n`); else process.stderr.write(`\nSession ${id}\n`); } },
           onText: (text) => { if (!json) process.stdout.write(text); }, approveExternalAction, approveRemoteFallback
         });
@@ -496,6 +498,7 @@ try {
   } else if (command === "agent" && (subcommand === "run" || subcommand === "resume")) {
     let sessionId: string | undefined;
     let model: string | undefined;
+    let workspace: string | undefined;
     let maxTurns = 20;
     const attachmentPaths: string[] = [];
     const taskParts: string[] = [];
@@ -503,7 +506,8 @@ try {
     if (subcommand === "resume") { sessionId = rest[0]; i = 1; if (!sessionId) fail("Usage: agent resume <session-id> <message>"); }
     while (i < rest.length) {
       const arg = rest[i]!;
-      if (arg === "--model") { model = rest[++i]; if (!model) fail("--model requires a model key"); }
+      if (arg === "--workspace") { workspace = rest[++i]; if (!workspace) fail("--workspace requires a path"); }
+      else if (arg === "--model") { model = rest[++i]; if (!model) fail("--model requires a model key"); }
       else if (arg === "--max-turns") { maxTurns = Number(rest[++i]); if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 50) fail("--max-turns must be between 1 and 50"); }
       else if (arg === "--attach") { const path = rest[++i]; if (!path || path.startsWith("--")) fail("--attach requires a file path"); attachmentPaths.push(path); }
       else taskParts.push(arg);
@@ -516,7 +520,7 @@ try {
     activeUserMessages = [];
     const unsub = runtime.events.on("*", (event) => { if (json) process.stdout.write(`${JSON.stringify(event)}\n`); });
     try {
-      const result = await runtime.agent.run(objective, { ...(sessionId ? { sessionId } : {}), ...(model ? { model } : {}), initialMessage, maxTurns, signal: controller.signal, drainUserMessages: () => { const messages = activeUserMessages ?? []; activeUserMessages = []; return messages; }, onRunClosing: () => { activeUserMessages = undefined; }, onText: (text) => { if (!json) process.stdout.write(text); }, approveExternalAction, approveRemoteFallback });
+      const result = await runtime.agent.run(objective, { ...(sessionId ? { sessionId } : {}), ...(workspace ? { workspace: resolve(workspace) } : {}), ...(model ? { model } : {}), initialMessage, maxTurns, signal: controller.signal, drainUserMessages: () => { const messages = activeUserMessages ?? []; activeUserMessages = []; return messages; }, onRunClosing: () => { activeUserMessages = undefined; }, onText: (text) => { if (!json) process.stdout.write(text); }, approveExternalAction, approveRemoteFallback });
       if (!json) process.stdout.write("\n"); else output({ sessionId: result.sessionId, model: result.model, turns: result.turns, status: result.status });
       if (result.status === "cancelled") process.exitCode = 130;
       else if (result.status === "limit") process.exitCode = 2;
@@ -1052,7 +1056,7 @@ try {
   } else if (command === "session" && subcommand === "list") {
     output(runtime.sessions.list());
   } else if (command === "session" && subcommand === "new") {
-    const id = runtime.sessions.create(rest.join(" ") || "New session"); output({ id, created: true });
+    const id = runtime.sessions.create(rest.join(" ") || "New session", process.cwd()); output({ id, created: true });
   } else if (command === "session" && subcommand === "show") {
     if (!rest[0]) fail("Usage: session show <session-id>");
     const rows = runtime.sessions.messages(rest[0]) as Array<{ role: string; content: string }>;
