@@ -3,7 +3,7 @@
 ## Recovery hardening · verified SQLite backup command (2026-10-26)
 
 - Added `xyst database backup <new-path>`. It uses SQLite's backup API so committed WAL data is included, verifies the copied database, and refuses corrupt sources and existing destinations. It remains available before normal runtime startup. It is a database-only backup; full profile copies remain necessary for workspaces and external files.
-- Windows and Ubuntu 24.04 WSL verification both kept Xyst's source database open in WAL mode with a newly created session, backed it up, started a second runtime from the copy, and found the same session. The checks also confirmed source/destination hashes remain unchanged on same-path, existing-target, and corrupt-source rejection. Runtime build, CLI typecheck, and the focused 3-test diagnostic suite passed on both platforms. Hosted checks for this code change are pending.
+- Windows and Ubuntu 24.04 WSL verification both kept Xyst's source database open in WAL mode with a newly created session, backed it up, started a second runtime from the copy, and found the same session. The checks also confirmed source/destination hashes remain unchanged on same-path, existing-target, and corrupt-source rejection. Runtime build, CLI typecheck, and the focused 3-test diagnostic suite passed on both platforms. All hosted Windows/Ubuntu verification and Windows/Linux packaging checks passed in both push and pull-request workflows for commit `10b9fee` (8/8).
 - This improves future recovery but does not reconstruct the current malformed default profile; its latest isolated salvage still lacks messages and tool-call history.
 
 ## Continuation · resumable current-source live API acceptance (2026-10-26)
