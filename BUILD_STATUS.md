@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Latest checkpoint · LM Studio context instances (2026-10-26)
+
+- Agent runs can select a currently loaded LM Studio instance ID, choose the smallest loaded instance with enough applied context, or load a separate larger-context instance while preserving existing ones. The inference request uses the selected instance ID while session/model-decision records retain the canonical model key. Context is rechecked as the conversation grows, and LM Studio's load response/inventory are read back before generation.
+- Regression coverage forces an 8,192-context loaded model to load a second instance for a larger task, verifies the original remains loaded, confirms inference targets the new instance, and checks that a caller can explicitly select the loaded instance ID. Remote fallback remains on its own inference endpoint.
+- Verification on this PR worktree: `npm run typecheck` passed; `npm test` passed with runtime 141 passed, 2 host-dependent skips, 0 failed, and CLI 15 passed. The targeted context-growth, remote-fallback, automatic-switching, and new larger-instance tests passed.
+- The feature is prepared on `codex/resume-completion`; the existing draft PR remains open. Physical/bare-metal Linux, native desktop/service acceptance, trusted publisher signing/update hosting, and Brave web-search credentials are still outside this local check. Continue to track scope and gates below.
+
 ## Resume checkpoint · live data source behavior (2026-10-25)
 
 - Confirmed network access defaults on globally and full-access profiles permit network and configured integrations. Current-source and packaged acceptance already proved live GitHub repository API and Open-Meteo weather retrieval; Hugging Face discovery and authenticated GitHub are configured.

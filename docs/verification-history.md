@@ -1,5 +1,11 @@
 # Xyst verification history
 
+## LM Studio task-sized context instances (2026-10-26)
+
+- Added context-aware instance selection to `AgentRunner`: when a task outgrows a loaded instance, Xyst can request a second LM Studio instance with a larger context, verify the applied context from LM Studio's response/inventory, and send inference to that instance ID. Existing instances remain available; persisted model selection continues to use the canonical model key. Runs may also explicitly select a loaded instance ID.
+- Deterministic coverage confirms a task above 8,192 tokens loads and uses a second instance, preserves the original, stores the model key in the decision, and accepts the new instance ID for a follow-up run. Remote fallback, conversation-growth rechecks, and automatic model switching regressions also pass.
+- `npm run typecheck` passed. `npm test` passed with runtime 141 passed, 2 host-dependent skips and CLI 15 passed, no failures.
+
 ## Read-only completion recovery and exact packaged live-data acceptance (2026-10-25)
 
 - Source commit `dff735a` changes the completion nudge to run after any successful persisted tool result, including read-only results. A regression test covers a read-only `file_list` followed by model prose; queued guidance coverage now reads back the file and verifies both criteria. Local runtime tests: 137 passed, 2 host-dependent skips; CLI: 15 passed; full typecheck passed.

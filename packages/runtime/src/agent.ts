@@ -7,7 +7,7 @@ import { createGitTools } from "./tools/git.js";
 import { createGitHubTools } from "./tools/github.js";
 import { AccessController, type AccessProfile } from "./access.js";
 import type { ConfigStore, SettingScope, XystStore, SessionStore, MemoryStore } from "./storage.js";
-import { LMStudioProvider } from "./providers/lm-studio.js";
+import { LMStudioProvider, type LMStudioModel } from "./providers/lm-studio.js";
 import { GitHubError, type GitHubProvider } from "./integrations/github.js";
 import { chooseAgentModel, estimateRequiredContextTokens, modelLoadContextLength } from "./model-selection.js";
 import { readModelPerformance } from "./model-performance.js";
@@ -21,6 +21,13 @@ import { runBoundedOrdered } from "./orchestration/tool-batches.js";
 
 const MESSAGE_PREFIX = "__xyst_api_message__:";
 type ApiMessage = Record<string, unknown> & { role: string; content?: unknown };
+function modelForIdentifier(inventory: LMStudioModel[], identifier: string): LMStudioModel | undefined {
+  return inventory.find((model) => model.key === identifier) ?? inventory.find((model) => model.loaded_instances.some((instance) => instance.id === identifier));
+}
+function instanceContextLength(instance: LMStudioModel["loaded_instances"][number], fallback?: number | null): number | undefined {
+  const context = instance.config.context_length;
+  return typeof context === "number" && Number.isSafeInteger(context) && context > 0 ? context : typeof fallback === "number" && Number.isSafeInteger(fallback) && fallback > 0 ? fallback : undefined;
+}
 const asRecord = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
 const asArray = (value: unknown): any[] => Array.isArray(value) ? value : [];
 const externalToolNames = new Set(["file_create", "file_patch", "file_delete", "file_move", "office_create", "office_edit", "office_preview", "run_process", "git_clone", "git_create_branch", "git_stage", "git_commit", "git_fetch", "git_push", "github_issue_comment", "github_create_pull_request", "github_create_review_comment", "github_workflow_dispatch", "github_merge_pull_request", "browser_click", "browser_fill", "browser_select", "browser_press", "browser_download", "browser_upload", "desktop_action"]);
@@ -314,46 +321,88 @@ export class AgentRunner {
         const choice = chooseAgentModel(inventory, { vision: visionRequired, requiredContextTokens, requireDeclaredContext: true, performanceByModel });
         model = choice.model.key; selectionReason = `downloaded, integrity checked, and capability verified from ${acquired.repository}@${acquired.revision}; ${choice.reason}`;
       }
-    } else if (visionRequired && !inventory?.some((candidate) => candidate.key === model && candidate.type === "llm" && candidate.capabilities?.vision === true)) {
+    } else if (visionRequired && !inventory?.some((candidate) => (candidate.key === model || candidate.loaded_instances.some((instance) => instance.id === model)) && candidate.type === "llm" && candidate.capabilities?.vision === true)) {
       throw new Error(`Selected model ${model} does not declare vision support required for the attached image`);
     }
     let activeProvider = this.deps.provider;
-    const prepareModel = async (key: string, provider: LMStudioProvider = activeProvider): Promise<void> => {
+    const prepareModel = async (key: string, provider: LMStudioProvider = activeProvider): Promise<{ modelKey: string; inferenceModel: string }> => {
       const isLocalServer = typeof provider.isLocalServer === "function" ? provider.isLocalServer() : true;
       if (!isLocalServer) access.assertCapability("network");
-      if (typeof provider.models !== "function") return;
+      if (typeof provider.models !== "function") return { modelKey: key, inferenceModel: key };
       const providerInventory = provider === this.deps.provider ? (inventory ??= await provider.models(options.signal)) : await provider.models(options.signal);
-      const candidate = providerInventory.find((entry) => entry.key === key && (entry.type === "llm" || entry.type === "decision"));
+      const candidate = modelForIdentifier(providerInventory, key);
       if (!candidate) throw new Error(`Selected model ${key} is not present in the LM Studio model inventory`);
-      const loadedContexts = candidate.loaded_instances.map((instance) => instance.config.context_length).filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
+      const requestedInstance = key === candidate.key ? undefined : candidate.loaded_instances.find((instance) => instance.id === key);
+      if (key !== candidate.key && !requestedInstance) throw new Error(`Loaded LM Studio model instance ${key} is no longer available`);
+      const availableInstances = requestedInstance ? [requestedInstance] : candidate.loaded_instances;
+      const contextTolerance = Math.min(128, Math.ceil(requiredContextTokens * 0.01));
+      const adequateInstance = availableInstances.map((instance) => ({ instance, contextLength: instanceContextLength(instance, candidate.max_context_length) }))
+        .filter((item): item is { instance: LMStudioModel["loaded_instances"][number]; contextLength: number } => typeof item.contextLength === "number" && item.contextLength + contextTolerance >= requiredContextTokens)
+        .sort((left, right) => left.contextLength - right.contextLength)[0];
+      if (adequateInstance) return { modelKey: candidate.key, inferenceModel: adequateInstance.instance.id };
+      const loadedContexts = availableInstances.map((instance) => instanceContextLength(instance)).filter((value): value is number => typeof value === "number");
       const currentContext = loadedContexts.length ? Math.max(...loadedContexts) : candidate.max_context_length;
-      if (typeof currentContext === "number" && currentContext < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${key} provides ${currentContext}. Increase its LM Studio context or choose a model with a larger context.`);
-      if (candidate.loaded_instances.length > 0) return;
-      if (!automaticLoading) throw new Error(`Model ${key} is not loaded and automatic model loading is off. Load it in LM Studio or enable Xyst automatic model loading.`);
-      const supportsLocalCli = typeof provider.supportsLocalCliModelLifecycle === "function" ? provider.supportsLocalCliModelLifecycle() : isLocalServer;
-      if (isLocalServer && supportsLocalCli && typeof provider.isLocalServer === "function" && typeof provider.load === "function") {
-        const loadContext = modelLoadContextLength(candidate.max_context_length, requiredContextTokens);
-        await provider.load(key, { ...(loadContext !== undefined ? { context_length: loadContext } : {}), ...(automaticUnloading ? { ttl_seconds: idleUnloadSeconds } : {}) }, options.signal);
-        const refreshedInventory = await provider.models(options.signal);
-        if (provider === this.deps.provider) inventory = refreshedInventory;
-        const loadedModel = refreshedInventory.find((entry) => entry.key === key);
-        if (!loadedModel?.loaded_instances.length) throw new Error(`LM Studio did not report ${key} as loaded after Xyst requested it`);
-        const appliedContexts = loadedModel.loaded_instances.map((instance) => instance.config.context_length).filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
-        const appliedContext = appliedContexts.length ? Math.max(...appliedContexts) : undefined;
-        if (typeof appliedContext === "number" && appliedContext < requiredContextTokens) throw new Error(`LM Studio loaded ${key} with ${appliedContext} context tokens, below the estimated ${requiredContextTokens} required for this task. Increase its context or choose a model with a larger context.`);
+      if (requestedInstance && typeof currentContext === "number") throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model instance ${key} provides ${currentContext}. Choose a loaded instance with a larger context.`);
+      if (!isLocalServer) {
+        if (typeof currentContext === "number" && currentContext + contextTolerance < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${candidate.key} provides ${currentContext}. Increase its LM Studio context or choose a model with a larger context.`);
+        return { modelKey: candidate.key, inferenceModel: candidate.key };
       }
-      // Remote servers perform their documented just-in-time load on the inference request.
+      if (provider !== this.deps.provider) {
+        if (typeof candidate.max_context_length === "number" && candidate.max_context_length + contextTolerance < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${candidate.key} provides ${candidate.max_context_length}. Choose a model with a larger declared context.`);
+        return { modelKey: candidate.key, inferenceModel: candidate.key };
+      }
+      if (candidate.loaded_instances.length === 0 && !automaticLoading) throw new Error(`Model ${candidate.key} is not loaded and automatic model loading is off. Load it in LM Studio or enable Xyst automatic model loading.`);
+      if (typeof candidate.max_context_length === "number" && candidate.max_context_length < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${candidate.key} provides ${candidate.max_context_length}. Choose a model with a larger declared context.`);
+      if (candidate.loaded_instances.length > 0 && !automaticLoading && typeof currentContext === "number") throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${candidate.key} provides ${currentContext}. Increase its LM Studio context or enable automatic model loading so Xyst can load a separate instance with a larger context.`);
+      if (typeof provider.load !== "function") {
+        if (requestedInstance) throw new Error(`LM Studio does not support loading ${candidate.key} with the ${requiredContextTokens}-token context this task needs`);
+        if (typeof currentContext !== "number" || currentContext + contextTolerance >= requiredContextTokens) return { modelKey: candidate.key, inferenceModel: candidate.loaded_instances[0]?.id ?? candidate.key };
+        if (typeof candidate.max_context_length !== "number" || candidate.max_context_length + contextTolerance >= requiredContextTokens) return { modelKey: candidate.key, inferenceModel: candidate.loaded_instances[0]?.id ?? candidate.key };
+        throw new Error(`LM Studio does not support loading ${candidate.key} with the ${requiredContextTokens}-token context this task needs`);
+      }
+      const supportsLocalCli = typeof provider.supportsLocalCliModelLifecycle === "function" ? provider.supportsLocalCliModelLifecycle() : isLocalServer;
+      if (automaticUnloading && !supportsLocalCli) throw new Error("Automatic model unloading requires the local LM Studio CLI; install it or disable automatic unloading before loading a task-specific instance.");
+      const previousInstanceIds = new Set(candidate.loaded_instances.map((instance) => instance.id));
+      const loadContext = modelLoadContextLength(candidate.max_context_length, requiredContextTokens);
+      const loadResult = await provider.load(candidate.key, { ...(loadContext !== undefined ? { context_length: loadContext } : {}), ...(automaticUnloading ? { ttl_seconds: idleUnloadSeconds } : {}) }, options.signal);
+      const refreshedInventory = await provider.models(options.signal);
+      if (provider === this.deps.provider) inventory = refreshedInventory;
+      const loadedModel = refreshedInventory.find((entry) => entry.key === candidate.key);
+      if (!loadedModel?.loaded_instances.length) throw new Error(`LM Studio did not report ${candidate.key} as loaded after Xyst requested it`);
+      const returnedInstanceId = typeof loadResult.instance_id === "string" ? loadResult.instance_id : undefined;
+      const reportedLoadConfig = asRecord(loadResult.load_config);
+      const reportedContext = typeof reportedLoadConfig.context_length === "number" ? reportedLoadConfig.context_length : undefined;
+      const returnedInstance = reportedContext !== undefined
+        ? (() => {
+            const instance = (returnedInstanceId ? loadedModel.loaded_instances.find((item) => item.id === returnedInstanceId) : undefined) ?? loadedModel.loaded_instances[0];
+            return instance ? { ...instance, config: { ...instance.config, context_length: instanceContextLength(instance) ?? reportedContext } } : { id: returnedInstanceId ?? candidate.key, config: { context_length: reportedContext } };
+          })()
+        : returnedInstanceId ? loadedModel.loaded_instances.find((instance) => instance.id === returnedInstanceId) : undefined;
+      const newInstances = loadedModel.loaded_instances.filter((instance) => !previousInstanceIds.has(instance.id));
+      const loadedWithEnoughContext = [returnedInstance, ...newInstances, ...loadedModel.loaded_instances]
+        .filter((instance): instance is LMStudioModel["loaded_instances"][number] => Boolean(instance))
+        .map((instance) => ({ instance, contextLength: instanceContextLength(instance, loadedModel.max_context_length) }))
+        .find((item) => typeof item.contextLength === "number" && item.contextLength + contextTolerance >= requiredContextTokens);
+      if (!loadedWithEnoughContext) {
+        const appliedContexts = loadedModel.loaded_instances.map((instance) => instanceContextLength(instance, loadedModel.max_context_length)).filter((value): value is number => typeof value === "number");
+        const appliedContext = appliedContexts.length ? Math.max(...appliedContexts) : undefined;
+        throw new Error(`LM Studio did not provide ${candidate.key} with the estimated ${requiredContextTokens}-token context required for this task${appliedContext ? ` (largest reported instance: ${appliedContext})` : ""}. Increase the model context or choose another model.`);
+      }
+      return { modelKey: candidate.key, inferenceModel: loadedWithEnoughContext.instance.id };
     };
-    await prepareModel(model);
+    const initialModel = await prepareModel(model);
+    let selected = initialModel.modelKey;
+    let inferenceModel = initialModel.inferenceModel;
+    let contextPreparedForTokens = requiredContextTokens;
+    if (model !== selected || inferenceModel !== selected) selectionReason += `; using loaded LM Studio instance ${inferenceModel}`;
     const makeRemoteProvider = (): LMStudioProvider => new LMStudioProvider({
       baseUrl: remoteFallbackUrl!,
       token: async () => this.deps.credentials?.get("lm-studio-remote-fallback", "api-token")
     });
-    let selected = model;
     const decisionId = randomUUID();
     this.deps.store.db.prepare("INSERT INTO model_decisions(id,session_id,objective,model,reason,considered_json,created_at) VALUES(?,?,?,?,?,?,?)")
       .run(decisionId, sessionId, safeObjective, selected, selectionReason, JSON.stringify({ source: options.automaticModelAssignment ? "automatic_resource_aware" : options.model ? "manual" : "automatic" }), new Date().toISOString());
-    this.deps.events.emit("model.selected", { model: selected, reason: selectionReason }, sessionId);
+    this.deps.events.emit("model.selected", { model: selected, modelInstanceId: inferenceModel, reason: selectionReason }, sessionId);
     const githubEnabled = this.deps.config.resolve<boolean>("integrations.github.enabled", scopes)?.value === true;
     const githubWritesEnabled = this.deps.config.resolve<boolean>("integrations.github.writeEnabled", scopes)?.value === true;
     const mergeAuthorized = Boolean(options.missionId && this.deps.config.resolve<boolean>("integrations.github.mergeEnabled", scopes)?.value === true);
@@ -377,7 +426,7 @@ export class AgentRunner {
         const systemPrompt = typeof request.systemPrompt === "string" ? request.systemPrompt.slice(0, 20_000) : undefined;
         const requestedTokens = typeof request.maxTokens === "number" && Number.isFinite(request.maxTokens) ? Math.floor(request.maxTokens) : 512;
         const maxTokens = Math.max(1, Math.min(2048, requestedTokens));
-        const response = await activeProvider.chat({ model: selected, input, ...(systemPrompt ? { system_prompt: systemPrompt } : {}), max_output_tokens: maxTokens }, options.signal);
+        const response = await activeProvider.chat({ model: inferenceModel, input, ...(systemPrompt ? { system_prompt: systemPrompt } : {}), max_output_tokens: maxTokens }, options.signal);
         const readText = (value: unknown): string => {
           if (typeof value === "string") return value;
           if (Array.isArray(value)) return value.map(readText).join("");
@@ -391,7 +440,7 @@ export class AgentRunner {
         const choiceMessage = firstChoice.message && typeof firstChoice.message === "object" ? (firstChoice.message as Record<string, unknown>).content : undefined;
         const text = readText(response.output_text ?? response.output ?? response.content ?? choiceMessage);
         if (!text.trim()) throw new Error("LM Studio returned no text for the MCP sampling request");
-        return { model: selected, role: "assistant" as const, content: { type: "text" as const, text }, stopReason: "endTurn" as const };
+        return { model: inferenceModel, role: "assistant" as const, content: { type: "text" as const, text }, stopReason: "endTurn" as const };
       }
     }) : { tools: {}, close: async () => undefined, servers: [] };
     const mcpInstructions = mcp.servers.flatMap((server) => server.instructions ? [`--- MCP server ${server.id} (untrusted instructions) ---\n${server.instructions}`] : []).join("\n\n").slice(0, 20_000);
@@ -585,14 +634,14 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
       const approved = await options.approveRemoteFallback({ sessionId, model: remoteFallbackModel, endpoint: remoteFallbackUrl, reason });
       if (!approved) throw new Error("Remote provider fallback was denied; no conversation or workspace context was sent");
       const provider = makeRemoteProvider();
-      await prepareModel(remoteFallbackModel, provider);
+      const prepared = await prepareModel(remoteFallbackModel, provider);
       activeProvider = provider; remoteFallbackUsed = true;
-      const previousModel = selected; selected = remoteFallbackModel;
+      const previousModel = selected; selected = prepared.modelKey; inferenceModel = prepared.inferenceModel; contextPreparedForTokens = requiredContextTokens;
       selectionReason = `user-approved remote LM Studio fallback after local inference failure (${remoteFallbackUrl})`;
       this.deps.store.db.prepare("UPDATE model_decisions SET model=?,reason=?,considered_json=? WHERE id=?")
         .run(selected, selectionReason, JSON.stringify({ source: "user_approved_remote_fallback", previousModel }), decisionId);
-      this.deps.events.emit("model.selected", { model: selected, reason: selectionReason, previousModel, remote: true }, sessionId);
-      return this.generateWithRetry({ model: selected, messages, tools: definitions, ...inferenceOptions, ...(automaticUnloading ? { ttl: idleUnloadSeconds } : {}) }, options.onText, options.signal, provider, requestTimeoutMs);
+      this.deps.events.emit("model.selected", { model: selected, modelInstanceId: inferenceModel, reason: selectionReason, previousModel, remote: true }, sessionId);
+      return this.generateWithRetry({ model: inferenceModel, messages, tools: definitions, ...inferenceOptions, ...(automaticUnloading ? { ttl: idleUnloadSeconds } : {}) }, options.onText, options.signal, provider, requestTimeoutMs);
     };
     this.deps.events.emit("agent.started", { sessionId, model: selected, maxTurns }, sessionId);
     let turns = 0; let finalResponse = ""; let status: AgentResult["status"] = "limit"; let switchedModel = false;
@@ -602,9 +651,14 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
         drainUserMessages();
         const conversation = sessionMessages();
         requiredContextTokens = Math.max(requiredContextTokens, estimateRequiredContextTokens(conversation));
+        if (requiredContextTokens > contextPreparedForTokens) {
+          const prepared = await prepareModel(selected, activeProvider);
+          selected = prepared.modelKey; inferenceModel = prepared.inferenceModel; contextPreparedForTokens = requiredContextTokens;
+        }
         const selectedModelInfo = inventory?.find((candidate) => candidate.key === selected);
         if (selectedModelInfo) {
-          const loadedContexts = selectedModelInfo.loaded_instances.map((instance) => instance.config.context_length).filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
+          const selectedInstance = selectedModelInfo.loaded_instances.find((instance) => instance.id === inferenceModel);
+          const loadedContexts = selectedInstance ? [instanceContextLength(selectedInstance, selectedModelInfo.max_context_length)].filter((value): value is number => typeof value === "number") : selectedModelInfo.loaded_instances.map((instance) => instanceContextLength(instance, selectedModelInfo.max_context_length)).filter((value): value is number => typeof value === "number");
           const activeContext = loadedContexts.length ? Math.max(...loadedContexts) : selectedModelInfo.max_context_length;
           if (typeof activeContext === "number" && activeContext < requiredContextTokens) {
             throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${selected} provides ${activeContext}. The session is saved; resume it with a model or LM Studio context setting that can fit the expanded conversation.`);
@@ -616,7 +670,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
       const messages: ApiMessage[] = [{ role: "system", content: turnSystem }, ...conversation];
         let response: Record<string, unknown> = {};
         let inferenceStartedAt = Date.now();
-        try { response = await this.generateWithRetry({ model: selected, messages, tools: definitions, ...inferenceOptions, ...(automaticUnloading ? { ttl: idleUnloadSeconds } : {}) }, options.onText, options.signal, activeProvider, requestTimeoutMs); }
+        try { response = await this.generateWithRetry({ model: inferenceModel, messages, tools: definitions, ...inferenceOptions, ...(automaticUnloading ? { ttl: idleUnloadSeconds } : {}) }, options.onText, options.signal, activeProvider, requestTimeoutMs); }
         catch (error) {
           if (options.signal?.aborted) { status = "cancelled"; break; }
           if (localMetricsEnabled && this.isLocalMetricsProvider(activeProvider)) this.recordInferenceUsage(sessionId, selected, Date.now() - inferenceStartedAt, null, null, { outcome: "failure", retryAttempts: 3, failureType: error instanceof Error ? error.name : typeof error });
@@ -630,13 +684,13 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
               if (!alternatives.length) throw error;
               const choice = chooseAgentModel(alternatives, { vision: visionRequired, requiredContextTokens, performanceByModel: localMetricsEnabled ? readModelPerformance(this.deps.store) : {} });
               switchedModel = true;
-              selected = choice.model.key; selectionReason = `switched after local inference failed for the previous model; ${choice.reason}`;
+              const prepared = await prepareModel(choice.model.key);
+              selected = prepared.modelKey; inferenceModel = prepared.inferenceModel; contextPreparedForTokens = requiredContextTokens; selectionReason = `switched after local inference failed for the previous model; ${choice.reason}`;
               this.deps.store.db.prepare("UPDATE model_decisions SET model=?,reason=?,considered_json=? WHERE id=?")
                 .run(selected, selectionReason, JSON.stringify({ source: "automatic local fallback", selectionSource: options.automaticModelAssignment ? "automatic_resource_aware" : "automatic", previousModel: model, considered: alternatives.length }), decisionId);
-              this.deps.events.emit("model.selected", { model: selected, reason: selectionReason, previousModel: model }, sessionId);
-              await prepareModel(selected);
+              this.deps.events.emit("model.selected", { model: selected, modelInstanceId: inferenceModel, reason: selectionReason, previousModel: model }, sessionId);
               inferenceStartedAt = Date.now();
-              response = await this.generateWithRetry({ model: selected, messages, tools: definitions, ...inferenceOptions, ...(automaticUnloading ? { ttl: idleUnloadSeconds } : {}) }, options.onText, options.signal, activeProvider, requestTimeoutMs);
+              response = await this.generateWithRetry({ model: inferenceModel, messages, tools: definitions, ...inferenceOptions, ...(automaticUnloading ? { ttl: idleUnloadSeconds } : {}) }, options.onText, options.signal, activeProvider, requestTimeoutMs);
               localFailure = undefined;
             } catch (switchError) { localFailure = switchError; }
           }

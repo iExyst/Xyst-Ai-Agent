@@ -1049,6 +1049,37 @@ test("agent rechecks context as queued messages grow the saved conversation", as
   } finally { store.close(); }
 }));
 
+test("agent loads a larger-context LM Studio instance without replacing an existing instance", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "context-instance.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  const model = { type: "llm" as const, key: "context-model", max_context_length: 32768, size_bytes: 1_000_000_000, loaded_instances: [{ id: "context-model", config: { context_length: 8192 } }] };
+  const generationModels: string[] = []; let loadedContext: number | undefined;
+  const provider = {
+    redact: (value: string) => value,
+    isLocalServer: () => true,
+    models: async () => [model],
+    load: async (_key: string, options: { context_length?: number }) => {
+      loadedContext = options.context_length;
+      model.loaded_instances.push({ id: "context-model:2", config: { context_length: options.context_length ?? 0 } });
+      return { instance_id: "context-model:2" };
+    },
+    streamChatWithTools: async (request: { model: string }) => { generationModels.push(request.model); return { choices: [{ message: { role: "assistant", content: "Ready." } }] }; }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    const result = await agent.run("Reply with a short status. ".repeat(1200), { workspace: root, maxTurns: 1 });
+    assert.equal(result.model, "context-model");
+    assert.equal(generationModels.length, 1);
+    assert.equal(generationModels[0], "context-model:2");
+    assert.ok((loadedContext ?? 0) > 8192);
+    assert.deepEqual(model.loaded_instances.map((instance) => instance.id), ["context-model", "context-model:2"]);
+    const decision = store.db.prepare("SELECT model FROM model_decisions WHERE session_id=?").get(result.sessionId) as { model: string };
+    assert.equal(decision.model, "context-model");
+    const explicitlySelected = await agent.run("Use this loaded instance", { model: "context-model:2", workspace: root, maxTurns: 1 });
+    assert.equal(explicitlySelected.model, "context-model");
+    assert.equal(generationModels.at(-1), "context-model:2");
+  } finally { store.close(); }
+}));
+
 test("aborting an in-flight inference ends the session as cancelled instead of failed", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "cancel-agent.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
@@ -2477,7 +2508,7 @@ test("recommended acquisition retries byte ranges and resumes a saved partial af
 test("agent model acquisition follows discovery and download controls without sending task text", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "automatic-model.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   const models: Array<Record<string, unknown>> = []; const discoveryQueries: string[] = []; let acquired = 0; let generatedModel = ""; let lastDiscoveryQuery = ""; let visionVerified = false;
-  const provider = { redact: (value: string) => value, models: async () => models, load: async () => ({}),
+  const provider = { redact: (value: string) => value, models: async () => models, load: async (key: string, options: { context_length?: number }) => { const model = models.find((item) => item.key === key); model?.loaded_instances && (model.loaded_instances as Array<{ id: string; config: Record<string, unknown> }>).push({ id: key, config: { context_length: options.context_length ?? 8192 } }); return { instance_id: key }; },
     streamChatWithTools: async (request: { model: string }) => { generatedModel = request.model; return { choices: [{ message: { role: "assistant", content: "Completed locally." } }] }; } };
   const acquisition = {
     recommend: async (query: string) => { discoveryQueries.push(query); lastDiscoveryQuery = query; return [{ repository: "owner/model", artifact: "model-Q4_K_M.gguf", quantization: "Q4_K_M", sizeBytes: 1024, estimatedMemoryBytes: 1280, diskSufficient: true, sha256: "a".repeat(64), license: "mit" }]; },
