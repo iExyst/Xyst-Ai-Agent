@@ -45,6 +45,14 @@ export function validateSettingValue(key: string, value: unknown): void {
       if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.hostname === "api.github.com") throw new Error("integrations.github.apiBaseUrl must be an HTTPS GitHub Enterprise API base URL without credentials, query, or fragment");
     }
   }
+  if (key === "integrations.lmStudio.baseUrl") {
+    if (value !== null && (typeof value !== "string" || value.length > 500)) throw new Error("integrations.lmStudio.baseUrl must be an HTTP(S) base URL or null");
+    if (typeof value === "string") {
+      let url: URL;
+      try { url = new URL(value); } catch { throw new Error("integrations.lmStudio.baseUrl must be an HTTP(S) base URL or null"); }
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (url.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new Error("integrations.lmStudio.baseUrl must be a credential-free HTTP(S) base URL; remote servers require HTTPS");
+    }
+  }
   const numericRanges: Record<string, [number, number, boolean]> = {
     "inference.temperature": [0, 2, false], "inference.maxTokens": [1, 1_000_000, true], "inference.requestTimeoutSeconds": [5, 3600, true], "inference.topP": [0, 1, false], "inference.topK": [1, 1000, true], "inference.repeatPenalty": [0.1, 5, false],
     "inference.presencePenalty": [-2, 2, false], "inference.frequencyPenalty": [-2, 2, false],

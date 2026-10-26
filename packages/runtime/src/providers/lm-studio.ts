@@ -63,12 +63,15 @@ export class LMStudioError extends Error {
 }
 
 export class LMStudioProvider {
-  private readonly baseUrl: string;
+  private readonly baseUrl: () => string;
   private readonly commandRunner: (command: string, args: string[], options?: ProcessOptions) => Promise<ProcessResult>;
   private readonly tokenizeFn: TokenizeFn;
   private readonly requestTimeoutMsResolver: () => number;
-  constructor(options: { baseUrl?: string; token?: () => Promise<string | undefined> | string | undefined; events?: RuntimeEvents; commandRunner?: (command: string, args: string[], options?: ProcessOptions) => Promise<ProcessResult>; tokenizeFn?: TokenizeFn; requestTimeoutMs?: () => number } = {}) {
-    this.baseUrl = (options.baseUrl ?? process.env.LM_STUDIO_BASE_URL ?? "http://127.0.0.1:1234").replace(/\/+$/, "");
+  constructor(options: { baseUrl?: string | (() => string); token?: () => Promise<string | undefined> | string | undefined; events?: RuntimeEvents; commandRunner?: (command: string, args: string[], options?: ProcessOptions) => Promise<ProcessResult>; tokenizeFn?: TokenizeFn; requestTimeoutMs?: () => number } = {}) {
+    this.baseUrl = () => {
+      const configured = typeof options.baseUrl === "function" ? options.baseUrl() : options.baseUrl;
+      return (configured ?? process.env.LM_STUDIO_BASE_URL ?? "http://127.0.0.1:1234").replace(/\/+$/, "");
+    };
     this.tokenResolver = options.token ?? (() => process.env.LM_API_TOKEN);
     this.events = options.events;
     this.commandRunner = options.commandRunner ?? runProcess;
@@ -94,16 +97,16 @@ export class LMStudioProvider {
     if (parentSignal?.aborted) return new LMStudioError("LM Studio request cancelled");
     if (deadline.didTimeout()) return new LMStudioError(`LM Studio request to ${endpoint} timed out after ${Math.ceil(deadline.timeoutMs / 1000)} seconds`);
     if (error instanceof SyntaxError) return new LMStudioError(`LM Studio returned invalid JSON for ${endpoint}: ${error.message}`);
-    return new LMStudioError(`Cannot connect to LM Studio at ${this.baseUrl}: ${error instanceof Error ? error.message : String(error)}`);
+    return new LMStudioError(`Cannot connect to LM Studio at ${this.baseUrl()}: ${error instanceof Error ? error.message : String(error)}`);
   }
   redact(value: string): string { return redactSecrets(value, [...this.knownSecrets]); }
   rememberSecretValues(values: Iterable<string>): void { for (const value of values) if (value.length >= 4) this.knownSecrets.add(value); }
   isLocalServer(): boolean {
-    const hostname = new URL(this.baseUrl).hostname;
+    const hostname = new URL(this.baseUrl()).hostname;
     return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
   }
   supportsLocalCliModelLifecycle(): boolean {
-    const address = new URL(this.baseUrl);
+    const address = new URL(this.baseUrl());
     return this.isLocalServer() && address.port === "1234" && (address.pathname === "" || address.pathname === "/");
   }
 
@@ -128,7 +131,7 @@ export class LMStudioProvider {
     const parentSignal = init.signal instanceof AbortSignal ? init.signal : undefined;
     const deadline = this.requestDeadline(parentSignal);
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers, signal: deadline.signal });
+      const response = await fetch(`${this.baseUrl()}${path}`, { ...init, headers, signal: deadline.signal });
       if (!response.ok) {
         let message = "";
         try { message = await response.text(); } catch (error) { throw this.deadlineError(deadline, parentSignal, path, error); }
@@ -144,7 +147,7 @@ export class LMStudioProvider {
 
   async diagnose(): Promise<{ ok: true; baseUrl: string; models: number }> {
     const result = await this.models();
-    return { ok: true, baseUrl: this.baseUrl, models: result.length };
+    return { ok: true, baseUrl: this.baseUrl(), models: result.length };
   }
   async tokenize(model: string, text: string, options: { includeTokenIds?: boolean; signal?: AbortSignal } = {}): Promise<LMStudioTokenization> {
     if (!model.trim()) throw new LMStudioError("A model key is required for tokenization");
@@ -154,7 +157,7 @@ export class LMStudioProvider {
     const deadline = this.requestDeadline(options.signal);
     try {
       const token = await this.tokenResolver(); this.remember(token);
-      const result = await this.tokenizeFn({ model, text, baseUrl: this.baseUrl, ...(token ? { token } : {}), includeTokenIds: options.includeTokenIds ?? false, signal: deadline.signal });
+      const result = await this.tokenizeFn({ model, text, baseUrl: this.baseUrl(), ...(token ? { token } : {}), includeTokenIds: options.includeTokenIds ?? false, signal: deadline.signal });
       if (options.signal?.aborted) throw new LMStudioError("Tokenization was cancelled");
       return options.includeTokenIds ? result : { model: result.model, count: result.count };
     } catch (error) {
@@ -261,7 +264,7 @@ export class LMStudioProvider {
       const token = await this.tokenResolver(); this.remember(token);
       const headers = new Headers({ Accept: "text/event-stream", "Content-Type": "application/json" });
       if (token) headers.set("Authorization", `Bearer ${token}`);
-      const response = await fetch(`${this.baseUrl}${endpoint}`, { method: "POST", headers, body: JSON.stringify(body), signal: deadline.signal });
+      const response = await fetch(`${this.baseUrl()}${endpoint}`, { method: "POST", headers, body: JSON.stringify(body), signal: deadline.signal });
       if (!response.ok) {
         let message = "";
         try { message = await response.text(); } catch (error) { throw this.deadlineError(deadline, signal, endpoint, error); }
@@ -322,7 +325,7 @@ export class LMStudioProvider {
     try {
       const token = await this.tokenResolver(); this.remember(token); const headers = new Headers({ Accept: "text/event-stream", "Content-Type": "application/json" });
       if (token) headers.set("Authorization", `Bearer ${token}`);
-      const response = await fetch(`${this.baseUrl}/api/v1/chat`, { method: "POST", headers, body: JSON.stringify({ store: options.store ?? Boolean(options.previous_response_id), ...options, stream: true }), signal: deadline.signal });
+      const response = await fetch(`${this.baseUrl()}/api/v1/chat`, { method: "POST", headers, body: JSON.stringify({ store: options.store ?? Boolean(options.previous_response_id), ...options, stream: true }), signal: deadline.signal });
       if (!response.ok) {
         let message = "";
         try { message = await response.text(); } catch (error) { throw this.deadlineError(deadline, signal, "/api/v1/chat", error); }
@@ -372,7 +375,7 @@ export class LMStudioProvider {
     try {
       const token = await this.tokenResolver(); this.remember(token); const headers = new Headers({ Accept: "text/event-stream", "Content-Type": "application/json" });
       if (token) headers.set("Authorization", `Bearer ${token}`);
-      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, { method: "POST", headers, body: JSON.stringify({ ...request, stream: true }), signal: deadline.signal });
+      const response = await fetch(`${this.baseUrl()}/v1/chat/completions`, { method: "POST", headers, body: JSON.stringify({ ...request, stream: true }), signal: deadline.signal });
       if (!response.ok) {
         let message = "";
         try { message = await response.text(); } catch (error) { throw this.deadlineError(deadline, signal, "/v1/chat/completions", error); }

@@ -621,6 +621,12 @@ test("config export excludes secret-like keys", async () => withTemp(async (root
 }));
 
 test("update settings require explicit opt-in and a credential-free HTTPS feed", () => {
+  assert.doesNotThrow(() => validateSettingValue("integrations.lmStudio.baseUrl", "http://127.0.0.1:1235"));
+  assert.doesNotThrow(() => validateSettingValue("integrations.lmStudio.baseUrl", "https://lm.example.test"));
+  assert.doesNotThrow(() => validateSettingValue("integrations.lmStudio.baseUrl", null));
+  for (const value of ["ftp://lm.example.test", "http://user:pass@localhost:1234", "http://localhost:1234?token=x", "not a url"]) {
+    assert.throws(() => validateSettingValue("integrations.lmStudio.baseUrl", value), /HTTP\(S\) base URL/);
+  }
   assert.doesNotThrow(() => validateSettingValue("integrations.lmStudio.nativeChat.enabled", false));
   assert.throws(() => validateSettingValue("integrations.lmStudio.nativeChat.enabled", "true"), /must be true or false/);
   assert.doesNotThrow(() => validateSettingValue("integrations.lmStudio.nativeChat.integrations", []));
@@ -644,6 +650,26 @@ test("update settings require explicit opt-in and a credential-free HTTPS feed",
     assert.throws(() => validateSettingValue("updates.feedUrl", value), /HTTPS base URL/);
   }
 });
+
+test("LM Studio base URL setting applies to the next provider request without restarting runtime", async () => withTemp(async (root) => {
+  const requested: number[] = [];
+  const first = createServer((_request, response) => { requested.push(1); response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ models: [] })); });
+  const second = createServer((_request, response) => { requested.push(2); response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ models: [] })); });
+  await Promise.all([first, second].map((server) => new Promise<void>((resolveListen, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolveListen); })));
+  const firstAddress = first.address(); const secondAddress = second.address();
+  assert.ok(firstAddress && typeof firstAddress !== "string"); assert.ok(secondAddress && typeof secondAddress !== "string");
+  const runtime = createRuntime({ dataDir: join(root, "runtime") });
+  try {
+    runtime.config.set("global", "integrations.lmStudio.baseUrl", `http://127.0.0.1:${firstAddress.port}`);
+    assert.equal((await runtime.lmStudio.diagnose()).baseUrl, `http://127.0.0.1:${firstAddress.port}`);
+    runtime.config.set("global", "integrations.lmStudio.baseUrl", `http://127.0.0.1:${secondAddress.port}`);
+    assert.equal((await runtime.lmStudio.diagnose()).baseUrl, `http://127.0.0.1:${secondAddress.port}`);
+    assert.deepEqual(requested, [1, 2]);
+  } finally {
+    runtime.store.close();
+    await Promise.all([first, second].map((server) => new Promise<void>((resolveClose) => server.close(() => resolveClose()))));
+  }
+}));
 
 test("known settings reject invalid values and imports roll back atomically", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "validated-settings.sqlite")); const config = new ConfigStore(store);
@@ -1588,7 +1614,7 @@ test("secrets are redacted and automatic selection prefers a tool capable model"
   assert.equal(redactSecrets("remote https://user:private-pass@example.com/team/repo.git"), "remote https://[REDACTED]@example.com/team/repo.git");
   const choice = chooseAgentModel([
     { type: "llm", publisher: "lmstudio-community", key: "small", display_name: "Small", size_bytes: 1_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: false } },
-    { type: "llm", publisher: "mistralai", key: "mistralai/ministral-3-3b", display_name: "Ministral 3B", size_bytes: 3_000_000_000, loaded_instances: [], max_context_length: 128000, capabilities: { trained_for_tool_use: true } }
+    { type: "llm", publisher: "mistralai", key: "mistralai/ministral-3-3b", display_name: "Ministral 3B", size_bytes: 1_000_000_000, loaded_instances: [], max_context_length: 128000, capabilities: { trained_for_tool_use: true } }
   ]);
   assert.equal(choice.model.key, "mistralai/ministral-3-3b"); assert.match(choice.reason, /tool-use support/);
 });

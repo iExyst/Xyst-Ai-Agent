@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Configurable local LM Studio endpoint and live server diagnosis (2026-10-26)
+
+- Added `integrations.lmStudio.baseUrl`, surfaced it in desktop Settings, and made the provider resolve it on every request so edits apply without restarting the runtime. The environment variable remains an override; default stays `http://127.0.0.1:1234`; credentials/query/fragment are rejected and remote HTTP is rejected.
+- A focused runtime test changed the saved URL between two local mock LM Studio endpoints and confirmed the same runtime's next diagnostics request switched endpoints. URL validation and the dynamic-endpoint regression passed (2/2); all workspace typechecks and CLI/runtime builds passed.
+- In a separate isolated Windows APPDATA/workspace with no `LM_STUDIO_BASE_URL` environment override, `xyst config set integrations.lmStudio.baseUrl "http://127.0.0.1:1235" global` followed by `xyst lm diagnose` returned `{ok:true, baseUrl:"http://127.0.0.1:1235", models:38}` from the running Windows LM Studio server. The default user profile was not used for this acceptance. Existing packaged live API-fetch evidence is recorded in the section below.
+- Using that same isolated saved endpoint and already-loaded `qwen3-0.6b`, the current-source Xyst CLI fetched `https://api.github.com/repos/iExyst/Xyst-Ai-Agent` through `web_fetch` twice (HTTP 200, `application/json`, untruncated). The persisted result included `full_name=iExyst/Xyst-Ai-Agent`, `default_branch=main`, `archived=false`, and `retrieved_at=2026-10-26T18:18:04.630Z`; the task completed `verified:true` for the exact requested URL. Session `43360d28-a75f-41be-b57b-452a0319a269`; isolated SQLite `quick_check` returned `ok`.
+
 ## Exact current CI Linux package GUI and live API acceptance (2026-10-26)
 
 - Downloaded the `xyst-linux` artifact from successful CI run `40368740323` for PR head `cb32093df8dc71089f66755808d49601015b54c6`. The AppImage is 325,087,566 bytes; SHA-512 Base64 `Hw23maGTiaoKzJrwP3GzhUV5zfJePad6AEu/MDp6r+GU2ASAcfk9vtorJlMuYYc3zbcViTZnvxd7hEyrmrZ1pA==`; the downloaded `latest-linux.yml` matched its size and digest.

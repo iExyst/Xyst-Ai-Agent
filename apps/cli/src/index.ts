@@ -563,7 +563,7 @@ try {
       "autonomy.externalActionApproval", "network.enabled", "notifications.enabled", "access.profile",
       "integrations.github.enabled", "integrations.github.writeEnabled", "integrations.github.mergeEnabled",
       "integrations.github.apiBaseUrl", "integrations.mcp.enabled", "integrations.mcp.servers",
-      "integrations.lmStudio.nativeChat.enabled", "integrations.lmStudio.nativeChat.integrations",
+      "integrations.lmStudio.baseUrl", "integrations.lmStudio.nativeChat.enabled", "integrations.lmStudio.nativeChat.integrations",
       "inference.temperature", "inference.maxTokens", "inference.requestTimeoutSeconds", "inference.topP", "inference.topK",
       "inference.repeatPenalty", "inference.presencePenalty", "inference.frequencyPenalty",
       "inference.stopSequences", "inference.reasoning", "browser.automation.enabled", "browser.headless",
@@ -593,6 +593,7 @@ try {
     output({ status, systemResources: systemResourcesResult, browser, sessions, missions, agents, memories: runtime.memories.list(), models, downloads: runtime.modelAcquisition.listDownloads(), jobs: runtime.jobs.list(50), ...(modelsError ? { modelsError } : {}), settings: {
       accessProfile: scalarSetting("access.profile", { mode: "full", network: true, integrations: true, backgroundJobs: true, externalActions: true }),
       githubEnabled: settingValue("integrations.github.enabled"), githubWrites: settingValue("integrations.github.writeEnabled"), githubMerge: settingValue("integrations.github.mergeEnabled"), githubApiBaseUrl: scalarSetting("integrations.github.apiBaseUrl", ""),
+      lmStudioBaseUrl: scalarSetting("integrations.lmStudio.baseUrl", process.env.LM_STUDIO_BASE_URL ?? "http://127.0.0.1:1234"),
       mcpEnabled: settingValue("integrations.mcp.enabled"), mcpServers: scalarSetting("integrations.mcp.servers", []), nativeChatMcpEnabled: settingValue("integrations.lmStudio.nativeChat.enabled"), nativeChatMcpIntegrations: scalarSetting("integrations.lmStudio.nativeChat.integrations", []),
       defaultModel: scalarSetting("model.default", ""), autoSelect: settingValue("model.autoSelect", true), automaticLoading: settingValue("models.automaticLoading", true), automaticUnloading: settingValue("models.automaticUnloading"), idleUnloadSeconds: scalarSetting("models.idleUnloadSeconds", 3600), modelMaxDownloadBytes: scalarSetting("models.maxDownloadBytes", 20 * 1024 ** 3), modelAllowedLicenses: scalarSetting("models.allowedLicenses", []), remoteFallback: settingValue("models.remoteFallback"), remoteFallbackUrl: scalarSetting("models.remoteFallbackUrl", ""), remoteFallbackModel: scalarSetting("models.remoteFallbackModel", ""), discovery: settingValue("models.onlineDiscovery"), downloads: settingValue("models.automaticDownloads"), switching: settingValue("models.automaticSwitching"), localMetrics: settingValue("telemetry.localMetrics", true),
       browserAutomation: { value: browserSetting.enabled?.value ?? false, source: browserSetting.enabled?.source ?? "runtime default" }, browserHeadless: { value: browserSetting.headless?.value ?? true, source: browserSetting.headless?.source ?? "runtime default" }, browserMaxDownloadBytes: { value: browserSetting.maxDownloadBytes?.value ?? 512 * 1024 ** 2, source: browserSetting.maxDownloadBytes?.source ?? "runtime default" },

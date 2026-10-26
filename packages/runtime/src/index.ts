@@ -62,7 +62,7 @@ export function createRuntime(options: { dataDir?: string; accessProfile?: Acces
   const access = globalNetworkEnabled ? profileAccess : profileAccess.restrictCapabilities({ network: true });
   const credentials = new CredentialStore();
   const events = new RuntimeEvents(); const sessions = new SessionStore(store); const github = new GitHubProvider(credentials, { config, store });
-  const lmStudio = new LMStudioProvider({ events, token: async () => process.env.LM_API_TOKEN || await credentials.get("lmstudio", "api-token"), requestTimeoutMs: () => (config.resolve<number>("inference.requestTimeoutSeconds")?.value ?? 600) * 1000 });
+  const lmStudio = new LMStudioProvider({ baseUrl: () => config.resolve<string>("integrations.lmStudio.baseUrl")?.value ?? process.env.LM_STUDIO_BASE_URL ?? "http://127.0.0.1:1234", events, token: async () => process.env.LM_API_TOKEN || await credentials.get("lmstudio", "api-token"), requestTimeoutMs: () => (config.resolve<number>("inference.requestTimeoutSeconds")?.value ?? 600) * 1000 });
   const sessionCompactor = new SessionCompactor(store, sessions, lmStudio);
   const huggingFace = new HuggingFaceProvider(credentials);
   const modelAcquisition = new ModelAcquisitionService({ store, config, huggingFace, lmStudio, access: profileAccess });
