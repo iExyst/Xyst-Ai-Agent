@@ -5,7 +5,8 @@
 - Fixed compaction recovery when LM Studio ignores the requested JSON Schema: Xyst now makes one bounded, JSON-only format repair attempt, validates the second response, and fails without saving a compaction if it is still invalid. The original transcript stays intact.
 - Full runtime suite passed: 144 passed, 2 host-dependent skips, 0 failed. Runtime typecheck passed. A live compaction with already-loaded `qwen3-0.6b` on an isolated synthetic session compacted 6 messages, retained 4, and preserved the exact primary objective, later user decisions, a dependency, and outstanding work. Session `ec8ff691-0220-4c31-8b4e-e89f8c1251b3`; no user's saved sessions were changed.
 - The earlier attempt using `qwen/qwen3.5-9b` ended with a transient connection failure; the local LM Studio server subsequently responded again, and the live acceptance succeeded on the smaller already-loaded model. No model was loaded or unloaded.
-- PR head `f7f9f47` passed current-head Cross-platform CI run `40276742247` and Desktop packages run `40276742260`, including clean Windows installation/renderer smoke and Linux AppImage packaging. The compaction change is the current local follow-up and needs its own hosted run after push.
+- Compaction commit `e69671b` passed current-head Cross-platform CI run `40277961687` and Desktop packages run `40277961667` on Windows and Ubuntu 24.04, including the clean Windows installation/renderer smoke and Linux AppImage packaging.
+- The actual CLI command `xyst session compact <id> --model qwen3-0.6b` also passed on an isolated profile: six older messages were summarized, four recent messages remained active, `session summary` reloaded the saved snapshot, and the exact primary objective plus explicit decisions/dependency were present. CLI fixture session `17cd4231-972d-4c38-8343-611800b24718`; compaction `6f8475b7-4e2d-4cb6-85e7-09b519789e2a`.
 
 ## Resume checkpoint · live API access reverified (2026-10-26)
 

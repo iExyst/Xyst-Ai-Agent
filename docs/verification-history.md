@@ -6,6 +6,8 @@
 - Runtime tests verify both recovery after one malformed response and fail-safe behavior after two malformed responses. The full runtime suite passed with 144 tests passed, 2 host-dependent skips, and no failures; runtime TypeScript typecheck passed.
 - Live acceptance used already-loaded `qwen3-0.6b` and an isolated synthetic session. Xyst compacted 6 of 10 messages, retained the latest 4, and preserved the exact primary goal, explicit later decisions/dependency, and outstanding actions. Session `ec8ff691-0220-4c31-8b4e-e89f8c1251b3`. No existing user session or loaded-model state was changed.
 - One earlier request to already-loaded `qwen/qwen3.5-9b` ended with a transient LM Studio connection failure; the server remained running and responded to a later request. The successful 0.6B result is the live acceptance evidence for this change.
+- The built CLI command `xyst session compact <id> --model qwen3-0.6b` then completed on a separate isolated profile. It saved 6 compacted messages and retained 4; `xyst session summary <id>` reloaded the summary with the exact primary objective, both explicit decisions, and the dependency. Session `17cd4231-972d-4c38-8343-611800b24718`; compaction record `6f8475b7-4e2d-4cb6-85e7-09b519789e2a`.
+- The code head containing this change, commit `e69671b`, passed hosted Cross-platform CI run `40277961687` and Desktop packages run `40277961667`. Windows and Ubuntu tests passed; the Windows clean-install/renderer smoke and Linux AppImage package/upload completed successfully.
 
 ## Live API access reverified from the current shared runtime (2026-10-26)
 
