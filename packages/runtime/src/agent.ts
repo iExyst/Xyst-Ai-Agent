@@ -77,6 +77,10 @@ function inferNamedOutputPaths(criteria: string[]): string[] {
   const outputIntent = /\b(?:create|write|save|generate|produce|export|put|store)\b/i;
   for (const criterion of criteria) {
     if (!outputIntent.test(criterion)) continue;
+    // Resume instructions often describe a failed earlier attempt (for example,
+    // "the prior run created .wrong.json instead of requested right.json").
+    // That historical mention must not become a new declared output.
+    if (/\b(?:prior|previous|earlier|last|failed)\s+(?:run|attempt|session|task)\b/i.test(criterion) && /\binstead\s+of\b/i.test(criterion)) continue;
     const withoutUrls = criterion.replace(/https?:\/\/[^\s<>"'`]+/gi, "");
     for (const match of withoutUrls.matchAll(/(?:^|[\s"'`])((?:[A-Za-z]:[\\/])?[^\s"'`<>|?*]+\.(?:txt|md|csv|json|ya?ml|html?|js|mjs|cjs|ts|tsx|jsx|py|sh|ps1|log|xml|pdf|docx|xlsx|pptx))(?![\w])/gi)) {
       const path = match[1]?.replace(/[),.;:]+$/, "");

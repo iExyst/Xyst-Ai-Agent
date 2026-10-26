@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Continuation · resume criteria and live API access (2026-10-26)
+
+- Confirmed the shared runtime has live public data access through guarded `web_fetch` for HTTPS pages and JSON/REST APIs. Responses preserve final source URL, HTTP status, content type, UTC retrieval time, and truncation state; full-access network is enabled by default. Existing current-source and packaged Windows/Linux acceptances have verified live GitHub and Open-Meteo responses. Scheduled mission runs provide polling; configured signed GitHub webhooks and supported MCP resource subscriptions provide event-driven updates. Search and private API sources require their own configured credentials/integrations.
+- Fixed resume completion inference so a prior-run filename described in a correction such as “the prior run created `.wrong.json` instead of the requested `right.json`” is not misclassified as another declared output. Added a runtime regression covering exact output readback alongside live-fetch evidence.
+- Verification: runtime typecheck and package build passed; full runtime suite passed 151 tests with 2 host-dependent skips; `git diff --check` passed.
+- The newest isolated LM Studio live API attempt fetched the requested GitHub endpoint and saved/read `repo-live.json`, but exhausted its inference turn budget after a verifier error caused by that historical filename. This failed attempt is not counted as acceptance; prior verified live API sessions remain recorded in [verification history](docs/verification-history.md).
+
 ## Continuation · live LM Studio idle-unload recovery (2026-10-26)
 
 - Re-read the full user build specification and confirmed the current `codex/resume-full-build` worktree is clean except for preserved untracked acceptance artifacts. PR #1 remains open, draft, and clean at `03556f61c18e0cc83421ba4047fd77e98f365647`.

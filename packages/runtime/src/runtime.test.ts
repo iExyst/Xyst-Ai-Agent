@@ -794,6 +794,34 @@ test("completion evidence does not require a tool the objective explicitly prohi
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
+test("historical wrong filenames in resume instructions do not become declared outputs", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "historical-output-name.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const url = "https://api.github.com/repos/example/live";
+  const sessionId = sessions.create("Live API output", root);
+  sessions.addMessage(sessionId, "user", `Fetch live JSON from exactly ${url}. Create repo-live.json with the source data, then use file_read to verify it.`);
+  sessions.addMessage(sessionId, "user", "The prior run created .repo-live.json instead of the exact requested repo-live.json and did not complete. Do not fetch again; verify the correct file.");
+  const originalFetch = globalThis.fetch; let turn = 0;
+  globalThis.fetch = async () => new Response(JSON.stringify({ full_name: "example/live" }), { status: 200, headers: { "content-type": "application/json" } });
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "historical-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } }] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "historical-create", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "repo-live.json", content: JSON.stringify({ full_name: "example/live" }) }) } }] } }] };
+      if (turn === 3) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "historical-read", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "repo-live.json" }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "historical-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1, 3] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("", { sessionId, model: "test-model", maxTurns: 5 });
+    assert.equal(result.status, "completed");
+    const checked = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='completed'").get(sessionId) as { output_json: string };
+    assert.equal(JSON.parse(checked.output_json).verified, true);
+  } finally { globalThis.fetch = originalFetch; store.close(); }
+}));
+
 test("wrong tool completion evidence points the model to the successful required tool index", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "completion-tool-correction.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model"); let turn = 0;
