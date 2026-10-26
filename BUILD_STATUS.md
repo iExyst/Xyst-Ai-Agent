@@ -1,5 +1,10 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Latest continuation · automatic vision-model acquisition (2026-10-26)
+
+- On current source `9d56f413b2aa361c728c32f09e80dbb4f798f53`, isolated Xyst automatically discovered, downloaded, integrity-checked, imported, and loaded Hugging Face `prithivMLmods/Qwen3-VisionCaption-2B-GGUF` (revision `f6915a16edd170c5515373b42e3f4cb1007c3f51`, Q8_0, 2.28 GB including its vision projector; Apache-2.0 per model-card metadata). A vision task read an unseen token from an attached image, wrote it to a file, and read the exact content back. Persisted task-completion evidence is `verified:true`; details and hashes are in [verification history](docs/verification-history.md#live-automatic-model-acquisition-and-vision-task-acceptance-2026-10-26).
+- This closes one live no-installed-vision-model auto-acquisition and task-use gate. The earlier automatic code-model download was also completed and verified for model import/capability check, but its initial agent task did not make the requested tool call. Open acceptance gates remain: bare-metal Linux GUI/service/reboot, configured LM Studio plugin permissions, trusted publisher signing and production update hosting, and broader model-selection/recovery quality. The full build remains active.
+
 ## Current acceptance snapshot · PR head dd69ef6 · 2026-10-26
 
 - Hosted Windows/Linux verification and packaging passed 8/8 checks on `dd69ef6`. The source is unchanged from `a824fff`, where local `npm test` passed 146 runtime tests (2 host-dependent skips) and 18 CLI tests and the full workspace typecheck passed.
