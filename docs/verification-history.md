@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Resumed LM Studio live API task (2026-10-26)
+
+- In a temporary isolated APPDATA/workspace profile, Xyst diagnosed the configured LM Studio endpoint `http://127.0.0.1:1235` successfully and reported 51 available models. The exact current-source CLI used `qwen3-0.6b` to fetch this complete public API URL through `web_fetch`: `https://api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.0060&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FNew_York`.
+- The persisted response was HTTP 200, `application/json`, `truncated=false`, with `retrieved_at=2026-10-26T23:18:50.519Z`. API values: observation `2026-10-26T19:15` in `America/New_York` (UTC offset -04:00), temperature 60.3 °F, relative humidity 52%, apparent temperature 56.3 °F, and wind 5.2 mph. Initial agent prose shortened the URL and used the wrong timezone label; read the saved `web_fetch` output, resumed the same session without refetching, and `task_complete` then verified the exact URL and tool evidence. Session `d868fd58-9cc1-4a2c-9448-a2ff9d9367f7`.
+- The model was not loaded before this isolated run. Xyst loaded it for the task, then unloaded instance `qwen3-0.6b`; a fresh inventory confirmed `loaded=[]`. No default Xyst profile was used or changed.
+- The same Windows PR checkout passed `npm test` (153 runtime passed, 2 host-dependent skips, 21 CLI passed) and `npm run typecheck` (runtime, CLI, desktop). The skips are Windows symlink privilege and optional LibreOffice preview availability.
+
 ## Configurable local LM Studio endpoint and live server diagnosis (2026-10-26)
 
 - Added `integrations.lmStudio.baseUrl`, surfaced it in desktop Settings, and made the provider resolve it on every request so edits apply without restarting the runtime. The environment variable remains an override; default stays `http://127.0.0.1:1234`; credentials/query/fragment are rejected and remote HTTP is rejected.
