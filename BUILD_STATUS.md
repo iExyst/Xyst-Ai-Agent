@@ -1,10 +1,10 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
-## Current acceptance snapshot · PR head db8af19 · 2026-10-26
+## Current acceptance snapshot · PR head dd69ef6 · 2026-10-26
 
-- Hosted verification and Windows/Linux packaging passed 8/8 on source head `a824fff`; the documentation-only follow-up `db8af19` has a fresh CI/package run in progress. Local `npm test` passed 146 runtime tests (2 host-dependent skips) and 18 CLI tests; full workspace typecheck passed.
+- Hosted Windows/Linux verification and packaging passed 8/8 checks on `dd69ef6`. The source is unchanged from `a824fff`, where local `npm test` passed 146 runtime tests (2 host-dependent skips) and 18 CLI tests and the full workspace typecheck passed.
 - Ubuntu 24.04 WSL2 with a SHA-256-verified Node 24.22.0 clean build installed the actual systemd user service through Xyst CLI. It reached `active/running`, logged scheduler startup, reported healthy isolated SQLite state, then uninstalled and stopped cleanly. This does not establish bare-metal Linux boot/reboot behavior.
-- The resumed installed Qwen3.5-9B agent created and read back its output; Xyst persisted `task_complete` with `verified:true`. Public live API fetches remain verified through Xyst with exact URLs and retrieval timestamps.
+- The resumed installed Qwen3.5-9B agent created and read back its output; Xyst persisted `task_complete` with `verified:true`. A fresh current-source CLI/Qwen3-0.6B run fetched the live GitHub repository API (HTTP 200, exact URL, `retrieved_at=2026-10-26T10:12:55.300Z`) and persisted `task_complete` with `verified:true` in two turns. Public live API access is enabled by default; scheduled missions poll, and webhook/MCP subscriptions support event-driven updates where configured.
 - Implemented paths and acceptance evidence are summarized in the ordered milestone checklist below. Open gates: real automatic acquisition when no adequate model is installed followed by role-appropriate task use; physical Linux GUI/service/reboot checks; LM Studio configured-plugin permission and independent Responses-MCP interoperability; publisher signing and a trusted production update feed; and credentials for Brave Search/private APIs.
 - The registered Windows Xyst profile database is malformed; it and the preserved backup were left untouched, and all current acceptance uses isolated healthy profiles. Release artifacts were not replaced.
 
