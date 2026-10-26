@@ -86,6 +86,13 @@ function inferNamedOutputPaths(criteria: string[]): string[] {
   return [...paths];
 }
 
+function isControlOnlyUserMessage(value: string): boolean {
+  const text = value.trim().replace(/[.!?]+$/g, "").replace(/\s+/g, " ");
+  if (/^(?:please\s+)?(?:resume|continue|proceed|go ahead|try again|keep going|keep working|finish(?: it)?|do it)(?:\s+(?:and\s+)?(?:resume|continue|proceed|go ahead|keep going|keep working|the work|the task|the build|after compaction|until (?:it(?:'s| is) )?finished|until (?:it is )?(?:complete|done)))*$/i.test(text)) return true;
+  if (/^(?:do what you need to do to get it done|(?:i said )?(?:you(?:'re| are)|your) allowed to do everything (?:that )?you need to do)$/i.test(text)) return true;
+  return /^(?:what(?:'s| is)\b.*\b(?:constraint|status|progress)\b|what\s*%.*\b(?:complete|build|project)\b|how far along\b.*|when did i say that)$/i.test(text);
+}
+
 export interface AgentOptions {
   sessionId?: string;
   initialMessage?: Record<string, unknown>;
@@ -131,7 +138,7 @@ export class AgentRunner {
 
   async run(objective: string, options: AgentOptions = {}): Promise<AgentResult> {
     const safeObjective = this.deps.provider.redact(objective);
-    const baseCompletionCriteria = [...new Set((options.completionCriteria?.length ? options.completionCriteria : [safeObjective]).map((item) => this.deps.provider.redact(String(item)).trim()).filter(Boolean))].slice(0, 50);
+    const baseCompletionCriteria = [...new Set((options.completionCriteria?.length ? options.completionCriteria : [safeObjective]).map((item) => this.deps.provider.redact(String(item)).trim()).filter((item) => Boolean(item) && (Boolean(options.completionCriteria?.length) || !options.sessionId || !isControlOnlyUserMessage(item))))].slice(0, 50);
     const requiredToolEvidence = options.requiredToolEvidence ?? [];
     const requiredCompletionCriteria = [
       ...baseCompletionCriteria,
@@ -227,7 +234,7 @@ export class AgentRunner {
         const content = message.content;
         const text = typeof content === "string" ? content : Array.isArray(content) ? content.flatMap((part) => part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string" ? [(part as Record<string, unknown>).text as string] : []).join("\n") : "";
         const safeText = this.deps.provider.redact(text).trim();
-        if (safeText && !requiredCompletionCriteria.includes(safeText) && requiredCompletionCriteria.length < 50) requiredCompletionCriteria.push(safeText);
+        if (safeText && !isControlOnlyUserMessage(safeText) && !requiredCompletionCriteria.includes(safeText) && requiredCompletionCriteria.length < 50) requiredCompletionCriteria.push(safeText);
       }
     }
     let requiredContextTokens = estimateRequiredContextTokens(contextMessages);

@@ -540,6 +540,9 @@ test("agent resume budgets context from the compacted history and keeps compacte
   const rows = sessions.messages(sessionId) as Array<{ id: string }>;
   sessions.addCompaction(sessionId, rows[1]!.id, { version: 1, primary_goal: originalGoal, user_goals: [originalGoal], decisions: [], dependencies: [], completed_work: [], outstanding_actions: [], durable_facts: [] });
   for (let index = 0; index < 4; index++) sessions.addMessage(sessionId, "assistant", `Recent saved response ${index}`);
+  sessions.addMessage(sessionId, "user", "Include a live API observation in the final report.");
+  sessions.addMessage(sessionId, "user", "What % complete would you say the build is?");
+  sessions.addMessage(sessionId, "user", "When did I say that?");
   const evidenceIds = ["compact-resume-evidence-1", "compact-resume-evidence-2"];
   let generation = 0; let completionArgs: Record<string, unknown> | undefined; let capturedMessages: Array<Record<string, unknown>> = [];
   const provider = {
@@ -564,9 +567,14 @@ test("agent resume budgets context from the compacted history and keeps compacte
     assert.equal(generation, 3);
     assert.deepEqual(completionArgs?.evidence_tool_call_indexes, [1, 2]);
     assert.ok(capturedMessages.some((message) => JSON.stringify(message).includes("Required completion criteria (runtime-defined")));
+    const systemMessage = String(capturedMessages.find((message) => message.role === "system")?.content ?? "");
+    assert.match(systemMessage, /Include a live API observation in the final report/);
+    assert.doesNotMatch(systemMessage, /- Continue the work after compaction/);
+    assert.doesNotMatch(systemMessage, /- What % complete would you say the build is\?/);
+    assert.doesNotMatch(systemMessage, /- When did I say that\?/);
     assert.equal(JSON.stringify(capturedMessages).includes("Archived detail"), false, "inference uses summary plus post-boundary messages, not the archived raw transcript");
     assert.ok(capturedMessages.some((message) => JSON.stringify(message).includes(originalGoal)), "the saved summary remains in resume context");
-    assert.equal((sessions.messages(sessionId) as unknown[]).length, 14, "resume preserves every original message while appending new turns");
+    assert.equal((sessions.messages(sessionId) as unknown[]).length, 17, "resume preserves every original message while appending new turns");
   } finally { store.close(); }
 }));
 
