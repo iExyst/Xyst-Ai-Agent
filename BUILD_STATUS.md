@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-26 (refreshed)
 
+## Resume · latest CI and live-data gate review
+
+- Re-read the complete ordered build specification from the attached text. The public live-data/API requirement is implemented and has current-source plus packaged Windows/Linux acceptance: bounded public HTTPS/JSON access with status, exact source URL, and UTC retrieval time; GitHub and Hugging Face integrations; scheduled polling; and opt-in signed GitHub webhook intake. Public APIs need no provider credential. Brave Search and private services require their own configured credentials.
+- Latest head `4f9cd3c` passed all 8 duplicated hosted checks: Windows and Ubuntu verification, plus Windows and Linux packaging, across push and PR workflows. Run IDs: `40397497598`, `40397497664`, `40397505272`, `40397505331`.
+- The full build is still active. Remaining gates documented in the acceptance map include bare-metal Linux desktop/service/reboot, production signing and trusted update hosting, installed LM Studio plugin permissions, broader model selection and resource coordination, configured Brave/private API credentials, and final representative mission/install acceptance. Preserve `.help recover` and `.xyst-live-acceptance/`.
+
 ## Continuation · explicit corrupt-profile recovery and live-data scope
 
 - Added `xyst database recover <new-archive-directory>` for a corrupt default database. It snapshots and hashes the full profile, checks SQLite on a temporary copy so the source WAL/SHM bytes are untouched, records a recovery manifest, quarantines database sidecars, and initializes a new database only after the snapshot verifies. The new database is empty; this operation does not salvage broken sessions. It rejects destinations inside the profile or already-existing paths, detects concurrent profile changes, and attempts rollback if initialization fails. See [recovery guide](docs/recovery.md).
