@@ -658,6 +658,7 @@ test("LM Studio base URL setting applies to the next provider request without re
   await Promise.all([first, second].map((server) => new Promise<void>((resolveListen, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolveListen); })));
   const firstAddress = first.address(); const secondAddress = second.address();
   assert.ok(firstAddress && typeof firstAddress !== "string"); assert.ok(secondAddress && typeof secondAddress !== "string");
+  const originalToken = process.env.LM_API_TOKEN; process.env.LM_API_TOKEN = "runtime-test-token";
   const runtime = createRuntime({ dataDir: join(root, "runtime") });
   try {
     runtime.config.set("global", "integrations.lmStudio.baseUrl", `http://127.0.0.1:${firstAddress.port}`);
@@ -666,6 +667,7 @@ test("LM Studio base URL setting applies to the next provider request without re
     assert.equal((await runtime.lmStudio.diagnose()).baseUrl, `http://127.0.0.1:${secondAddress.port}`);
     assert.deepEqual(requested, [1, 2]);
   } finally {
+    if (originalToken === undefined) delete process.env.LM_API_TOKEN; else process.env.LM_API_TOKEN = originalToken;
     runtime.store.close();
     await Promise.all([first, second].map((server) => new Promise<void>((resolveClose) => server.close(() => resolveClose()))));
   }
