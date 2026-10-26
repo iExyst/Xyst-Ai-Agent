@@ -764,6 +764,40 @@ test("agent blocks an identical web fetch after a successful truncated response 
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
+test("task completion rejects truncated web fetch evidence and accepts a successful full refetch", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "truncated-fetch-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0; let inferenceRound = 0;
+  globalThis.fetch = async () => {
+    fetchCalls++;
+    return new Response("x".repeat(4000), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      inferenceRound++;
+      if (inferenceRound === 1 || inferenceRound === 3) {
+        const maxChars = inferenceRound === 1 ? 1000 : 5000;
+        return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: `fetch-${inferenceRound}`, type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url: "https://8.8.8.8/api/data", max_chars: maxChars }) } }] } }] };
+      }
+      const id = inferenceRound === 2 ? "complete-truncated" : "complete-full";
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never }).run("Fetch the complete live API response", { workspace: root, maxTurns: 4 });
+    assert.equal(result.status, "completed");
+    assert.equal(fetchCalls, 2);
+    const calls = store.db.prepare("SELECT name,status,input_json,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId) as Array<{ name: string; status: string; input_json: string; output_json: string | null }>;
+    assert.deepEqual(calls.map((call) => [call.name, call.status]), [["web_fetch", "completed"], ["task_complete", "failed"], ["web_fetch", "completed"], ["task_complete", "completed"]]);
+    assert.match(calls[1]!.output_json!, /is truncated/);
+    assert.equal(JSON.parse(calls[0]!.output_json!).truncated, true);
+    assert.equal(JSON.parse(calls[2]!.output_json!).truncated, false);
+    assert.equal(JSON.parse(calls[3]!.output_json!).verified, true);
+  } finally { globalThis.fetch = originalFetch; store.close(); }
+}));
+
 test("malformed external tool arguments fail before durable intent and do not quarantine the mission", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "malformed-external-tool.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

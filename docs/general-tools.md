@@ -89,3 +89,5 @@ Use `lm json <model> <schema.json> <prompt>` to send a JSON Schema through the d
 The desktop Sessions view includes collapsed execution and artifact records for each selected session. `office_preview` output PNGs appear with `image/png` MIME type and can be opened like other registered artifacts. Expand a tool call to inspect its redacted saved input/output, effect classification, status, and timestamp. Expand an artifact to inspect its registered path, MIME type, and recorded hash metadata. The journals are shared with the CLI through `session calls <id>` and `session artifacts <id>`. Agent-created text files and generated/edited office files are registered automatically after a successful tool call.
 
 When a successful web_fetch response is truncated, Xyst blocks an identical request for two minutes and tells the agent to increase max_chars (up to 30,000) or request narrower fields. Later fresh fetches remain available.
+
+A truncated `web_fetch` result cannot verify task completion. The agent must request more characters or narrower API fields and cite the successful full response instead.

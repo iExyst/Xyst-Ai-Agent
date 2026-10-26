@@ -490,6 +490,7 @@ export class AgentRunner {
           try { evidenceOutput = JSON.parse(evidence.output_json) as unknown; } catch { evidenceOutput = evidence.output_json; }
           const evidenceRecord = asRecord(evidenceOutput);
           if (typeof evidenceRecord.error === "string" || evidenceRecord.success === false) throw new Error(`Completion evidence ${evidenceId} reports a tool error`);
+          if (evidence.name === "web_fetch" && evidenceRecord.truncated === true) throw new Error(`Completion evidence ${evidenceId} is truncated. Increase max_chars or request narrower API fields, then cite the successful full fetch.`);
           const workspaceRoot = options.workspace ?? process.cwd();
           const normalizeOutputPath = (path: string) => { const normalized = resolve(workspaceRoot, path); return process.platform === "win32" ? normalized.toLowerCase() : normalized; };
           const expectedOutputPath = inferredOutputPaths.find((path) => normalizeOutputPath(path) === normalizeOutputPath(criterion));
