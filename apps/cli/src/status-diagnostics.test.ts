@@ -63,3 +63,28 @@ test("status and desktop snapshot report corrupt SQLite without changing it or s
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("CLI help works without opening a corrupt profile or starting an agent", () => {
+  const root = mkdtempSync(resolve(tmpdir(), "xyst-help-corrupt-"));
+  const dataHome = resolve(root, "data");
+  const workspace = resolve(root, "workspace");
+  const databasePath = resolve(dataHome, "xyst", "xyst.sqlite");
+  mkdirSync(dirname(databasePath), { recursive: true });
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(databasePath, Buffer.from("deliberately-invalid-sqlite-fixture"));
+  const originalHash = createHash("sha256").update(readFileSync(databasePath)).digest("hex");
+
+  try {
+    const help = runCli(dataHome, workspace, "agent", "run", "--help");
+    assert.equal(help.error, undefined, help.error?.message);
+    assert.equal(help.status, 0);
+    const result = JSON.parse(help.stdout).data;
+    assert.match(result, /agent run \[--workspace path\]/);
+    assert.doesNotMatch(help.stdout, /available tools include|sessionId|agent\.session/);
+    assert.equal(createHash("sha256").update(readFileSync(databasePath)).digest("hex"), originalHash);
+    assert.equal(existsSync(`${databasePath}-wal`), false);
+    assert.equal(existsSync(`${databasePath}-shm`), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

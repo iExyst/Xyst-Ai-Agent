@@ -38,6 +38,11 @@ process.on("message", (message) => {
     if (process.send && typeof value.requestId === "string") process.send({ type: "xyst:user-message-result", requestId: value.requestId, accepted });
   }
 });
+if (clean[0] === "help" || clean[0] === "--help" || clean[0] === "-h" || clean.includes("--help") || clean.includes("-h")) {
+  help();
+  await new Promise<void>((flushed) => process.stdout.write("", () => flushed()));
+  process.exit(0);
+}
 if (clean[0] === "database" && clean[1] === "check") {
   const report = inspectDatabaseIntegrity(resolve(getDataDirectory(), "xyst.sqlite"));
   output(report);
