@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-25 (refreshed)
 
+## Resume checkpoint · live API access reverified (2026-10-26)
+
+- Rebuilt the PR worktree's current shared runtime and invoked its policy-enforced `web_fetch` against Open-Meteo's live current-conditions JSON API. The exact endpoint returned HTTP 200, `application/json`, an untruncated response, and Xyst `retrieved_at=2026-10-26T05:53:31.772Z`; New York's observation was `2026-10-26T01:45` local, 44.9 °F, 71% relative humidity, WMO code 0. The request used a fresh isolated Xyst data directory under `.xyst-live-acceptance/`.
+- Live source access is implemented through bounded public HTTP(S) retrieval and provider integrations. The agent is instructed to retrieve current/changing facts when network access is allowed, and to report source and retrieval time. GitHub webhook events can trigger durable missions; scheduled missions can poll APIs at configured intervals. There is no universal always-on streaming feed.
+- Network access defaults on, but the active access profile still governs it. Public JSON endpoints do not need a search credential; Brave web search requires its API token, and private/authenticated APIs require configured credentials or an MCP server. Retrieval rejects private/reserved destinations and marks returned page/API content untrusted.
+- The normal Windows Xyst data directory currently reports a malformed SQLite database. This verification used isolated data and did not modify that directory. Recovery remains a separate data-recovery task; inspect backups before any restore.
+
 ## Latest continuation · persistent GitHub webhook receiver on PR branch (2026-10-26)
 
 - Ported the opt-in built-in GitHub webhook listener and persistent service configuration into the attached PR branch `codex/resume-completion`. It binds loopback by default, validates custom routes, requires network/integration access, and persists listener arguments in systemd and Task Scheduler service definitions.

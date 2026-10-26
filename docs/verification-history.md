@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Live API access reverified from the current shared runtime (2026-10-26)
+
+- Rebuilt `@xyst/runtime` from the PR worktree source and called its actual policy-enforced `web_fetch` tool with a new isolated Xyst data directory. Open-Meteo returned HTTP 200 JSON from `https://api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.0060&current=temperature_2m,relative_humidity_2m,weather_code&temperature_unit=fahrenheit&timezone=America%2FNew_York`.
+- Xyst recorded `retrieved_at=2026-10-26T05:53:31.772Z`; the payload's observation time was `2026-10-26T01:45` America/New_York: 44.9 °F, 71% relative humidity, WMO weather code 0. The response was untruncated and returned as JSON.
+- Current/changing-fact policy, UTC retrieval timestamps, public API retrieval, authenticated GitHub/Hugging Face integrations, and opt-in GitHub webhook mission triggers are documented and implemented. Network access is profile-gated; Brave search needs its API token and private APIs need credentials. Scheduled missions support configured polling. This provides fresh on-demand retrieval and configured trigger/poll behavior, not a universal live stream.
+- The default Windows Xyst SQLite database reports `database disk image is malformed`; this check did not write to it. All verification used a new isolated directory under `.xyst-live-acceptance/`.
+
 ## LM Studio task-sized context instances (2026-10-26)
 
 - Added context-aware instance selection to `AgentRunner`: when a task outgrows a loaded instance, Xyst can request a second LM Studio instance with a larger context, verify the applied context from LM Studio's response/inventory, and send inference to that instance ID. Existing instances remain available; persisted model selection continues to use the canonical model key. Runs may also explicitly select a loaded instance ID.
