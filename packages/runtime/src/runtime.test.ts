@@ -789,6 +789,8 @@ test("completion evidence does not require a tool the objective explicitly prohi
     assert.equal(result.status, "completed");
     assert.equal(turn, 2);
     assert.match(systemPrompt, /complete URL or API endpoint, call web_fetch directly with that exact URL/);
+    assert.match(systemPrompt, /honor the API's timezone and UTC offset/);
+    assert.match(systemPrompt, /label Xyst retrieved_at values as UTC/);
     assert.match(systemPrompt, /Required evidence from direct retrieval of the user-supplied URL/);
     assert.match(systemPrompt, new RegExp(`Required live fetch from requested URL: ${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   } finally { globalThis.fetch = originalFetch; store.close(); }
