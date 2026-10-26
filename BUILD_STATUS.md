@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-26 (refreshed)
 
+## Continuation · live data sources and PR validation (2026-10-26)
+
+- Live data access is wired into the shared runtime and enabled by the default full-access profile when network access is enabled. `web_fetch` reads public HTTPS pages and JSON/REST APIs with source URL, HTTP status, content type, UTC retrieval time, truncation state, bounded size, redirect/DNS checks, and persisted evidence. Current-source Windows/Linux package mission acceptances are recorded below and in the verification history.
+- `web_search` uses Brave Search and requires a token stored with `xyst credential set brave search-api-key`. Public APIs need no search token. Private APIs can use configured credential-backed MCP servers or their native integration. Missions support periodic polling; signed GitHub webhooks and MCP resource subscriptions support event-driven updates when configured. These are distinct from a permanent streaming connection.
+- Live answers now append verified source URLs and retrieval timestamps, and completion-only tool turns preserve the existing answer. The docs describe the live-data paths and credential setup. On the PR worktree, `npm test` passed (runtime 152 passed, 2 host-dependent skips; CLI 19/19), `npm run typecheck` passed, both packaging workflows parsed as YAML, both release metadata verifier scripts passed against the isolated current-source Windows/Linux package artifacts, `v0.1.0` matched the package version, and `git diff --check` passed. The isolated package artifacts are from the separate main workspace and are not represented as builds of this PR worktree.
+- PR worktree changes are pending review/push. No production release was triggered: the Windows signing certificate secrets are not configured. The full build goal remains active; physical Linux acceptance, trusted production signing/update hosting, configured search/private API credentials, and remaining release/recovery/model gates are open.
+
 ## Current-source package live-data mission acceptance
 
 - The current-source Windows package completed a two-task mission through the shared runtime using the loaded LM Studio Qwen 3.5 9B model. It fetched GitHub REST API JSON live (HTTP 200, timestamped), saved and re-read `source.json`, then generated and re-read a dependent `report.md`; both tasks and the mission were verified complete. Details: [verification history](docs/verification-history.md#current-source-packaged-multi-step-live-api-mission-2026-10-26).

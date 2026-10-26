@@ -72,8 +72,7 @@
       "icon": "resources/xyst-icon.ico",
       "target": [
         "nsis"
-      ],
-      "signAndEditExecutable": false
+      ]
     },
     "linux": {
       "icon": "resources/xyst-icon.png",

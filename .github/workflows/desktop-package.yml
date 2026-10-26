@@ -23,6 +23,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run desktop:package
+      - name: Verify Windows update manifest and installer
+        if: runner.os == 'Windows'
+        run: node scripts/verify-release-metadata.cjs windows release
+      - name: Verify Linux update manifest and AppImage
+        if: runner.os == 'Linux'
+        run: node scripts/verify-release-metadata.cjs linux release
       - name: Smoke test clean Windows install and renderer
         if: runner.os == 'Windows'
         run: node scripts/smoke-packaged-windows-gui.mjs

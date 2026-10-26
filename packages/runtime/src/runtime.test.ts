@@ -938,6 +938,31 @@ test("explicit live API requests require evidence from the exact requested URL",
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
+test("verified live-data answers include the successful source URL and retrieval time", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "live-source-attribution.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const url = "https://8.8.8.8/api/status"; const originalFetch = globalThis.fetch; let turn = 0;
+  globalThis.fetch = async () => new Response('{"status":"operational"}', { status: 200, headers: { "content-type": "application/json" } });
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", content: "The service is operational.", tool_calls: [{ id: "live-source-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "live-source-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never }).run(`Use web_fetch to retrieve ${url} and report its status.`, { workspace: root, maxTurns: 3 });
+    assert.equal(result.status, "completed");
+    assert.match(result.response, /The service is operational\./);
+    assert.match(result.response, /Live sources \(retrieved UTC\):/);
+    assert.ok(result.response.includes(`<${url}>`));
+    const output = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='web_fetch' AND status='completed'").get(result.sessionId) as { output_json: string };
+    assert.ok(result.response.includes(JSON.parse(output.output_json).retrieved_at));
+    assert.ok((sessions.messages(result.sessionId) as Array<{ content: string }>).some((message) => message.content.includes("Live sources (retrieved UTC):")));
+  } finally { globalThis.fetch = originalFetch; store.close(); }
+}));
+
 test("task completion rejects truncated web fetch evidence and accepts a successful full refetch", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "truncated-fetch-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

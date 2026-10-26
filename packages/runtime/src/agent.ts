@@ -972,9 +972,23 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
         if (status === "cancelled") break;
         if (completionVerified) {
           status = "completed";
-          if (!text.trim()) {
+          if (!text.trim() && !finalResponse.trim()) {
             finalResponse = "Task completed and verified against persisted tool evidence.";
             save({ role: "assistant", content: finalResponse });
+          }
+          const liveFetches = this.deps.store.db.prepare("SELECT output_json FROM tool_calls WHERE name='web_fetch' AND status='completed' AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?) ORDER BY created_at,rowid").all(sessionId, executionScope) as Array<{ output_json: string }>;
+          const sources = new Map<string, string>();
+          for (const row of liveFetches) {
+            try {
+              const output = JSON.parse(row.output_json) as { url?: unknown; status?: unknown; retrieved_at?: unknown; truncated?: unknown };
+              if (typeof output.url === "string" && typeof output.status === "number" && output.status >= 200 && output.status < 300 && typeof output.retrieved_at === "string" && Number.isFinite(Date.parse(output.retrieved_at)) && output.truncated !== true) sources.set(output.url, output.retrieved_at);
+            } catch { /* Ignore malformed historical tool output. */ }
+          }
+          if (sources.size && !finalResponse.includes("Live sources (retrieved UTC):")) {
+            const sourceNote = `Live sources (retrieved UTC):\n${[...sources].map(([url, retrievedAt]) => `- <${url}> — ${retrievedAt}`).join("\n")}`;
+            finalResponse = finalResponse.trim() ? `${finalResponse.trimEnd()}\n\n${sourceNote}` : sourceNote;
+            this.deps.events.emit("agent.text", { text: `\n\n${sourceNote}` }, sessionId);
+            save({ role: "assistant", content: sourceNote });
           }
           turns++;
           break;
