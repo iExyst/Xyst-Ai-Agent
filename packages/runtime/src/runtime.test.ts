@@ -786,6 +786,24 @@ test("a file-create request for a filesystem root is a definite failure, not an 
   } finally { store.close(); }
 }));
 
+test("agent setup failures mark the newly created session failed instead of leaving it active", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "agent-setup-failure.sqlite"));
+  const config = new ConfigStore(store);
+  const sessions = new SessionStore(store);
+  const events = new RuntimeEvents();
+  const provider = { redact: (value: string) => value, models: async () => { throw new Error("LM Studio is unreachable"); } };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    await assert.rejects(agent.run("Do a small task", { workspace: root }), /LM Studio is unreachable/);
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await agent.run("Do a small task", { workspace: root, signal: controller.signal });
+    assert.equal(cancelled.status, "cancelled");
+    const sessionStatuses = (store.db.prepare("SELECT status FROM sessions ORDER BY created_at").all() as Array<{ status: string }>).map(({ status }) => status);
+    assert.deepEqual(sessionStatuses, ["failed", "cancelled"]);
+  } finally { store.close(); }
+}));
+
 test("agent completion requires successful persisted tool evidence", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "completion-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

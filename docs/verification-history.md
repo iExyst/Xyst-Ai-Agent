@@ -1,11 +1,24 @@
 # Xyst verification history
 
+## Agent preflight failure session cleanup (2026-10-27)
+
+- LM Studio endpoint troubleshooting revealed that failures during model discovery could leave a newly created agent session marked `active`. An outer `AgentRunner.run` cleanup now marks preflight failures `failed`, or pre-aborted work `cancelled`, while preserving the existing in-loop failure/cancellation path.
+- The regression test covers both failure and cancellation. Targeted test passed; full runtime suite passed (157 passed, 2 host-dependent skips, 0 failures); runtime, CLI, and desktop typecheck passed. Hosted checks on the resulting commit are pending.
+
+
+## Bounded Qwen3.5-9B coding attempt and hosted checks (2026-10-27)
+
+- On source commit `947d2c4`, an isolated Windows Xyst CLI run used a fresh APPDATA profile and workspace with the already-loaded LM Studio `qwen/qwen3.5-9b` instance. The requested task was a small ES module plus a real `node:test` suite, run with `node --test` through Xyst tools and read back for verification.
+- No assistant message or tool call was persisted after more than ten minutes. The CLI process was cancelled; no workspace files were created and the attempt is not a coding acceptance. LM Studio later reported the instance idle with zero queued requests. Two preceding endpoint-misconfiguration probes also created empty active sessions in the isolated profile, exposing an early-run session cleanup edge for follow-up.
+- Hosted Windows/Ubuntu verification and desktop package workflows all passed on source `947d2c4`: runs `40445031316`, `40445031323`, `40445034685`, and `40445034541`.
+
+
 ## Current-source Responses API Remote MCP and empty-tool handling (2026-10-27)
 
 - The current Windows checkout used Xyst's `lm responses` CLI against LM Studio `127.0.0.1:1235` with Qwen3-0.6B and Hugging Face Remote MCP. The completed Responses payload exposed `hub_repo_search`, called it with query `Qwen 3.5`, `repo_types: [model]`, `sort: downloads`, `limit: 1`, and returned a real MCP result for `Qwen/Qwen3.5-4B` (7.4M downloads). Response ID: `resp_d8eac7d6e931cb64a05c6ffbcebdb2889373dd4ca48a7b8b`. The response and tool output are saved in `.xyst-live-acceptance/responses-mcp-live-20261027/response-mcp-required.jsonl`.
 - A probe using the obsolete allowlist name `model_search` received no tools even though the server was healthy and its per-request MCP setting was enabled. The live Hugging Face server advertised `hub_repo_search`. This is a tool-name mismatch, not a Remote MCP permission failure.
 - Added CLI validation for advertised MCP tools. When a requested server is missing, errors, or fails to expose an explicitly allowed tool, `lm responses` now reports that issue and exits 2 for both ordinary and SSE requests. Regression coverage includes available, missing, and empty tool lists.
-- Verification: `npm run test --workspace @xyst/cli` passed (22/22); `npm run typecheck` passed for runtime, CLI, and desktop. Hosted Windows/Ubuntu verification and packaging are pending on the next commit.
+- Verification: `npm run test --workspace @xyst/cli` passed (22/22); `npm run typecheck` passed for runtime, CLI, and desktop. All four hosted Windows/Ubuntu verification and packaging runs passed on commit `947d2c4`: `40445031316`, `40445031323`, `40445034685`, `40445034541`.
 
 ## Test-suite completion evidence (2026-10-27)
 

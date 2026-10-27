@@ -1,11 +1,19 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Agent preflight failure session cleanup (2026-10-27)
+
+- Live LM Studio endpoint troubleshooting showed that failures before the agent's main inference loop could leave a newly created session marked `active`. Added an outer `AgentRunner.run` cleanup path: preflight exceptions mark it `failed`; an already-aborted run marks it `cancelled` and returns a cancelled result. Existing in-loop terminal handling is preserved without duplicate status changes.
+- Regression verifies both an LM Studio model-discovery failure and a pre-aborted run. Targeted test passed; the full runtime suite passed (157 passed, 2 environment-dependent skips, 0 failed); runtime, CLI, and desktop typecheck passed. Hosted checks for this source change are pending.
+- A separate live Qwen3.5-9B coding acceptance remains unverified: no assistant/tool message arrived in over ten minutes, so the isolated attempt was cancelled without files. See the bounded live attempt section below.
+
+
 ## Live Responses MCP and tool-list guard (2026-10-27)
 
 - Current-source Xyst on LM Studio port 1235 completed a real `/v1/responses` request with Hugging Face Remote MCP. The response included `mcp_list_tools` and an actual `mcp_call` for `hub_repo_search`; the returned data reported `Qwen/Qwen3.5-4B` with 7.4M downloads. Model: Qwen3-0.6B. The result is persisted in `.xyst-live-acceptance/responses-mcp-live-20261027/response-mcp-required.jsonl`.
 - An initial request used the stale allowed-tool name `model_search`; LM Studio returned an empty list. Xyst now detects missing or empty requested MCP tools in both streamed and non-streamed Responses results, prints a clear server/tool error, and exits 2 instead of treating it as a normal success.
-- Verification: CLI suite 22/22 passed (including streamed and non-streamed empty-tool regressions); full runtime/CLI/desktop typecheck passed. Hosted checks for the next code commit are pending.
+- Verification: CLI suite 22/22 passed (including streamed and non-streamed empty-tool regressions); full runtime/CLI/desktop typecheck passed. Hosted Windows/Ubuntu verification and desktop packaging all passed on commit `947d2c4` (runs `40445031316`, `40445031323`, `40445034685`, `40445034541`).
 - Per-request Remote MCP is enabled in the installed server. Configured `mcp.json` plugin integration remains unverified because no configured servers are present; it is a separate path from the verified per-request MCP call.
+- Live coding recheck on qwen/qwen3.5-9b did not produce an assistant turn or tools within 10+ minutes in an isolated Windows task; cancellation ended the attempt and no code was accepted. Hosted CI and package checks for 947d2c4 all passed.
 
 ## Test-suite completion evidence and latest verification (2026-10-27)
 

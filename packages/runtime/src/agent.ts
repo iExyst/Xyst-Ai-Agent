@@ -149,6 +149,35 @@ export class AgentRunner {
   constructor(private readonly deps: { store: XystStore; config: ConfigStore; sessions: SessionStore; events: RuntimeEvents; access: AccessController; provider: LMStudioProvider; github: GitHubProvider; modelAcquisition?: ModelAcquisitionService; dataDir?: string; credentials?: { get(service: string, name: string): Promise<string | undefined> }; memories?: MemoryStore; resourceStatsReader?: typeof readHostResourceStats }) {}
 
   async run(objective: string, options: AgentOptions = {}): Promise<AgentResult> {
+    let sessionId = options.sessionId;
+    try {
+      return await this.runInternal(objective, {
+        ...options,
+        onSession: (createdSessionId) => {
+          sessionId = createdSessionId;
+          options.onSession?.(createdSessionId);
+        }
+      });
+    } catch (error) {
+      if (sessionId) {
+        const row = this.deps.store.db.prepare("SELECT status FROM sessions WHERE id=?").get(sessionId) as { status: string } | undefined;
+        if (row?.status === "active") {
+          const cancelled = Boolean(options.signal?.aborted);
+          this.deps.sessions.setStatus(sessionId, cancelled ? "cancelled" : "failed");
+          if (cancelled) {
+            const result: AgentResult = { sessionId, model: options.model ?? "", selectionReason: "", turns: 0, status: "cancelled", response: "" };
+            this.deps.events.emit("agent.finished", result, sessionId);
+            return result;
+          }
+          const message = this.deps.provider.redact(error instanceof Error ? error.message : String(error));
+          this.deps.events.emit("agent.failed", { sessionId, model: options.model, error: message }, sessionId);
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async runInternal(objective: string, options: AgentOptions): Promise<AgentResult> {
     const workspace = resolve(options.workspace ?? (options.sessionId ? this.deps.sessions.workspace(options.sessionId) : undefined) ?? process.cwd());
     const safeObjective = this.deps.provider.redact(objective);
     const baseCompletionCriteria = [...new Set((options.completionCriteria?.length ? options.completionCriteria : [safeObjective]).map((item) => this.deps.provider.redact(String(item)).trim()).filter((item) => Boolean(item) && (Boolean(options.completionCriteria?.length) || !options.sessionId || !isControlOnlyUserMessage(item))))].slice(0, 50);
