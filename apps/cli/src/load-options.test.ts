@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRuntime } from "@xyst/runtime";
+import { createRuntime, PersistentMissionRunner } from "@xyst/runtime";
 import { parseLoadOptions } from "./load-options.js";
 import { installMissionService, missionServiceStatus, renderSystemdMissionUnit, renderWindowsMissionTaskScript, systemdMissionUnitPath, uninstallMissionService } from "./mission-service.js";
 import { getMissionTemplate, MISSION_TEMPLATES } from "./mission-templates.js";
 import { createAgentUserMessage } from "./attachments.js";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { ProcessResult } from "@xyst/runtime";
+
+const execFile = promisify(execFileCallback);
 
 test("agent attachments preserve text and create LM Studio vision data URLs", async () => {
   const directory = await mkdtemp(join(tmpdir(), "xyst-attachment-test-"));
@@ -56,15 +60,24 @@ test("agent attachments reject unsupported, oversized, and excessive input", asy
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("mission templates provide schema-valid task graphs with safe GitHub defaults", async () => {
+test("mission templates provide valid task graphs and execute through the normal runner", async () => {
   const ids = new Set<string>();
   const dataDir = await mkdtemp(join(tmpdir(), "xyst-template-test-"));
   const runtime = createRuntime({ dataDir });
   try {
+  const repositoryPath = join(dataDir, "repository");
+  await mkdir(repositoryPath);
+  await execFile("git", ["init", "-b", "main"], { cwd: repositoryPath });
+  await execFile("git", ["config", "user.name", "Xyst Template Test"], { cwd: repositoryPath });
+  await execFile("git", ["config", "user.email", "xyst-template-test@example.invalid"], { cwd: repositoryPath });
+  await writeFile(join(repositoryPath, "README.md"), "Mission template runtime fixture\n", "utf8");
+  await execFile("git", ["add", "README.md"], { cwd: repositoryPath });
+  await execFile("git", ["commit", "-m", "Initialize mission template fixture"], { cwd: repositoryPath });
+
   for (const template of MISSION_TEMPLATES) {
     assert.equal(ids.has(template.id), false);
     ids.add(template.id);
-    const definition = getMissionTemplate(template.id) as { name: string; objective: string; tasks: Array<{ id: string; dependsOn: string[] }> };
+    const definition = getMissionTemplate(template.id) as { name: string; objective: string; workspace?: string; tasks: Array<{ id: string; dependsOn: string[] }> };
     assert.ok(definition.name.length > 0);
     assert.ok(definition.objective.length > 0);
     assert.ok(definition.tasks.length > 0);
@@ -76,6 +89,40 @@ test("mission templates provide schema-valid task graphs with safe GitHub defaul
   assert.equal((getMissionTemplate("issue-to-pr") as any).github.writeEnabled, false);
   assert.equal((getMissionTemplate("pr-review") as any).github.writeEnabled, false);
   assert.throws(() => getMissionTemplate("unknown-template"), /Unknown mission template/);
+
+  const runCalls: Array<{ objective: string; options: Record<string, unknown> }> = [];
+  let sessionNumber = 0;
+  const runner = new PersistentMissionRunner({
+    store: runtime.store,
+    config: runtime.config,
+    events: runtime.events,
+    agent: {
+      run: async (objective: string, options: Record<string, unknown> & { onSession?: (id: string) => void }) => {
+        runCalls.push({ objective, options });
+        const sessionId = `template-session-${++sessionNumber}`;
+        options.onSession?.(sessionId);
+        return { sessionId, model: "fixture", turns: 1, status: "completed" as const, response: `verified-step-${sessionNumber}` };
+      }
+    } as never
+  });
+  for (const template of MISSION_TEMPLATES) {
+    const startCall = runCalls.length;
+    const startSession = sessionNumber;
+    const definition = getMissionTemplate(template.id) as { name: string; objective: string; workspace?: string; tasks: Array<{ id: string; dependsOn: string[] }> };
+    definition.objective = `Execute the ${template.id} template through the standard mission runner.`;
+    definition.workspace = repositoryPath;
+    const executableMission = runner.repository.create(definition);
+    const run = await runner.run(executableMission.id);
+    assert.equal(run.status, "completed", `${template.id} should complete through PersistentMissionRunner`);
+    assert.equal(runCalls.length - startCall, definition.tasks.length, `${template.id} should execute each task once`);
+    assert.match(runCalls[startCall]!.objective, new RegExp(`Execute the ${template.id} template`));
+    for (let index = 1; index < definition.tasks.length; index++) assert.match(runCalls[startCall + index]!.objective, new RegExp(`verified-step-${startSession + index}`), `${template.id} should pass the preceding task result to its dependent`);
+    const runTasks = runtime.store.db.prepare("SELECT task_key,state,attempts FROM mission_tasks WHERE run_id=? ORDER BY task_key").all(run.runId) as Array<{ task_key: string; state: string; attempts: number }>;
+    assert.deepEqual(runTasks, definition.tasks.map((task) => ({ task_key: task.id, state: "completed", attempts: 1 })).sort((left, right) => left.task_key.localeCompare(right.task_key)), `${template.id} persisted task states`);
+    for (const workspace of runner.listWorkspaces(executableMission.id) as Array<{ task_key: string; mode: string }>) {
+      if (workspace.mode === "worktree") await runner.removeWorktree(executableMission.id, run.runId, workspace.task_key);
+    }
+  }
   } finally { runtime.close(); await rm(dataDir, { recursive: true, force: true }); }
 });
 
