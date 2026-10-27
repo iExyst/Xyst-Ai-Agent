@@ -1,4 +1,13 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
+## Latest continuation · verified live-model evidence and cross-platform release checks (2026-10-27)
+
+- Fixed dynamic completion-evidence rebuilding so a generic `run_process exitCode=0` criterion cannot remain after it is strengthened to require `node --test`. Added a regression that checks the prompt contains exactly one correctly typed process criterion and one registered `node:test` suite criterion.
+- Re-ran the isolated Ministral 3B Xyst task using the loaded `xyst-min-code-32k` LM Studio instance. It reread `src/isEven.cjs` and `test/isEven.test.cjs`, ran `node --test` (11 passing, 0 failing), and Xyst persisted `task_complete: verified=true` with the passing process ID mapped to both the general/test-run criteria and the suite read mapped to `file_read`.
+- Local checks on commit `1de26a64148c21431155d0dec6bbc9b011efb866`: full `npm test` passed (runtime 163 passed, 2 host-dependent skips; CLI 22 passed), focused regression passed, `npm run typecheck` passed, and `git diff --check` passed.
+- The exact PR head passed both duplicated push/PR Windows and Ubuntu CI and package runs: `40470839938`, `40470839839`, `40470845099`, and `40470845108` (all eight jobs succeeded). Clean Linux AppImage renderer and Windows installer/renderer smoke checks passed; artifacts are retained under `.xyst-live-acceptance/`.
+- Live-data access remains implemented and exercised: bounded HTTP(S)/JSON/REST fetches include source and UTC retrieval time, with GitHub and Hugging Face integrations plus scheduled polling and webhook/MCP event delivery. Public API examples were verified on Windows and Linux; private/authenticated services require user credentials and live feeds are based on configured polling/events, not a universal stream.
+- PR #1 remains draft and open. Remaining release acceptance includes bare-metal Linux verification and production signing/update hosting; no claim of those gates passing is made. Untracked user acceptance/workspace artifacts remain preserved.
+
 ## Latest continuation · output inference false positive (2026-10-27)
 
 - A persisted Ministral coding task had correct implementation/tests and a passing six-case Node test run, but completion was blocked by an inferred output named `console.log`. The phrase came from the user's explicit negative instruction not to use `console.log` as a substitute for registered tests. Updated output inference to exclude JavaScript console methods and expanded the exact end-to-end regression prompt; full `npm test` passed.
