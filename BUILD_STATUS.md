@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Live Responses MCP and tool-list guard (2026-10-27)
+
+- Current-source Xyst on LM Studio port 1235 completed a real `/v1/responses` request with Hugging Face Remote MCP. The response included `mcp_list_tools` and an actual `mcp_call` for `hub_repo_search`; the returned data reported `Qwen/Qwen3.5-4B` with 7.4M downloads. Model: Qwen3-0.6B. The result is persisted in `.xyst-live-acceptance/responses-mcp-live-20261027/response-mcp-required.jsonl`.
+- An initial request used the stale allowed-tool name `model_search`; LM Studio returned an empty list. Xyst now detects missing or empty requested MCP tools in both streamed and non-streamed Responses results, prints a clear server/tool error, and exits 2 instead of treating it as a normal success.
+- Verification: CLI suite 22/22 passed (including streamed and non-streamed empty-tool regressions); full runtime/CLI/desktop typecheck passed. Hosted checks for the next code commit are pending.
+- Per-request Remote MCP is enabled in the installed server. Configured `mcp.json` plugin integration remains unverified because no configured servers are present; it is a separate path from the verified per-request MCP call.
+
 ## Test-suite completion evidence and latest verification (2026-10-27)
 
 - Fixed a false-positive completion path: when a user's objective says to run/execute/check tests and the suite passes, Xyst now requires a successful `run_process` result (`exitCode=0`) before accepting completion. This prevents a file creation or a print-only pseudo-test from satisfying the objective.

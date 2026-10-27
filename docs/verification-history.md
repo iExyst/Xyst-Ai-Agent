@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Current-source Responses API Remote MCP and empty-tool handling (2026-10-27)
+
+- The current Windows checkout used Xyst's `lm responses` CLI against LM Studio `127.0.0.1:1235` with Qwen3-0.6B and Hugging Face Remote MCP. The completed Responses payload exposed `hub_repo_search`, called it with query `Qwen 3.5`, `repo_types: [model]`, `sort: downloads`, `limit: 1`, and returned a real MCP result for `Qwen/Qwen3.5-4B` (7.4M downloads). Response ID: `resp_d8eac7d6e931cb64a05c6ffbcebdb2889373dd4ca48a7b8b`. The response and tool output are saved in `.xyst-live-acceptance/responses-mcp-live-20261027/response-mcp-required.jsonl`.
+- A probe using the obsolete allowlist name `model_search` received no tools even though the server was healthy and its per-request MCP setting was enabled. The live Hugging Face server advertised `hub_repo_search`. This is a tool-name mismatch, not a Remote MCP permission failure.
+- Added CLI validation for advertised MCP tools. When a requested server is missing, errors, or fails to expose an explicitly allowed tool, `lm responses` now reports that issue and exits 2 for both ordinary and SSE requests. Regression coverage includes available, missing, and empty tool lists.
+- Verification: `npm run test --workspace @xyst/cli` passed (22/22); `npm run typecheck` passed for runtime, CLI, and desktop. Hosted Windows/Ubuntu verification and packaging are pending on the next commit.
+
 ## Test-suite completion evidence (2026-10-27)
 
 - A fresh isolated Qwen3-0.6B probe asked for a JavaScript addition module and a test suite. The model wrote code but supplied print-only pseudo-tests, then tried to execute the test file directly; the process launcher returned `spawn EFTYPE`. The runtime did not falsely accept completion: it stopped with an uncertain process action, and the session remains unverified. No coding acceptance is claimed.

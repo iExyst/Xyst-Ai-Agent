@@ -13,7 +13,7 @@ import * as nodePty from "node-pty";
 import { authenticateMcpOAuth, createDatabaseBackup, createMcpTools, createRuntime, createText, deletePath, getDataDirectory, getSessionCompactionModel, inspectDatabaseIntegrity, recoverCorruptDatabaseProfile, McpOAuthClientProvider, resolveLMStudioIntegrations, gitBranches, gitClone, gitCommit, gitCreateBranch, gitDiff, gitFetch, gitLog, gitPush, gitStage, gitStatus, indexMemories, inspectDesktopCapabilities, inspectLmsDaemon, listFiles, mcpServersSchema, movePath, patchText, readModelPerformance, readText, requestEmbeddings, runProcess, runShell, searchFiles, sendNativeNotification, subscribeRunNotifications, type ExternalActionApprovalRequest, type RemoteFallbackApprovalRequest } from "@xyst/runtime";
 import { parseLoadOptions } from "./load-options.js";
 import { parseChatOptions } from "./chat-options.js";
-import { parseResponsesRequest } from "./responses-options.js";
+import { parseResponsesRequest, responsesMcpToolsError } from "./responses-options.js";
 import { installMissionService, missionServiceStatus, uninstallMissionService, type MissionServiceSpec } from "./mission-service.js";
 import { getMissionTemplate, MISSION_TEMPLATES } from "./mission-templates.js";
 import { createAgentUserMessage } from "./attachments.js";
@@ -720,16 +720,22 @@ try {
     const { tools: _tools, ...requestFields } = responsesRequest;
     const request = { ...requestFields, ...(requestTools.length ? { tools: normalizedTools } : {}) };
     if (rest.includes("--stream")) {
+      const responseEvents: Array<Record<string, unknown>> = [];
       for await (const event of lm.streamResponses(request as Parameters<typeof lm.streamResponses>[0], controller.signal)) {
+        responseEvents.push(event);
         if (json) process.stdout.write(`${JSON.stringify({ type: "lm_studio", at: new Date().toISOString(), data: event })}\n`);
         else if (event.type === "response.output_text.delta") process.stdout.write(String(event.delta ?? ""));
         if (event.type === "response.incomplete") { if (!json) process.stderr.write("LM Studio ended the response with incomplete status.\n"); process.exitCode = 2; }
       }
+      const mcpError = responsesMcpToolsError(requestTools, responseEvents);
+      if (mcpError) { process.stderr.write(`${mcpError}\n`); process.exitCode = 2; }
       if (!json) process.stdout.write("\n");
     } else {
       const result = await lm.responses(request as Parameters<typeof lm.responses>[0], controller.signal);
       output(result);
-      if (result.status === "incomplete" || result.status === "failed") process.exitCode = 2;
+      const mcpError = responsesMcpToolsError(requestTools, result);
+      if (mcpError) process.stderr.write(`${mcpError}\n`);
+      if (result.status === "incomplete" || result.status === "failed" || mcpError) process.exitCode = 2;
     }
   } else if (command === "lm" && (subcommand === "ask" || subcommand === "stream")) {
     runtime.access.assertCapability("network");

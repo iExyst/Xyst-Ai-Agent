@@ -24,3 +24,36 @@ export function parseResponsesRequest(value: unknown): ParsedResponsesRequest {
   if (request.reasoning !== undefined && (!request.reasoning || typeof request.reasoning !== "object" || Array.isArray(request.reasoning))) throw new Error("Responses reasoning must be an object");
   return structuredClone(request) as ParsedResponsesRequest;
 }
+
+function collectMcpToolLists(value: unknown, result: Array<Record<string, unknown>>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectMcpToolLists(item, result);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const item = value as Record<string, unknown>;
+  if (item.type === "mcp_list_tools") result.push(item);
+  for (const key of ["output", "response", "item"]) collectMcpToolLists(item[key], result);
+}
+
+export function responsesMcpToolsError(requestTools: Array<Record<string, unknown>> | undefined, responseOrEvents: unknown): string | undefined {
+  const requestedServers = (requestTools ?? []).filter((tool) => tool.type === "mcp");
+  if (!requestedServers.length) return undefined;
+  const toolLists: Array<Record<string, unknown>> = [];
+  collectMcpToolLists(responseOrEvents, toolLists);
+
+  for (const server of requestedServers) {
+    const label = typeof server.server_label === "string" ? server.server_label : "(unnamed server)";
+    const list = toolLists.find((item) => item.server_label === label);
+    if (!list) return `LM Studio did not return an MCP tool list for server "${label}". Check its Remote MCP setting and server connection.`;
+    if (list.error) return `LM Studio could not initialize MCP server "${label}". Check its Remote MCP setting and server connection.`;
+    const available = Array.isArray(list.tools)
+      ? list.tools.flatMap((tool) => tool && typeof tool === "object" && typeof (tool as Record<string, unknown>).name === "string" ? [(tool as Record<string, unknown>).name as string] : [])
+      : [];
+    const allowed = Array.isArray(server.allowed_tools) ? server.allowed_tools.filter((name): name is string => typeof name === "string") : [];
+    const missing = allowed.filter((name) => !available.includes(name));
+    if (missing.length) return `LM Studio did not expose requested MCP tool(s) ${missing.map((name) => JSON.stringify(name)).join(", ")} from server "${label}". Check its Remote MCP setting and server tool list.`;
+    if (!allowed.length && !available.length) return `LM Studio returned no tools for MCP server "${label}". Check its Remote MCP setting and server tool list.`;
+  }
+  return undefined;
+}

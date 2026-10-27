@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { parseResponsesRequest } from "./responses-options.js";
+import { parseResponsesRequest, responsesMcpToolsError } from "./responses-options.js";
 
 test("Responses request validation preserves supported request fields and tools", () => {
   const request = { model: "publisher/model", input: [{ role: "user", content: "Continue" }], previous_response_id: "resp_123", reasoning: { effort: "high" }, tools: [{ type: "function", name: "lookup" }] };
@@ -24,12 +24,20 @@ test("Responses request validation rejects missing required values and unsupport
   ]) assert.throws(() => parseResponsesRequest(request));
 });
 
+test("Responses MCP validation requires requested tools to be exposed", () => {
+  const requestTools = [{ type: "mcp", server_label: "huggingface", server_url: "https://huggingface.co/mcp", allowed_tools: ["model_search"] }];
+  assert.match(responsesMcpToolsError(requestTools, { output: [{ type: "mcp_list_tools", server_label: "huggingface", tools: [], error: null }] })!, /did not expose requested MCP tool.*model_search/);
+  assert.match(responsesMcpToolsError(requestTools, { output: [] })!, /did not return an MCP tool list/);
+  assert.equal(responsesMcpToolsError(requestTools, { output: [{ type: "mcp_list_tools", server_label: "huggingface", tools: [{ name: "model_search" }], error: null }] }), undefined);
+});
+
 test("lm responses CLI sends regular and streaming requests and emits JSON events", async () => {
   const scratch = await mkdtemp(join(tmpdir(), "xyst-responses-cli-"));
   const work = join(scratch, "work"); const appData = join(scratch, "appdata");
   await mkdir(work); await mkdir(appData);
   await writeFile(join(work, "request.json"), JSON.stringify({ model: "mock-model", input: "fixture prompt", max_output_tokens: 24 }));
   await writeFile(join(work, "request-incomplete.json"), JSON.stringify({ model: "mock-model", input: "fixture incomplete", max_output_tokens: 24 }));
+  await writeFile(join(work, "request-mcp.json"), JSON.stringify({ model: "mock-model", input: "fixture MCP", max_output_tokens: 24, tools: [{ type: "mcp", server_label: "search", server_url: "https://mcp.example.test/mcp", allowed_tools: ["lookup"] }] }));
   const received: Array<Record<string, unknown>> = []; const authorizations: string[] = [];
   const server = createServer((request, response) => {
     if (typeof request.headers.authorization === "string") authorizations.push(request.headers.authorization);
@@ -37,15 +45,17 @@ test("lm responses CLI sends regular and streaming requests and emits JSON event
     request.setEncoding("utf8"); request.on("data", (chunk: string) => { body += chunk; });
     request.on("end", () => {
       received.push(JSON.parse(body) as Record<string, unknown>);
+      const tools = Array.isArray(received.at(-1)?.tools) ? received.at(-1)!.tools as Array<Record<string, unknown>> : [];
+      const mcpOutput = tools.filter((tool) => tool.type === "mcp").map((tool) => ({ type: "mcp_list_tools", server_label: tool.server_label, tools: [], error: null }));
       if (received.at(-1)?.stream !== true) {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ id: "resp_fixture", status: received.at(-1)?.input === "fixture incomplete" ? "incomplete" : "completed", output_text: "fixture answer" }));
+        response.end(JSON.stringify({ id: "resp_fixture", status: received.at(-1)?.input === "fixture incomplete" ? "incomplete" : "completed", output_text: "fixture answer", output: mcpOutput }));
         return;
       }
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write('event: response.created\ndata: {"type":"response.created","response":{"id":"resp_stream_fixture","status":"in_progress"}}\n\n');
       response.write('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"fixture stream"}\n\n');
-      response.end('event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_stream_fixture","status":"completed"}}\n\n');
+      response.end(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { id: "resp_stream_fixture", status: "completed", output: mcpOutput } })}\n\n`);
     });
   });
   const closeServer = () => new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
@@ -68,6 +78,9 @@ test("lm responses CLI sends regular and streaming requests and emits JSON event
       child.once("close", (code) => { clearTimeout(timeout); resolveRun({ code, stdout, stderr }); });
     });
 
+    const approval = await invoke(["config", "set", "autonomy.externalActionApproval", "false"]);
+    assert.equal(approval.code, 0, approval.stderr);
+
     const regular = await invoke(["lm", "responses", "request.json"]);
     assert.equal(regular.code, 0, regular.stderr);
     const regularEvents = regular.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line) as { data: Record<string, unknown> });
@@ -89,7 +102,16 @@ test("lm responses CLI sends regular and streaming requests and emits JSON event
     assert.equal(incomplete.code, 2, incomplete.stderr);
     const incompleteEvent = JSON.parse(incomplete.stdout.trim()) as { data: Record<string, unknown> };
     assert.equal(incompleteEvent.data.status, "incomplete");
-    assert.deepEqual(authorizations, Array(3).fill("Bearer fixture-token"));
+
+    const mcpUnavailable = await invoke(["lm", "responses", "request-mcp.json"]);
+    assert.equal(mcpUnavailable.code, 2, mcpUnavailable.stderr);
+    assert.match(mcpUnavailable.stderr, /did not expose requested MCP tool.*lookup/);
+    assert.deepEqual(received[3]?.tools, [{ type: "mcp", server_label: "search", server_url: "https://mcp.example.test/mcp", allowed_tools: ["lookup"] }]);
+
+    const mcpUnavailableStream = await invoke(["lm", "responses", "request-mcp.json", "--stream"]);
+    assert.equal(mcpUnavailableStream.code, 2, mcpUnavailableStream.stderr);
+    assert.match(mcpUnavailableStream.stderr, /did not expose requested MCP tool.*lookup/);
+    assert.deepEqual(authorizations, Array(5).fill("Bearer fixture-token"));
   } finally {
     if (server.listening) await closeServer();
     await rm(scratch, { recursive: true, force: true });
