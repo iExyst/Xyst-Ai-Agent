@@ -303,6 +303,19 @@ test('concurrent runtime settings updates serialize and preserve unrelated setti
   assert.equal(await fs.stat(`${file}.lock`).catch(() => null), null);
 });
 
+test('runtime settings update recovers an interrupted replacement without hiding it as empty defaults', async (t) => {
+  const root = await createTempDirectory('xyst-runtime-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'config.toml.runtime.json');
+  await updateRuntimeOverrides(file, { ui: { theme: 'dark' } });
+  const backup = `${file}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(file, backup);
+  await assert.rejects(loadRuntimeOverrides(file), { code: 'SETTINGS_RECOVERY_REQUIRED' });
+  await updateRuntimeOverrides(file, { routing: { selection: 'quality' } });
+  assert.deepEqual(await loadRuntimeOverrides(file), { ui: { theme: 'dark' }, routing: { selection: 'quality' } });
+  await assert.rejects(fs.stat(backup), { code: 'ENOENT' });
+});
+
 test('runtime shortcut updates merge per action and restore defaults on null', async (t) => {
   const root = await createTempDirectory('xyst-runtime-shortcuts-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

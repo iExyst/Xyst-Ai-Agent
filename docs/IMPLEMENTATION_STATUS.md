@@ -5,6 +5,7 @@
 - Application update, package update, and revocation refresh restore one bounded JSON backup under the feed-cache lock before sequence comparison. A missing cache primary can no longer be mistaken for a first run after an interrupted replacement, allowing a lower signed sequence to bypass rollback protection.
 - Focused application-update, update-feed, and revocation-feed tests pass 27/27, including new interrupted-replacement replay regressions. Biome formatting/lint and whitespace checks pass. Exact-source hosted CI is pending.
 - Package-registry mutations now restore a single bounded, schema-valid replacement backup under the registry lock. The focused signed-package suite passes 12/12, including an activation-state recovery regression. Exact-source hosted CI is pending.
+- Runtime settings detect a missing primary with an atomic-write backup and fail closed rather than treating the settings as empty. Updates restore one bounded schema-valid backup under the settings lock before merging. Focused runtime-settings tests pass 10/10, including preserving existing preferences across recovery. Exact-source hosted CI is pending.
 
 ## Usage-ledger replacement-backup recovery — 2026-10-27
 

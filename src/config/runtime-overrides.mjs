@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createPublicKey } from 'node:crypto';
 import { isIP } from 'node:net';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, hasAtomicWriteBackup, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { isValidUiShortcut } from '../core/keybindings.mjs';
 import { RUN_BUDGET_FIELDS } from '../core/budgets.mjs';
 import { normalizeSandboxMode, SANDBOX_MODES, SANDBOX_PROCESS_TOOLS } from '../platform/sandbox-modes.mjs';
@@ -464,7 +464,13 @@ export async function loadRuntimeOverrides(filePath) {
   try {
     info = await fs.lstat(filePath);
   } catch (error) {
-    if (error.code === 'ENOENT') return {};
+    if (error.code === 'ENOENT') {
+      if (await hasAtomicWriteBackup(filePath))
+        throw Object.assign(new Error('Runtime settings have an interrupted replacement backup; update settings to recover it safely'), {
+          code: 'SETTINGS_RECOVERY_REQUIRED',
+        });
+      return {};
+    }
     throw error;
   }
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_OVERRIDE_BYTES)
@@ -500,6 +506,10 @@ export async function updateRuntimeOverrides(filePath, patch, { lockWaitMs = 10_
     });
   try {
     await lockHandle.writeFile(JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+    await restoreAtomicWriteBackup(filePath, {
+      maxBytes: MAX_OVERRIDE_BYTES,
+      decode: (serialized) => validateRuntimeOverrides(JSON.parse(serialized)),
+    });
     const merged = mergeSettings(await loadRuntimeOverrides(filePath), validatedPatch);
     validateRuntimeOverrides(merged);
     await writeRuntimeOverrides(filePath, merged);

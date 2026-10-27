@@ -90,6 +90,21 @@ export async function atomicWriteJson(destination, value, options) {
   await atomicWriteFile(destination, `${JSON.stringify(value, null, 2)}\n`, options);
 }
 
+export async function hasAtomicWriteBackup(destination) {
+  const directory = path.dirname(destination);
+  const prefix = `${path.basename(destination)}.`;
+  const names = await fs.readdir(directory).catch((error) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  return names.some(
+    (name) =>
+      name.startsWith(prefix) &&
+      name.endsWith('.bak') &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(name.slice(prefix.length, -'.bak'.length)),
+  );
+}
+
 /** Restore the one validated Windows replacement backup after a crash between
  * moving the old destination aside and installing the new file. The caller
  * must hold the store's cross-process mutation lock and validate the decoded
