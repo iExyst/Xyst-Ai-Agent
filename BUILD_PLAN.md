@@ -8,6 +8,10 @@ Move Xyst from a feature-complete development build to a supportable, security-r
 
 ## Priority order
 
+### Execution timing
+
+Start hosted CI and independent security review in parallel as soon as the repository remote and reviewer are available; neither should be postponed until release packaging. Use early CI failures and review findings to guide the remaining code work. Schedule native Ubuntu/Wayland and supported-client acceptance against a stable release candidate, before making support claims. Keep signing, revocation operations, and final installer lifecycle checks at the release stage after the source is approved.
+
 ### 0. Establish a reviewable baseline and release scope
 
 **Why first:** Without a commit-backed baseline, code review, isolated fixes, and reliable rollback are difficult. The supported target matrix and release owner/signing process also need to be explicit before release claims are made.
@@ -25,6 +29,7 @@ Move Xyst from a feature-complete development build to a supportable, security-r
 **Why second:** Xyst can execute processes, edit files, load extensions, and use desktop automation. A security defect or recovery/data-loss defect is more consequential than adding features.
 
 - Obtain an independent security review covering sandbox enforcement, approvals/grants, secret handling, prompt injection boundaries, MCP/skills, update/package verification, and unrestricted-mode claims.
+- In parallel, run the required clean hosted CI matrix as soon as the Git remote and workflow permissions are available; use failures to identify reproducible fixes rather than waiting for security review completion.
 - Triage findings by severity; resolve every critical/high finding and document mitigations for accepted lower-severity findings.
 - Finish crash/torn-write recovery and safe cleanup for sessions, worktrees, subprocesses, temporary files, and locks; cleanup must remain reviewable and must not delete user work automatically.
 - Review data retention, export/import, session redaction limits, telemetry payloads, and update/revocation behavior for privacy and recovery.
@@ -34,7 +39,7 @@ Move Xyst from a feature-complete development build to a supportable, security-r
 
 ### 2. Prove supported-platform acceptance in hosted CI and native environments
 
-**Why third:** Local Windows and WSL/package evidence is useful, but hosted jobs and physical Linux desktop checks are the independent reproducibility gate.
+**Why third:** Local Windows and WSL/package evidence is useful, but physical Linux desktop checks and final cross-surface acceptance are required before claiming supported platforms. Hosted CI begins earlier in parallel with the security review and is confirmed here from the approved candidate.
 
 - Run the full required Windows CI matrix, including AppContainer and ConPTY gates, from a clean checkout.
 - Run the full Ubuntu CI matrix, including Bubblewrap, pidfd, Secret Service where available, DEB/AppImage build and lifecycle checks.
