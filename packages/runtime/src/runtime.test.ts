@@ -3287,7 +3287,7 @@ test("persistent browser navigates, interacts, transfers bounded files, and enfo
     }
     if (request.url === "/upload") { response.end("Upload received"); return; }
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end('<!doctype html><title>Xyst local browser test</title><h1>Local page loaded</h1><input id="query"><button id="show" onclick="document.querySelector(\'#result\').innerText=document.querySelector(\'#query\').value">Show</button><p id="result"></p><a id="download" href="/download">Download</a><a id="large-download" href="/large-download">Large download</a><form action="/upload" method="post" enctype="multipart/form-data"><input id="file" type="file" name="file"><button id="upload">Upload</button></form>');
+    response.end('<!doctype html><title>Xyst local browser test</title><h1>Local page loaded</h1><input id="query"><button id="show" onclick="document.querySelector(\'#result\').innerText=document.querySelector(\'#query\').value">Show</button><p id="result"></p><a id="popup" href="/check" target="_blank">Open popup</a><a id="download" href="/download">Download</a><a id="large-download" href="/large-download">Large download</a><form action="/upload" method="post" enctype="multipart/form-data"><input id="file" type="file" name="file"><button id="upload">Upload</button></form>');
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const address = server.address(); assert.ok(address && typeof address !== "string");
@@ -3297,7 +3297,7 @@ test("persistent browser navigates, interacts, transfers bounded files, and enfo
   const browser = createBrowserTools({ access: new AccessController(), dataDir, sessionId, workspace, headless: true, maxDownloadBytes: 20 });
   const call = async (name: string, args: unknown = {}) => browser.tools[name]!.execute(args);
   try {
-    const opened = await call("browser_open", { url: origin }) as { title: string; trust: string };
+    const opened = await call("browser_open", { url: origin }) as { tab_id: string; title: string; trust: string };
     assert.equal(opened.title, "Xyst local browser test"); assert.equal(opened.trust, "untrusted-browser-content");
     await call("browser_fill", { selector: "#query", value: "browser interaction passed" });
     await call("browser_click", { selector: "#show" });
@@ -3311,6 +3311,26 @@ test("persistent browser navigates, interacts, transfers bounded files, and enfo
     await call("browser_upload", { selector: "#file", path: "upload.txt" });
     await call("browser_click", { selector: "#upload" });
     assert.match(uploadedBody, /filename="upload\.txt"/); assert.match(uploadedBody, /upload-content/);
+    const second = await call("browser_new_tab", { url: `${origin}/check` }) as { tab_id: string };
+    assert.notEqual(second.tab_id, opened.tab_id);
+    const activeTabs = await call("browser_tabs") as Array<{ tab_id: string; selected: boolean }>;
+    assert.equal(activeTabs.find((tab) => tab.tab_id === second.tab_id)?.selected, true);
+    await call("browser_select_tab", { tab_id: opened.tab_id });
+    assert.equal((await call("browser_tabs") as Array<{ tab_id: string; selected: boolean }>).find((tab) => tab.tab_id === opened.tab_id)?.selected, true);
+    await call("browser_close_tab", { tab_id: second.tab_id });
+    await assert.rejects(() => call("browser_select_tab", { tab_id: second.tab_id }), /no longer open/);
+    await call("browser_open", { url: origin });
+    await call("browser_click", { selector: "#popup" });
+    let popup: { tab_id: string; url: string } | undefined;
+    for (let attempt = 0; attempt < 10 && !popup; attempt++) {
+      const popupTabs = await call("browser_tabs") as Array<{ tab_id: string; url: string }>;
+      popup = popupTabs.find((tab) => tab.tab_id !== opened.tab_id);
+      if (!popup) await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    }
+    assert.ok(popup, "the page opened a second tab");
+    await call("browser_select_tab", { tab_id: popup.tab_id });
+    assert.equal((await call("browser_snapshot") as { url: string }).url, `${origin}/check`);
+    await call("browser_close_tab", { tab_id: popup.tab_id });
     await call("browser_open", { url: `${origin}/persist` });
     await browser.close();
     const resumed = createBrowserTools({ access: new AccessController(), dataDir, sessionId, workspace, headless: true, maxDownloadBytes: 20 });

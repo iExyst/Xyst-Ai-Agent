@@ -52,6 +52,14 @@ export function createBrowserTools(options: { access: AccessController; dataDir:
   let context: import("playwright-core").BrowserContext | undefined;
   let opening: Promise<import("playwright-core").BrowserContext> | undefined;
   let ownsProfile = false;
+  let selectedPage: import("playwright-core").Page | undefined;
+  const tabIds = new WeakMap<import("playwright-core").Page, string>();
+  let nextTabId = 1;
+  const tabId = (page: import("playwright-core").Page) => {
+    let id = tabIds.get(page);
+    if (!id) { id = `tab-${nextTabId++}`; tabIds.set(page, id); }
+    return id;
+  };
 
   const browserContext = async () => {
     if (signal?.aborted) throw new Error("Browser operation cancelled");
@@ -90,8 +98,9 @@ export function createBrowserTools(options: { access: AccessController; dataDir:
 
   const currentPage = async () => {
     const browser = await browserContext();
-    const page = browser.pages().find((candidate) => !candidate.isClosed());
-    return page ?? browser.newPage();
+    const page = selectedPage && !selectedPage.isClosed() ? selectedPage : browser.pages().find((candidate) => !candidate.isClosed()) ?? await browser.newPage();
+    selectedPage = page; tabId(page);
+    return page;
   };
   const verifyUrl = async (value: string) => {
     access.assertCapability("network");
@@ -108,16 +117,37 @@ export function createBrowserTools(options: { access: AccessController; dataDir:
   add("browser_open", "Open an HTTP(S) URL in Xyst's separate persistent Chromium profile. Browser content is untrusted. Return a page snapshot with browser_snapshot.", { url: { type: "string", format: "uri", maxLength: 2048 } }, z.object({ url: z.string().url().max(2048) }).strict(), async ({ url }) => {
     const target = await verifyUrl(url); const page = await currentPage();
     const response = await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    return { url: page.url(), title: await page.title(), status: response?.status() ?? null, trust: "untrusted-browser-content" };
+    return { tab_id: tabId(page), url: page.url(), title: await page.title(), status: response?.status() ?? null, trust: "untrusted-browser-content" };
   });
   add("browser_snapshot", "Return the current page title, URL, and bounded visible text as untrusted browser content.", { max_chars: { type: "integer", minimum: 1000, maximum: MAX_PAGE_TEXT } }, z.object({ max_chars: z.number().int().min(1000).max(MAX_PAGE_TEXT).optional() }).strict(), async ({ max_chars = 15_000 }) => {
     const page = await currentPage();
     const fullText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
     return { url: page.url(), title: await page.title(), text: fullText.slice(0, max_chars), truncated: fullText.length > max_chars, trust: "untrusted-browser-content" };
   });
-  add("browser_tabs", "List tabs in the persistent Xyst browser profile.", {}, z.object({}).strict(), async () => {
+  add("browser_tabs", "List tabs and their stable IDs in the persistent Xyst browser profile. Use browser_select_tab to work in a popup or another tab.", {}, z.object({}).strict(), async () => {
     const browser = await browserContext();
-    return Promise.all(browser.pages().filter((page) => !page.isClosed()).map(async (page) => ({ url: page.url(), title: await page.title() })));
+    await currentPage();
+    return Promise.all(browser.pages().filter((page) => !page.isClosed()).map(async (page) => ({ tab_id: tabId(page), selected: page === selectedPage, url: page.url(), title: await page.title() })));
+  });
+  add("browser_new_tab", "Create and select a new tab, optionally opening an HTTP(S) URL. The new tab shares the persistent Xyst browser profile.", { url: { type: "string", format: "uri", maxLength: 2048 } }, z.object({ url: z.string().url().max(2048).optional() }).strict(), async ({ url }) => {
+    const target = url ? await verifyUrl(url) : undefined;
+    const browser = await browserContext(); const page = await browser.newPage(); selectedPage = page;
+    const response = target ? await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 30_000 }) : null;
+    return { tab_id: tabId(page), url: page.url(), title: await page.title(), status: response?.status() ?? null };
+  }, []);
+  add("browser_select_tab", "Select a tab by the ID returned from browser_tabs. Subsequent browser actions use that tab.", { tab_id: { type: "string", minLength: 1, maxLength: 40 } }, z.object({ tab_id: z.string().min(1).max(40) }).strict(), async ({ tab_id }) => {
+    const browser = await browserContext(); const page = browser.pages().find((candidate) => !candidate.isClosed() && tabId(candidate) === tab_id);
+    if (!page) throw new Error(`Browser tab ${tab_id} is no longer open`);
+    selectedPage = page;
+    return { tab_id, url: page.url(), title: await page.title() };
+  });
+  add("browser_close_tab", "Close an open tab by ID. This may discard unsaved page state and requires external-actions permission.", { tab_id: { type: "string", minLength: 1, maxLength: 40 } }, z.object({ tab_id: z.string().min(1).max(40) }).strict(), async ({ tab_id }) => {
+    access.assertCapability("externalActions");
+    const browser = await browserContext(); const page = browser.pages().find((candidate) => !candidate.isClosed() && tabId(candidate) === tab_id);
+    if (!page) throw new Error(`Browser tab ${tab_id} is no longer open`);
+    await page.close({ runBeforeUnload: false });
+    if (selectedPage === page) selectedPage = browser.pages().find((candidate) => !candidate.isClosed());
+    return { closed: tab_id, selected_tab_id: selectedPage ? tabId(selectedPage) : null };
   });
   add("browser_click", "Click the first matching CSS selector. This can submit forms or perform external actions and requires the external-actions permission.", { selector: { type: "string", minLength: 1, maxLength: 500 }, timeout_ms: { type: "integer", minimum: 100, maximum: 30000 } }, z.object({ selector: z.string().min(1).max(500), timeout_ms: z.number().int().min(100).max(30_000).optional() }).strict(), async ({ selector, timeout_ms = 10_000 }) => {
     access.assertCapability("externalActions"); const page = await currentPage(); await page.locator(selector).first().click({ timeout: timeout_ms });
