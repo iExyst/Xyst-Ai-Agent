@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## LM Studio context selection and live-data continuity (2026-10-27)
+
+- Fixed session compaction/model selection so an exact loaded LM Studio instance ID is respected, while a model key selects the largest-context loaded instance. The compactor checks the selected instance's actual context limit, including when an instance ID matches its base model key. Regression coverage was added to `runtime.test.ts`. Local runtime suite: 159 passed, 2 environment-dependent skips, 0 failures; runtime/CLI/desktop typechecks and runtime build passed on `c58bb5d`.
+- Loaded Qwen3.5-9B at 32,768 context with GPU KV-cache offload disabled and retried the saved coding session. LM Studio still returned HTTP 500 before the model issued a completion call. This does not count as live-model coding acceptance.
+- Live public API capability remains available through `web_fetch` (bounded public HTTPS/JSON, exact final URL, HTTP metadata, UTC retrieval time, truncation state, and network policy). Current-source and Windows/Linux package evidence includes live GitHub REST and Open-Meteo calls. The tool is on-demand; scheduled missions poll, and configured signed GitHub webhooks or supported MCP subscriptions can deliver events. Brave Search needs its stored API token; private APIs need their credentials or an authenticated MCP integration. This does not claim universal streaming.
+- PR-head CI run `40457843666` and package run `40457843644` passed on Windows and Ubuntu. Exact PR artifacts match their manifests: Windows NSIS 264,253,784 bytes, SHA-512 Base64 `vUcYgVTtjr+qgSEc1qQkaL/XamgPWd12KH9a34g7rw9IHuEbEG6mPRbzU/zQsLrnOf2oo1ssum8LIX4YYeF5fw==`; Ubuntu x64 AppImage 325,120,373 bytes, SHA-512 Base64 `2x2//b+pAKsjk37WcKT5eH8btqtnpZUjx/kHrlgZxX+scKXNAmqpjJje6eiyeD92jhS0Dl83dIrQma2jtmy3cw==`. Artifacts retained under `release-current-c58bb5d/`.
+
 ## Completion output inference, live model retry, and current packages (2026-10-27)
 
 - A live Qwen3.5-9B coding task wrote `src/add.cjs` and `src/add.test.cjs`, ran the exact `node --test src/add.test.cjs` command with four passing tests, and read both outputs back. Completion was rejected because the verifier inferred the test's `require("./add.cjs")` dependency as an additional declared output. The task itself did not complete and is not counted as coding acceptance.
