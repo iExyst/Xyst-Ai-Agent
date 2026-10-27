@@ -869,6 +869,34 @@ test("agent completion requires successful persisted tool evidence", async () =>
   } finally { store.close(); }
 }));
 
+test("office preview result sends the rendered PNG pixels to the next model request", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "office-preview-vision.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const pdf = await PDFDocument.create(); const page = pdf.addPage([180, 80]); page.drawText("VISION TEST", { x: 20, y: 35 });
+  await writeFile(join(root, "vision.pdf"), await pdf.save());
+  let round = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async (request: { messages: Array<{ role: string; content?: unknown }> }) => {
+      round++;
+      if (round === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-page", type: "function", function: { name: "office_preview", arguments: JSON.stringify({ path: "vision.pdf", page: 1, output_path: "vision.png" }) } }] } }] };
+      const previewResult = request.messages.find((message) => message.role === "tool" && Array.isArray(message.content) && message.content.some((part) => Boolean(part && typeof part === "object" && (part as Record<string, unknown>).type === "image_url")));
+      assert.ok(previewResult, "office_preview's next-turn tool message should include multimodal image content");
+      const parts = previewResult!.content as Array<Record<string, any>>;
+      const imageUrl = parts.find((part) => part.type === "image_url")?.image_url?.url;
+      const previewBytes = await readFileAsync(join(root, "vision.png"));
+      assert.equal(imageUrl, `data:image/png;base64,${previewBytes.toString("base64")}`);
+      assert.match(String(parts.find((part) => part.type === "text")?.text), /vision\.png/);
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Inspect the rendered preview", { workspace: root, model: "test-model", maxTurns: 3, completionCriteria: ["Inspect the rendered preview"], requiredToolEvidence: [{ tool: "office_preview" }] });
+    assert.equal(result.status, "completed"); assert.equal(round, 2);
+  } finally { store.close(); }
+}));
+
 test("agent completion for a requested command requires successful process evidence", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "command-completion-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
