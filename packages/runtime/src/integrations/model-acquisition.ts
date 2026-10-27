@@ -94,6 +94,22 @@ export class ModelAcquisitionService {
       }
     }
   }
+  private async diskVolume(path: string): Promise<number> {
+    let candidate = resolve(path);
+    for (;;) {
+      try { return (await stat(candidate)).dev; }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const parent = dirname(candidate);
+        if ((code !== "ENOENT" && code !== "ENOTDIR") || parent === candidate) throw new Error(`Cannot inspect the model staging volume: ${error instanceof Error ? error.message : String(error)}`);
+        candidate = parent;
+      }
+    }
+  }
+  private async stagingDiskRequirements(modelDirectory: string, artifactBytes: number): Promise<{ modelBytes: number; tempBytes: number; sharedVolume: boolean }> {
+    const sharedVolume = await this.diskVolume(modelDirectory) === await this.diskVolume(tmpdir());
+    return { modelBytes: Math.ceil(artifactBytes * (sharedVolume ? 2.05 : 1.05)), tempBytes: Math.ceil(artifactBytes * 1.05), sharedVolume };
+  }
   listDownloads() {
     return this.deps.store.db.prepare("SELECT id,repository,revision,quantization,lm_job_id,state,total_size_bytes,details_json,created_at,updated_at FROM model_downloads ORDER BY created_at DESC LIMIT 50").all();
   }
@@ -119,6 +135,9 @@ export class ModelAcquisitionService {
     const modelDirectory = await this.modelDirectory();
     const allowedLicenses = this.deps.config.resolve<string[]>("models.allowedLicenses", scopes)?.value ?? [];
     const [diskAvailableBytes, tempDiskAvailableBytes] = await Promise.all([this.diskSpace(modelDirectory), this.diskSpace(tmpdir())]);
+    const sharedStagingVolume = await this.diskVolume(modelDirectory) === await this.diskVolume(tmpdir());
+    const modelDiskNeeded = (sizeBytes: number) => Math.ceil(sizeBytes * (sharedStagingVolume ? 2.05 : 1.05));
+    const tempDiskNeeded = (sizeBytes: number) => Math.ceil(sizeBytes * 1.05);
     const recommendations: Array<Record<string, unknown>> = [];
     const parameterScaleBillions = Math.max(0.5, Math.floor((memoryBudgetBytes / (2 * 1024 ** 3)) * 2) / 2);
     const fallbackQueries = requirements.visionRequired
@@ -205,8 +224,8 @@ export class ModelAcquisitionService {
         const bConcurrentFit = b.estimatedConcurrentMemoryBytes <= memoryBudgetBytes ? 1 : 0;
         const aGpuFit = gpuFreeBytes !== undefined && a.estimatedMemoryBytes <= gpuFreeBytes ? 1 : 0;
         const bGpuFit = gpuFreeBytes !== undefined && b.estimatedMemoryBytes <= gpuFreeBytes ? 1 : 0;
-        const aDiskFit = diskAvailableBytes >= Math.ceil(a.sizeBytes * 1.05) && tempDiskAvailableBytes >= Math.ceil(a.sizeBytes * 1.05) ? 1 : 0;
-        const bDiskFit = diskAvailableBytes >= Math.ceil(b.sizeBytes * 1.05) && tempDiskAvailableBytes >= Math.ceil(b.sizeBytes * 1.05) ? 1 : 0;
+        const aDiskFit = diskAvailableBytes >= modelDiskNeeded(a.sizeBytes) && tempDiskAvailableBytes >= tempDiskNeeded(a.sizeBytes) ? 1 : 0;
+        const bDiskFit = diskAvailableBytes >= modelDiskNeeded(b.sizeBytes) && tempDiskAvailableBytes >= tempDiskNeeded(b.sizeBytes) ? 1 : 0;
         return bConcurrentFit - aConcurrentFit || bGpuFit - aGpuFit || bDiskFit - aDiskFit || quantizationRank(b.quantization) - quantizationRank(a.quantization) || a.sizeBytes - b.sizeBytes;
       });
       const selected = candidates[0];
@@ -238,9 +257,9 @@ export class ModelAcquisitionService {
         concurrentMemoryFitsBudget: selected.estimatedConcurrentMemoryBytes <= memoryBudgetBytes,
         ...(declaredContextTokens !== undefined ? { declaredContextTokens } : {}),
         ...(declaredContextTokens !== undefined && contextSource ? { contextMetadata: { source: contextSource, repository: contextModelRepository, ...(contextModelRevision ? { revision: contextModelRevision } : {}) } } : {}),
-        diskAvailableBytes, diskRequiredBytes: Math.ceil(selected.sizeBytes * 1.05),
-        tempDiskAvailableBytes, tempDiskRequiredBytes: Math.ceil(selected.sizeBytes * 1.05),
-        diskSufficient: diskAvailableBytes >= Math.ceil(selected.sizeBytes * 1.05) && tempDiskAvailableBytes >= Math.ceil(selected.sizeBytes * 1.05),
+        diskAvailableBytes, diskRequiredBytes: modelDiskNeeded(selected.sizeBytes),
+        tempDiskAvailableBytes, tempDiskRequiredBytes: tempDiskNeeded(selected.sizeBytes), sharedStagingVolume,
+        diskSufficient: diskAvailableBytes >= modelDiskNeeded(selected.sizeBytes) && tempDiskAvailableBytes >= tempDiskNeeded(selected.sizeBytes),
         downloads: metadata.downloads ?? result.downloads ?? 0, license: license ?? null,
         licenseAllowed: typeof license === "string" && allowedLicenses.includes(license.trim().toLowerCase()),
         ...(toolCallingRequired ? { toolCallingRequired: true } : {}),
@@ -253,7 +272,7 @@ export class ModelAcquisitionService {
           concurrency: "full per-agent model and KV memory multiplied by the saved maximum concurrency; assumes separate model loads",
           gpu: "full model and KV estimate compared with free VRAM on the largest single NVIDIA device; assumes full offload"
         },
-        reason: `${publishedEvaluationEvidence.length ? `Hub metadata lists ${publishedEvaluationEvidence.length} evaluation result(s); these are claims to review, not independent or directly comparable quality scores. ` : "No structured evaluation results were found in Hub metadata. "}${toolUseEvidence === "explicit-model-card-claim" ? "The model card explicitly claims tool-calling, function-calling, tool-use, or agent capability; treat that publisher statement as unverified until a live tool-call probe passes. " : toolCallingRequired ? "The model card did not provide an explicit tool-calling claim. " : ""}Resource-aware shortlist with a ${selected.quantization} GGUF${contextSource === "base-model-config" ? `; declared context and architecture were read from the pinned base-model config ${contextModelRepository}@${contextModelRevision}` : ""}. Estimated single-agent RAM is ${selected.estimatedMemoryBytes} bytes (${selected.memoryEstimateCoverage}; ${assumedContextTokens}-token context) against a ${memoryBudgetBytes}-byte effective budget; ${concurrencyLimit}-agent estimated memory is ${selected.estimatedConcurrentMemoryBytes} bytes${selected.estimatedConcurrentMemoryBytes > memoryBudgetBytes ? " and exceeds that budget" : " and fits that budget"}. Estimated full-offload GPU memory is ${selected.estimatedMemoryBytes} bytes${gpuFreeBytes === undefined ? "; current NVIDIA free VRAM is unavailable" : ` against ${gpuFreeBytes} bytes free on the largest single GPU`}; the loaded-model LM Studio estimate is still required to verify actual placement. The artifact fits the ${maxDownloadBytes}-byte download cap. Disk preflight needs ${Math.ceil(selected.sizeBytes * 1.05)} bytes on both the LM Studio model-directory volume and temporary volume. Weight memory uses artifact size × 1.25; when config dimensions are available, KV cache assumes FP16. Concurrency multiplies the full per-agent estimate by the saved maximum concurrency. GPU fit assumes full offload on one GPU. These are conservative estimates, not measured model usage.`
+        reason: `${publishedEvaluationEvidence.length ? `Hub metadata lists ${publishedEvaluationEvidence.length} evaluation result(s); these are claims to review, not independent or directly comparable quality scores. ` : "No structured evaluation results were found in Hub metadata. "}${toolUseEvidence === "explicit-model-card-claim" ? "The model card explicitly claims tool-calling, function-calling, tool-use, or agent capability; treat that publisher statement as unverified until a live tool-call probe passes. " : toolCallingRequired ? "The model card did not provide an explicit tool-calling claim. " : ""}Resource-aware shortlist with a ${selected.quantization} GGUF${contextSource === "base-model-config" ? `; declared context and architecture were read from the pinned base-model config ${contextModelRepository}@${contextModelRevision}` : ""}. Estimated single-agent RAM is ${selected.estimatedMemoryBytes} bytes (${selected.memoryEstimateCoverage}; ${assumedContextTokens}-token context) against a ${memoryBudgetBytes}-byte effective budget; ${concurrencyLimit}-agent estimated memory is ${selected.estimatedConcurrentMemoryBytes} bytes${selected.estimatedConcurrentMemoryBytes > memoryBudgetBytes ? " and exceeds that budget" : " and fits that budget"}. Estimated full-offload GPU memory is ${selected.estimatedMemoryBytes} bytes${gpuFreeBytes === undefined ? "; current NVIDIA free VRAM is unavailable" : ` against ${gpuFreeBytes} bytes free on the largest single GPU`}; the loaded-model LM Studio estimate is still required to verify actual placement. The artifact fits the ${maxDownloadBytes}-byte download cap. Disk preflight needs ${modelDiskNeeded(selected.sizeBytes)} bytes on the model-directory volume and ${tempDiskNeeded(selected.sizeBytes)} bytes on the temporary volume${sharedStagingVolume ? " (the shared volume must hold staging and the imported copy at once)" : ""}. Weight memory uses artifact size × 1.25; when config dimensions are available, KV cache assumes FP16. Concurrency multiplies the full per-agent estimate by the saved maximum concurrency. GPU fit assumes full offload on one GPU. These are conservative estimates, not measured model usage.`
       });
     }
     if (!toolCallingRequired && recommendations.length) break;
@@ -328,8 +347,10 @@ export class ModelAcquisitionService {
     if (expectedBytes > limit) throw new Error(`Selected artifact is ${expectedBytes} bytes, over the configured ${limit} byte model download limit`);
     const directory = await this.modelDirectory();
     const [available, tempAvailable] = await Promise.all([this.diskSpace(directory), this.diskSpace(tmpdir())]);
-    const needed = Math.ceil(expectedBytes * 1.05);
-    if (available < needed || tempAvailable < needed) throw new Error(`Insufficient disk space for verified model staging (need ${needed} bytes in both the LM Studio model directory and temporary directory)`);
+    const diskRequirements = await this.stagingDiskRequirements(directory, expectedBytes);
+    if (available < diskRequirements.modelBytes || tempAvailable < diskRequirements.tempBytes) {
+      throw new Error(`Insufficient disk space for verified model staging (need ${diskRequirements.modelBytes} bytes in the LM Studio model directory and ${diskRequirements.tempBytes} bytes in the temporary directory${diskRequirements.sharedVolume ? "; both paths share one volume and staging coexists with the imported copy" : ""})`);
+    }
     const safeName = artifact.split("/").at(-1)!;
     const stagingDir = await access.assertPath(join(tmpdir(), "xyst-model-downloads"), "write");
     await mkdir(stagingDir, { recursive: true });

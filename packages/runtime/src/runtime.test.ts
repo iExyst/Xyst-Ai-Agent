@@ -2804,8 +2804,9 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   assert.equal(visionRecommendation.artifact, "model-Q4_K_M.gguf"); assert.deepEqual(visionRecommendation.companionFiles, ["mmproj-model-Q4_K_M.gguf"]);
   assert.equal((visionRecommendation.artifacts as Array<{ role: string }>).some((file) => file.role === "vision-projector"), true);
   assert.equal(recommendations[0]?.quantization, "Q4_K_M"); assert.equal(recommendations[0]?.estimatedMemoryBytes, 1280);
-  assert.equal(recommendations[0]?.diskAvailableBytes, 4096); assert.equal(recommendations[0]?.diskRequiredBytes, 1076);
+  assert.equal(recommendations[0]?.diskAvailableBytes, 4096); assert.equal(recommendations[0]?.diskRequiredBytes, 2100);
   assert.equal(recommendations[0]?.tempDiskAvailableBytes, 4096); assert.equal(recommendations[0]?.tempDiskRequiredBytes, 1076); assert.equal(recommendations[0]?.diskSufficient, true);
+  assert.equal(recommendations[0]?.sharedStagingVolume, true);
   assert.deepEqual(recommendations[0]?.publishedEvaluationEvidence, []);
   assert.equal((recommendations[0]?.resourceEstimateAssumptions as Record<string, unknown>).weightMemoryMultiplier, 1.25);
   assert.match(String(recommendations[0]?.reason), /No structured evaluation/);
@@ -2841,6 +2842,11 @@ test("model acquisition requires opt-in, enforces artifact limits, and tracks LM
   const noSpace = new ModelAcquisitionService({ store, config, huggingFace: hf as never, lmStudio: lm as never, hostResourceStats: async () => hostResources, modelDirectory: async () => root, diskAvailableBytes: async () => 1000 });
   assert.equal((await noSpace.recommend("coding"))[0]?.diskSufficient, false);
   await assert.rejects(() => noSpace.download("owner/model", "Q4_K_M"), /Insufficient free space at the LM Studio model directory/); assert.equal(downloadCalls, 0);
+  const stagingPeakShortfall = new ModelAcquisitionService({ store, config, huggingFace: hf as never, lmStudio: lm as never, hostResourceStats: async () => hostResources, modelDirectory: async () => root, diskAvailableBytes: async () => 1500 });
+  assert.equal((await stagingPeakShortfall.recommend("coding"))[0]?.diskSufficient, false, "one shared volume cannot hold both a staged artifact and imported copy with only 1500 bytes free");
+  config.set("global", "models.allowedLicenses", ["mit"]);
+  await assert.rejects(() => stagingPeakShortfall.acquireRecommended(recommendations[0] as never), /Insufficient disk space for verified model staging/);
+  config.set("global", "models.allowedLicenses", []);
   const noTempSpace = new ModelAcquisitionService({ store, config, huggingFace: hf as never, lmStudio: lm as never, hostResourceStats: async () => hostResources, modelDirectory: async () => root, diskAvailableBytes: async (path) => path === root ? 4096 : 1000 });
   const temporarySpaceRecommendation = (await noTempSpace.recommend("coding"))[0]!;
   assert.equal(temporarySpaceRecommendation.diskAvailableBytes, 4096); assert.equal(temporarySpaceRecommendation.tempDiskAvailableBytes, 1000); assert.equal(temporarySpaceRecommendation.diskSufficient, false, "temporary staging space participates in the recommendation preflight");
