@@ -1,4 +1,11 @@
 # Xyst verification history
+
+## Reasoning-disabled live coding attempts (2026-10-27)
+
+- A CPU-only Qwen3-4B instance was loaded for Xyst coding acceptance using a resource estimate of 2.97 GiB total memory and an 8,192-token context. With reasoning disabled and a 1,024-token output cap, Xyst created a correct `src/add.mjs`; its first `file_list` failed because `src` did not exist. The model produced no test file or test execution after 15 minutes, so the isolated run was cancelled and not accepted. The test instance was unloaded afterward.
+- A second isolated run used the already-loaded Qwen3.5-9B instance with reasoning disabled and the same output cap. It created the same implementation file but produced no test creation or execution within 10 minutes; the run was cancelled without acceptance.
+- Profiles and partial workspaces are preserved under `.xyst-live-acceptance/live-coding-qwen3-4b-off-20261027/` and `.xyst-live-acceptance/live-coding-qwen35-off-20261027/`. These model runs used isolated settings and did not alter the repository workspace.
+
 ## Current-source live preflight and Qwen3-0.6B coding recheck (2026-10-27)
 
 - A current-source CLI run against an intentionally unreachable LM Studio endpoint (`127.0.0.1:1234`) exited with the expected connection error and persisted its session as `failed` (`9c198095-645f-4e0b-943c-fadf1787a461`), confirming the preflight cleanup fix against the live CLI/provider path.

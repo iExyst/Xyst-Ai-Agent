@@ -1,5 +1,12 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Reasoning-disabled live coding attempts (2026-10-27)
+
+- A CPU-only Qwen3-4B instance was loaded for Xyst coding acceptance using a resource estimate of 2.97 GiB total memory and an 8,192-token context. With reasoning disabled and a 1,024-token output cap, Xyst created a correct `src/add.mjs`; its first `file_list` failed because `src` did not exist. The model produced no test file or test execution after 15 minutes, so the isolated run was cancelled and not accepted. The test instance was unloaded afterward.
+- A second isolated run used the already-loaded Qwen3.5-9B instance with reasoning disabled and the same output cap. It created the same implementation file but produced no test creation or execution within 10 minutes; the run was cancelled without acceptance.
+- Profiles and partial workspaces are preserved under `.xyst-live-acceptance/live-coding-qwen3-4b-off-20261027/` and `.xyst-live-acceptance/live-coding-qwen35-off-20261027/`. These model runs used isolated settings and did not alter the repository workspace.
+
+
 ## Agent preflight failure session cleanup (2026-10-27)
 
 - Live LM Studio endpoint troubleshooting showed that failures before the agent's main inference loop could leave a newly created session marked `active`. Added an outer `AgentRunner.run` cleanup path: preflight exceptions mark it `failed`; an already-aborted run marks it `cancelled` and returns a cancelled result. Existing in-loop terminal handling is preserved without duplicate status changes.
