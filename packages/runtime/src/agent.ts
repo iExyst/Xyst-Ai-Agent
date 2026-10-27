@@ -219,18 +219,21 @@ export class AgentRunner {
     else if (options.sessionId && options.workspace) this.deps.sessions.setWorkspace(sessionId, workspace);
     const executionScope = options.executionScope ?? sessionId;
     options.onSession?.(sessionId);
+    const addResumeBridge = () => {
+      const previous = (this.deps.sessions.messages(sessionId) as Array<{ role: string }>).at(-1);
+      if (!previous || (previous.role !== "tool" && previous.role !== "user")) return;
+      const bridge = { role: "assistant", content: "This session is resuming after an interrupted turn. Continue from the saved conversation and recorded tool results, then address the new message." };
+      const safeBridge = JSON.parse(this.deps.provider.redact(JSON.stringify(bridge))) as ApiMessage;
+      this.deps.sessions.addMessage(sessionId, "assistant", `${MESSAGE_PREFIX}${JSON.stringify(safeBridge)}`);
+    };
     if (options.initialMessage) {
       if (options.initialMessage.role !== "user" || options.initialMessage.content === undefined) throw new Error("Initial agent message must be a user message with content");
+      if (options.sessionId) addResumeBridge();
       const safeMessage = JSON.parse(this.deps.provider.redact(JSON.stringify(options.initialMessage))) as ApiMessage;
       this.deps.sessions.addMessage(sessionId, "user", `${MESSAGE_PREFIX}${JSON.stringify(safeMessage)}`);
     } else if (!options.sessionId) this.deps.sessions.addMessage(sessionId, "user", safeObjective);
     else if (safeObjective) {
-      const previous = (this.deps.sessions.messages(sessionId) as Array<{ role: string }>).at(-1);
-      if (previous && (previous.role === "tool" || previous.role === "user")) {
-        const bridge = { role: "assistant", content: "This session is resuming after an interrupted turn. Continue from the saved conversation and recorded tool results, then address the new message." };
-        const safeBridge = JSON.parse(this.deps.provider.redact(JSON.stringify(bridge))) as ApiMessage;
-        this.deps.sessions.addMessage(sessionId, "assistant", `${MESSAGE_PREFIX}${JSON.stringify(safeBridge)}`);
-      }
+      addResumeBridge();
       this.deps.sessions.addMessage(sessionId, "user", safeObjective);
     }
     if (!visionRequired) {

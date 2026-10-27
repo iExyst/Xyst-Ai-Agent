@@ -1,4 +1,10 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
+## Latest continuation · structured CLI resume sequencing (2026-10-27)
+
+- A live model resume exposed that the CLI passes a structured `initialMessage` even when resuming a saved session, bypassing the runtime's existing bridge after an interrupted tool result. Added the missing assistant bridge before the new structured user message. Regression captures the exact provider payload and verifies the final sequence is tool result → assistant bridge → resumed user message.
+- Runtime suite: 162 passed, 2 host-dependent skips, 0 failures; runtime/CLI builds and `git diff --check` passed. This source fix has not yet been pushed or through hosted CI/package checks.
+- The interrupted Ministral task remains unaccepted because it asserted numeric strings should be even, contrary to the objective, and later patch attempts did not reliably verify the revised source. The Qwen3.5-9B attempt timed out before its first tool call. Both isolated profiles/workspaces are preserved.
+
 ## Latest continuation · current exact-head packages and file-action recovery (2026-10-27)
 
 - Commit `2eb84a8` passed all four push/PR Windows and Ubuntu CI/package workflows: `40463309131`, `40463309081`, `40463313682`, and `40463313570`. The exact PR-head Windows NSIS package is 264,256,844 bytes, SHA-512 Base64 `/dIWvzpkgUdnbIaEUPKMX6TpWivzvZsOfrfTnuXaMahYYEYYouTHFb6K4Myo6BHp3HOup90nrri2NKY3fSZf7w==`; Ubuntu x64 AppImage is 325,124,473 bytes, SHA-512 Base64 `w/3k78JTSmBTPs72WtBhDheNCshzY5A9seBpXyZuhqKxLlD8nb/wnDfdJrdB0SdKFnifnXWADoTNfyHR/Y3+7w==`. Both hashes match workflow updater manifests; exact payloads and renderer-smoke images are preserved under `.xyst-live-acceptance/current-pr-packages-2eb84a8/`.

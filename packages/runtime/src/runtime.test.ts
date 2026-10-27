@@ -308,6 +308,34 @@ test("resuming a task on a different model preserves the earlier model's termina
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
+test("structured CLI resume bridges the previous tool result before the new user message", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "structured-resume-bridge.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  let requestCount = 0; let interrupted = true; let sessionId = ""; let resumedMessages: Array<Record<string, unknown>> = [];
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
+      requestCount++;
+      if (requestCount === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "resume-file-read", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "missing.txt" }) } }] } }] };
+      if (interrupted) throw new Error("simulated inference interruption after tool result");
+      resumedMessages = request.messages;
+      return { choices: [{ message: { role: "assistant", content: "Continuing from the saved tool result." } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    await assert.rejects(() => agent.run("Read missing.txt and report its contents.", { workspace: root, maxTurns: 3, onSession: (id) => { sessionId = id; } }), /simulated inference interruption/);
+    assert.ok(sessionId);
+    assert.equal((sessions.messages(sessionId) as Array<{ role: string }>).at(-1)?.role, "tool");
+    interrupted = false;
+    await agent.run("Continue from the saved result.", { sessionId, workspace: root, maxTurns: 1, initialMessage: { role: "user", content: "Continue from the saved result." } });
+    const conversation = resumedMessages.slice(1);
+    assert.deepEqual(conversation.slice(-3).map((message) => message.role), ["tool", "assistant", "user"]);
+    assert.match(String(conversation.at(-2)?.content), /resuming after an interrupted turn/);
+    assert.equal((sessions.messages(sessionId) as Array<{ role: string }>).at(-3)?.role, "assistant");
+  } finally { store.close(); }
+}));
+
 test("automatic selection deprioritizes a model with observed zero task completions when an eligible model is unmeasured", () => {
   const models = [
     { type: "llm" as const, publisher: "test", key: "observed-failures", display_name: "Observed Failures", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
