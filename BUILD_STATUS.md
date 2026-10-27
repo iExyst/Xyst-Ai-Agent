@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-26 (refreshed)
 
+## Latest continuation · exact Windows package live API mission (2026-10-27)
+
+- Ran the `xyst-windows` payload artifact from hosted package run `40421400459` (code from commit `d446afb`; subsequent heads through `1c8aa2c` are documentation-only) with a new isolated APPDATA profile and workspace. Configured only that test profile to use the user's running LM Studio server at `127.0.0.1:1235`; diagnostics reported 51 models.
+- The loaded local `qwen3-0.6b` completed the exact public GitHub REST API workflow: `web_fetch` returned HTTP 200 at `2026-10-27T00:04:03.167Z`; Xyst created and read back `repository.json` with `full_name=iExyst/Xyst-Ai-Agent` and `default_branch=main`; persisted `task_complete verified:true`. Session `11d59069-b9da-4153-832b-f15e058dbf87`. Result SHA-256: `FDB7F42C6B8E9709CDE27D15ACC3200213C66BFB0F48C3A1E2D8D3B2D3FF2F36`. Full details are in [verification history](docs/verification-history.md#exact-windows-package-live-github-api-task-2026-10-27).
+- Two exploratory attempts are not counted as success: Qwen3.5 9B produced no first response for over five minutes and was cancelled; a prior 0.6B session wrote to a stale nested path and failed completion verification. The fresh profile/workspace succeeded. Afterward, the two test-loaded Qwen3-0.6B instances were unloaded; the pre-existing Qwen3.5 9B and GPT-OSS 20B instances remain loaded.
+
 ## Latest continuation · preserve custom XDG data path in Linux mission service (2026-10-26)
 
 - Fixed a shared-state issue in service installation: when `XDG_DATA_HOME` is configured, `mission service install` now writes that exact data home into the generated `systemd --user` unit alongside `XYST_ROOT`. The formatter uses POSIX path normalization even when unit-generation tests run on Windows. This keeps the headless daemon on the same SQLite profile as the CLI and desktop.
