@@ -1,5 +1,12 @@
 # Xyst verification history
 
+## Completion output inference, live model retry, and current packages (2026-10-27)
+
+- A live Qwen3.5-9B coding task wrote `src/add.cjs` and `src/add.test.cjs`, ran the exact `node --test src/add.test.cjs` command with four passing tests, and read both outputs back. Completion was rejected because the verifier inferred the test's `require("./add.cjs")` dependency as an additional declared output. The task itself did not complete and is not counted as coding acceptance.
+- Updated output inference to remove common JavaScript/TypeScript module specifiers before filename matching. A deterministic regression writes and verifies both CommonJS files, executes a Node check, reads back the exact outputs, and proves `task_complete` accepts the evidence. Local runtime suite: 158 passed, 2 environment-dependent skips, 0 failures. Runtime, CLI, and desktop typechecks passed.
+- A guided resume of the saved live task then encountered model evidence-selection errors and an LM Studio HTTP 500. The separate fresh Qwen3-0.6B attempt did not complete; it created the implementation at the wrong workspace-relative path and did not satisfy the requested suite. Neither session counts as a successful live coding acceptance.
+- Commit `25d3bbd` passed all hosted checks: push CI `40455622967`, PR CI `40455626268`, push package `40455622802`, and PR package `40455626275`. The exact PR package artifacts were downloaded and verified against their manifests: Windows NSIS 264,251,864 bytes, SHA-512 Base64 `RvjVIiZHaBlfbajSsNqrGUqDXSjgKdw9FcVMONRL8PeG6WKAOofvrl60YYcG3ymFThSC/ePGnabSA437ciAoKw==`; Ubuntu x64 AppImage 325,120,337 bytes, SHA-512 Base64 `16+F9H0XY7RZCLPR3qkVipkhKqkkUKwHJB9+uQBp955yb39r21TomTn7vuSBJX4O3SZ4GZIdOKlHv65n7C3MoA==`. These are unsigned CI candidates, not a public release.
+
 ## Reasoning-disabled live coding attempts (2026-10-27)
 
 - A CPU-only Qwen3-4B instance was loaded for Xyst coding acceptance using a resource estimate of 2.97 GiB total memory and an 8,192-token context. With reasoning disabled and a 1,024-token output cap, Xyst created a correct `src/add.mjs`; its first `file_list` failed because `src` did not exist. The model produced no test file or test execution after 15 minutes, so the isolated run was cancelled and not accepted. The test instance was unloaded afterward.
