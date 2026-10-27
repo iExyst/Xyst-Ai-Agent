@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Latest continuation · exact LM Studio MCP server permissions (2026-10-27)
+
+- Read the current official [LM Studio server settings](https://lmstudio.ai/docs/developer/core/server/settings) and [MCP API guide](https://lmstudio.ai/docs/developer/core/mcp). In a read-only inspection of the installed LM Studio 0.4.26 Server Settings at `127.0.0.1:1235`, `Allow per-request MCPs` is on, `Require Authentication` is off, and `Allow calling servers from mcp.json` is off; the server reports 51 models. The official docs state configured `mcp.json` servers require authentication. This matches the prior configured-plugin HTTP 403 and explains why ephemeral MCP can work while configured plugin calls cannot.
+- No server settings, authentication state, API keys, or models were changed. The native configured-plugin gate remains open; Xyst's policy-managed MCP path and ephemeral LM Studio MCP support are implemented and separately verified. The [LM Studio support matrix](docs/lm-studio-support.md) now records the exact installed setting state and official prerequisite.
+- The full build remains active. Current PR CI is partially complete: Ubuntu verification and Linux packaging passed; Windows verification and packaging are still running on `912964a`. Preserve `.help recover` and `.xyst-live-acceptance/`.
+
 ## Latest continuation · live-data access and current PR checks (2026-10-27)
 
 - Confirmed the live-data boundary in the current shared runtime: full-access agents can fetch bounded public HTTPS/JSON APIs with `web_fetch`; results include exact URL, HTTP status, content type, UTC retrieval timestamp, and truncation state. GitHub and Hugging Face API integrations are also available. Scheduled missions poll on their configured schedule, and configured signed GitHub webhooks/MCP subscriptions can deliver event-driven updates. Public API reads need no provider token.
