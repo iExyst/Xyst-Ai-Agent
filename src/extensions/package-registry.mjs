@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { acquirePackageInstallLock, verifySignedPackage } from './signed-packages.mjs';
 import { getCachedRevocations } from './revocation-feed.mjs';
 
@@ -353,6 +353,14 @@ async function updateRegistry(installRoot, mutate) {
   const root = await resolveInstallRoot(installRoot);
   const release = await acquireRegistryLock(root);
   try {
+    await restoreAtomicWriteBackup(path.join(root, REGISTRY_NAME), {
+      maxBytes: MAX_REGISTRY_BYTES,
+      decode: (serialized) => {
+        const state = JSON.parse(serialized);
+        validateRegistry(state);
+        return state;
+      },
+    });
     const state = await readRegistry(root);
     const { state: updated, result } = await mutate(state, root);
     if (result.changed) await atomicWriteJson(path.join(root, REGISTRY_NAME), updated, { mode: 0o600 });

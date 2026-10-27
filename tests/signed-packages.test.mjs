@@ -481,3 +481,20 @@ test('runtime installed skill discovery treats an absent package store as empty'
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   assert.deepEqual(await getActiveInstalledPackages({ installRoot: path.join(root, 'extensions'), trustedKeys: {} }), []);
 });
+
+test('package registry mutation restores an interrupted registry before applying the next change', async (t) => {
+  const fixture = await signedFixture(t);
+  const installRoot = path.join(fixture.root, 'installed');
+  const trustedKeys = { 'test-key': fixture.publicKeyPem };
+  await installSignedPackage(fixture.source, { installRoot, trustedKeys });
+  const coordinates = { installRoot, packageId: 'release-check', version: '1.2.3', trustedKeys };
+  await activateInstalledSkill(coordinates);
+  const registryPath = path.join(installRoot, 'registry.json');
+  const backupPath = `${registryPath}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(registryPath, backupPath);
+  assert.deepEqual(await disableInstalledSkill({ installRoot, packageId: 'release-check' }), { changed: true, active_version: null });
+  assert.deepEqual(await listInstalledPackageActivations({ installRoot }), [
+    { package_type: 'skill', package_id: 'release-check', active_version: null, previous_versions: ['1.2.3'] },
+  ]);
+  await assert.rejects(fs.stat(backupPath), { code: 'ENOENT' });
+});
