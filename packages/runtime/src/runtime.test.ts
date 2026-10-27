@@ -1056,6 +1056,35 @@ test("task completion rejects truncated web fetch evidence and accepts a success
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
+test("same-response live fetch completion retries against refreshed evidence indexes", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "same-response-fetch-completion.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const originalFetch = globalThis.fetch; const url = "https://8.8.8.8/api/repository"; let fetchCalls = 0; let inferenceRound = 0;
+  globalThis.fetch = async () => { fetchCalls++; return new Response(JSON.stringify({ full_name: "example/repository", default_branch: "main", pushed_at: "2026-10-27T02:10:47Z" }), { status: 200, headers: { "content-type": "application/json" } }); };
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      inferenceRound++;
+      if (inferenceRound === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [
+        { id: "same-turn-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } },
+        { id: "same-turn-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }
+      ] } }] };
+      return { choices: [{ message: { role: "assistant", content: "The live repository data was retrieved and verified.", tool_calls: [{ id: "refreshed-evidence-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run(`Fetch the live repository data from ${url} and report its status and repository fields.`, { workspace: root, maxTurns: 4 });
+    assert.equal(result.status, "completed");
+    assert.equal(fetchCalls, 1, "completion recovery must not repeat the live request");
+    const calls = store.db.prepare("SELECT name,status,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId) as Array<{ name: string; status: string; output_json: string | null }>;
+    assert.deepEqual(calls.map(({ name, status }) => [name, status]), [["web_fetch", "completed"], ["task_complete", "failed"], ["task_complete", "completed"]]);
+    assert.match(calls[1]!.output_json!, /completed after the displayed evidence list was sent/);
+    assert.equal(JSON.parse(calls[2]!.output_json!).verified, true);
+    assert.equal(inferenceRound, 2);
+  } finally { globalThis.fetch = originalFetch; store.close(); }
+}));
+
 test("malformed external tool arguments fail before durable intent and do not quarantine the mission", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "malformed-external-tool.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

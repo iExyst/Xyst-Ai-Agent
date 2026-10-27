@@ -623,6 +623,10 @@ export class AgentRunner {
         }
         const receivedIndexCount = Array.isArray(indexes) ? indexes.length : 0;
         if (!requiredCompletionCriteria.length || requiredCompletionCriteria.length > 50 || !Array.isArray(indexes) || indexes.length !== requiredCompletionCriteria.length || !indexes.every((item) => Number.isSafeInteger(item) && (item as number) >= 1 && (item as number) <= currentEvidence.length)) {
+          const persistedEvidenceCount = this.deps.store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE name!='task_complete' AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?)").get(sessionId, executionScope) as { count: number };
+          if (Array.isArray(indexes) && indexes.length === requiredCompletionCriteria.length && indexes.every((item) => Number.isSafeInteger(item) && (item as number) >= 1) && persistedEvidenceCount.count > currentEvidence.length) {
+            throw new Error("Successful evidence was completed after the displayed evidence list was sent. Call task_complete again in a new turn using the refreshed evidence indexes.");
+          }
           throw new Error(`Completion verification needs exactly ${requiredCompletionCriteria.length} evidence indexes in criterion order; received ${receivedIndexCount}. One index is accepted only when the same tool result supports every criterion.`);
         }
         const checked = requiredCompletionCriteria.map((criterion, index) => {
@@ -836,8 +840,9 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
           if (drainUserMessages() > 0) continue;
           if (!completionVerified && completionNudges < 2) {
             const priorCompletion = this.deps.store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE session_id=? AND name='task_complete'").get(sessionId) as { count: number };
+            const staleEvidenceCompletion = this.deps.store.db.prepare("SELECT 1 FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed' AND output_json LIKE '%completed after the displayed evidence list was sent%' LIMIT 1").get(sessionId);
             const evidence = this.deps.store.db.prepare("SELECT id,name,effect,input_json,output_json FROM tool_calls WHERE name!='task_complete' AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?) ORDER BY created_at DESC,rowid DESC LIMIT 50").all(sessionId, executionScope) as Array<{ id: string; name: string; effect: string; input_json: string; output_json: string }>;
-            if (priorCompletion.count === 0 && evidence.some((item) => item.effect === "external")) {
+            if ((priorCompletion.count === 0 && evidence.some((item) => item.effect === "external")) || (staleEvidenceCompletion && evidence.length > 0)) {
               const criteria = requiredCompletionCriteria.map((item) => `- ${item}`).join("\n");
               const evidenceList = evidence.map(evidenceLabel).join("\n");
               save({ role: "user", content: `Your prior response did not verify the requested work. Do not repeat completed actions or describe commands. Call task_complete now with one relevant successful evidence index for each server-defined required criterion, in the order shown. Indexes refer to the list in the next system message. You may provide one index if that same result supports every criterion. Required criteria:\n${criteria}\nSuccessful tool results available as evidence:\n${evidenceList}` });
