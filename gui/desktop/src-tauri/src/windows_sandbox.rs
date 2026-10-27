@@ -1661,16 +1661,21 @@ mod tests {
         directory
     }
 
-    fn test_workspace_directory(name: &str) -> PathBuf {
+    fn test_workspace_directory(name: &str) -> (PathBuf, PathBuf) {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.test-tmp");
         std::fs::create_dir_all(&root).expect("create desktop test temp root");
-        let workspace = root.join(format!(
+        let fixture_root = root.join(format!(
             "xyst-sandbox-{name}-workspace-{}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&workspace);
+        let _ = std::fs::remove_dir_all(&fixture_root);
+        std::fs::create_dir_all(&fixture_root).expect("create isolated sandbox fixture root");
+        let workspace = fixture_root.join("workspace");
         std::fs::create_dir_all(&workspace).expect("create isolated sandbox workspace");
-        std::fs::canonicalize(workspace).expect("resolve isolated sandbox workspace")
+        (
+            std::fs::canonicalize(workspace).expect("resolve isolated sandbox workspace"),
+            fixture_root,
+        )
     }
 
     fn dacl_bytes(path: &Path, directory: bool) -> Vec<u8> {
@@ -2039,13 +2044,18 @@ mod tests {
                 local_app_data.to_string_lossy().into_owned(),
             ),
         ]);
-        let workspace = test_workspace_directory("appcontainer-process");
-        std::fs::write(workspace.join("existing.txt"), "workspace-readable")
+        let (workspace, fixture_root) = test_workspace_directory("appcontainer-process");
+        let existing_file = workspace
+            .join("existing")
+            .join("nested")
+            .join("existing.txt");
+        std::fs::create_dir_all(existing_file.parent().unwrap())
+            .expect("create existing nested workspace directory");
+        std::fs::write(&existing_file, "workspace-readable")
             .expect("create existing workspace file");
         let original_root_acl = dacl_bytes(&workspace, true);
-        let original_file_acl = dacl_bytes(&workspace.join("existing.txt"), false);
-        let temp_probe =
-            "echo sandbox-out && echo sandbox-err 1>&2 && type existing.txt >nul && echo workspace-write>new.txt && if exist new.txt (exit /b 23) else (exit /b 1)";
+        let original_file_acl = dacl_bytes(&existing_file, false);
+        let temp_probe = "echo sandbox-out && echo sandbox-err 1>&2 && (type existing\\nested\\existing.txt >nul || exit /b 11) && (echo workspace-write>new.txt || exit /b 12) && if exist new.txt (exit /b 23) else (exit /b 13)";
         let code = run_appcontainer_command(
             &command,
             &["/d".into(), "/c".into(), temp_probe.into()],
@@ -2070,7 +2080,7 @@ mod tests {
         assert!(!code.stdout_truncated);
         assert!(!code.stderr_truncated);
         assert_eq!(
-            std::fs::read_to_string(workspace.join("existing.txt")).unwrap(),
+            std::fs::read_to_string(&existing_file).unwrap(),
             "workspace-readable"
         );
         assert_eq!(
@@ -2117,11 +2127,8 @@ mod tests {
             "stdin-forwarded"
         );
         assert_eq!(dacl_bytes(&workspace, true), original_root_acl);
-        assert_eq!(
-            dacl_bytes(&workspace.join("existing.txt"), false),
-            original_file_acl
-        );
-        std::fs::remove_dir_all(workspace).expect("clean sandbox workspace");
+        assert_eq!(dacl_bytes(&existing_file, false), original_file_acl);
+        std::fs::remove_dir_all(fixture_root).expect("clean sandbox workspace fixture");
         std::fs::remove_dir_all(local_app_data).expect("clean isolated test LOCALAPPDATA");
     }
 
