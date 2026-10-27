@@ -29,6 +29,16 @@ jobs:
       - name: Verify Linux update manifest and AppImage
         if: runner.os == 'Linux'
         run: node scripts/verify-release-metadata.cjs linux release
+      - name: Ensure Xvfb is available for the Linux renderer smoke
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends xvfb xauth
+          fi
+      - name: Smoke test clean Linux AppImage and renderer
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node scripts/smoke-packaged-linux-gui.mjs
       - name: Smoke test clean Windows install and renderer
         if: runner.os == 'Windows'
         run: node scripts/smoke-packaged-windows-gui.mjs
