@@ -3,7 +3,8 @@
 ## Usage-ledger replacement-backup recovery — 2026-10-27
 
 - The Windows atomic-write fallback can leave the destination absent with a UUID-named `.bak` if the process exits after moving the old file aside. The shared-lock-protected usage-ledger reader now restores exactly one bounded, regular, single-link backup only after JSON and ledger-schema validation; exclusive linking prevents overwriting a concurrently created primary. It cleans only the same-file duplicate link left by an interrupted restore and preserves ambiguous, invalid, or unsupported candidates with an explicit recovery error.
-- The focused valid-recovery and ambiguous-backup tests pass (2/2) when run with local Windows hard-link capability. The default restricted local shell denies `fs.link` with `EPERM`, which the helper now reports as `ATOMIC_WRITE_RECOVERY_REQUIRED` while preserving the source backup. Formatting and exact-source hosted CI are pending. Equivalent missing-primary recovery for project/global memory, goals, and subagent task history remains open.
+- The focused valid-recovery and ambiguous-backup tests pass (2/2) when run with local Windows hard-link capability. The default restricted local shell denies `fs.link` with `EPERM`, which the helper now reports as `ATOMIC_WRITE_RECOVERY_REQUIRED` while preserving the source backup. Formatting and exact-source hosted CI are pending. Project/global memory and goals now use the same recovery helper; subagent task history remains open.
+- Project/global memory and project goals restore one validated backup under their cross-process mutation locks instead of presenting empty stores. Focused recovery regressions pass (2/2) with the required local Windows hard-link capability; exact-source hosted CI is pending.
 
 ## Session backup-recovery CI regression — 2026-10-27
 

@@ -3,7 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { redactSecrets } from '../platform/redaction.mjs';
 import { PERSISTENCE_SCHEMA_REGISTRY } from '../persistence/schema-registry.mjs';
 
@@ -56,7 +56,7 @@ export class GoalStore {
   async importGoals(document) {
     validateGoalsExport(document);
     return this.#withLock(async () => {
-      const current = await this.#read();
+      const current = await this.#readUnlocked();
       if (current.goals.length)
         throw Object.assign(new Error('Goals can only be restored into an empty project goal store'), {
           code: 'GOALS_IMPORT_TARGET_NOT_EMPTY',
@@ -72,7 +72,7 @@ export class GoalStore {
   async importReferencedGoals(document) {
     validateGoalsExport(document);
     return this.#withLock(async () => {
-      const current = await this.#read();
+      const current = await this.#readUnlocked();
       const byId = new Map(current.goals.map((goal) => [goal.id, goal]));
       const incoming = redactGoalRecords(document.goals);
       for (const goal of incoming) {
@@ -97,7 +97,7 @@ export class GoalStore {
     if (typeof title !== 'string' || !title.trim() || title.length > 500)
       throw new TypeError('Goal title must contain 1 to 500 characters');
     return this.#withLock(async () => {
-      const document = await this.#read();
+      const document = await this.#readUnlocked();
       if (document.goals.length >= MAX_GOALS) throw new TypeError(`Project goals cannot exceed ${MAX_GOALS} entries`);
       const now = new Date().toISOString();
       const safeTitle = redactSecrets(title.trim());
@@ -122,7 +122,7 @@ export class GoalStore {
   async setStatus(id, status) {
     if (!STATUS.has(status)) throw new TypeError(`Goal status must be one of: ${[...STATUS].join(', ')}`);
     return this.#withLock(async () => {
-      const document = await this.#read();
+      const document = await this.#readUnlocked();
       const goal = document.goals.find((entry) => entry.id === id);
       if (!goal) throw Object.assign(new Error(`Goal '${id}' was not found`), { code: 'NOT_FOUND' });
       goal.status = status;
@@ -139,7 +139,7 @@ export class GoalStore {
     if (typeof reference !== 'string' || reference.length > 1_000)
       throw new TypeError('Goal progress reference must be a string of at most 1000 characters');
     return this.#withLock(async () => {
-      const document = await this.#read();
+      const document = await this.#readUnlocked();
       const goal = document.goals.find((entry) => entry.id === id);
       if (!goal) throw Object.assign(new Error(`Goal '${id}' was not found`), { code: 'NOT_FOUND' });
       goal.progress ||= [];
@@ -165,7 +165,7 @@ export class GoalStore {
     if (reference !== undefined && (typeof reference !== 'string' || reference.length > 1_000))
       throw new TypeError('Goal progress reference must be a string of at most 1000 characters');
     return this.#withLock(async () => {
-      const document = await this.#read();
+      const document = await this.#readUnlocked();
       const goal = document.goals.find((entry) => entry.id === id);
       if (!goal) throw Object.assign(new Error(`Goal '${id}' was not found`), { code: 'NOT_FOUND' });
       const entry = (goal.progress || []).find((item) => item.id === progressId);
@@ -182,7 +182,7 @@ export class GoalStore {
 
   async deleteProgress(id, progressId) {
     return this.#withLock(async () => {
-      const document = await this.#read();
+      const document = await this.#readUnlocked();
       const goal = document.goals.find((entry) => entry.id === id);
       if (!goal) throw Object.assign(new Error(`Goal '${id}' was not found`), { code: 'NOT_FOUND' });
       const progress = goal.progress || [];
@@ -202,7 +202,7 @@ export class GoalStore {
     const { SessionStore } = await import('../session/store.mjs');
     return this.#withLock(async () => {
       await new SessionStore(this.workspaceRoot, { lockWaitMs: this.lockWaitMs }).removeGoalReference(id);
-      const document = await this.#read();
+      const document = await this.#readUnlocked();
       const before = document.goals.length;
       document.goals = document.goals.filter((goal) => goal.id !== id);
       if (document.goals.length === before) return false;
@@ -225,7 +225,7 @@ export class GoalStore {
         code: 'INVALID_SESSION_GOALS',
       });
     return this.#withLock(async () => {
-      const available = new Set((await this.#read()).goals.map((goal) => goal.id));
+      const available = new Set((await this.#readUnlocked()).goals.map((goal) => goal.id));
       const missing = ids.filter((id) => !available.has(id));
       if (missing.length)
         throw Object.assign(new Error(`Project goals were not found: ${missing.join(', ')}`), { code: 'GOAL_NOT_FOUND', ids: missing });
@@ -234,36 +234,26 @@ export class GoalStore {
   }
 
   async #read() {
+    return this.#withLock(() => this.#readUnlocked());
+  }
+
+  async #readUnlocked() {
     try {
       const directory = await resolveAgentDirectory(this.workspaceRoot);
       if (!directory) return { schema_version: GOALS_SCHEMA_VERSION, updated_at: new Date().toISOString(), goals: [] };
       const filePath = path.join(directory, 'goals.json');
-      const document = JSON.parse(await readBoundedGoalFile(filePath));
-      PERSISTENCE_SCHEMA_REGISTRY.assertVersion('goals', document?.schema_version);
-      if (document.schema_version !== GOALS_SCHEMA_VERSION || !Array.isArray(document.goals))
-        throw new Error('Goals file has an unsupported schema');
-      if (document.goals.length > MAX_GOALS) throw new Error('Goals file exceeds its entry limit');
-      for (const goal of document.goals) {
-        if (!goal.id || !goal.title || !STATUS.has(goal.status)) throw new Error('Goals file contains an invalid entry');
-        goal.progress ||= [];
-        if (!Array.isArray(goal.progress) || goal.progress.length > MAX_PROGRESS_ENTRIES)
-          throw new Error('Goals file contains invalid progress entries');
-        for (const entry of goal.progress)
-          if (
-            !entry ||
-            typeof entry.id !== 'string' ||
-            typeof entry.text !== 'string' ||
-            !entry.text ||
-            entry.text.length > 2_000 ||
-            typeof entry.reference !== 'string' ||
-            entry.reference.length > 1_000 ||
-            entry.source !== 'user' ||
-            !Number.isFinite(Date.parse(entry.created_at)) ||
-            (entry.updated_at !== undefined && !Number.isFinite(Date.parse(entry.updated_at)))
-          )
-            throw new Error('Goals file contains an invalid progress entry');
+      try {
+        return decodeGoals(await readBoundedGoalFile(filePath));
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        return (
+          (await restoreAtomicWriteBackup(filePath, { maxBytes: MAX_GOAL_FILE_BYTES, decode: decodeGoals })) ?? {
+            schema_version: GOALS_SCHEMA_VERSION,
+            updated_at: new Date().toISOString(),
+            goals: [],
+          }
+        );
       }
-      return document;
     } catch (error) {
       if (error.code === 'ENOENT') return { schema_version: GOALS_SCHEMA_VERSION, updated_at: new Date().toISOString(), goals: [] };
       throw error;
@@ -310,6 +300,35 @@ export class GoalStore {
         await fs.rm(lockPath, { force: true }).catch(() => {});
     }
   }
+}
+
+function decodeGoals(serialized) {
+  const document = JSON.parse(serialized);
+  PERSISTENCE_SCHEMA_REGISTRY.assertVersion('goals', document?.schema_version);
+  if (document.schema_version !== GOALS_SCHEMA_VERSION || !Array.isArray(document.goals))
+    throw new Error('Goals file has an unsupported schema');
+  if (document.goals.length > MAX_GOALS) throw new Error('Goals file exceeds its entry limit');
+  for (const goal of document.goals) {
+    if (!goal.id || !goal.title || !STATUS.has(goal.status)) throw new Error('Goals file contains an invalid entry');
+    goal.progress ||= [];
+    if (!Array.isArray(goal.progress) || goal.progress.length > MAX_PROGRESS_ENTRIES)
+      throw new Error('Goals file contains invalid progress entries');
+    for (const entry of goal.progress)
+      if (
+        !entry ||
+        typeof entry.id !== 'string' ||
+        typeof entry.text !== 'string' ||
+        !entry.text ||
+        entry.text.length > 2_000 ||
+        typeof entry.reference !== 'string' ||
+        entry.reference.length > 1_000 ||
+        entry.source !== 'user' ||
+        !Number.isFinite(Date.parse(entry.created_at)) ||
+        (entry.updated_at !== undefined && !Number.isFinite(Date.parse(entry.updated_at)))
+      )
+        throw new Error('Goals file contains an invalid progress entry');
+  }
+  return document;
 }
 
 export function validateGoalsExport(document) {

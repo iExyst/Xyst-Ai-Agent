@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteFile, atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteFile, atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { redactSecrets } from '../platform/redaction.mjs';
 import { MEMORY_PROVENANCE_ACTORS, PERSISTENCE_SCHEMA_REGISTRY } from '../persistence/schema-registry.mjs';
 
@@ -38,7 +38,10 @@ export class MemoryStore {
 
   async read() {
     const snapshot = await this.#readSnapshot();
-    if (!snapshot) return createMemory();
+    if (!snapshot) {
+      const paths = await this.#memoryPaths(false);
+      return paths ? this.#withLock(() => this.#readUnlocked()) : createMemory();
+    }
     const migration = PERSISTENCE_SCHEMA_REGISTRY.migrate('memory', snapshot.memory);
     validateMemory(migration.record);
     if (!migration.migrated) return migration.record;
@@ -327,8 +330,14 @@ export class MemoryStore {
   }
 
   async #readUnlocked() {
-    const snapshot = await this.#readSnapshot();
-    if (!snapshot) return createMemory();
+    let snapshot = await this.#readSnapshot();
+    if (!snapshot) {
+      const paths = await this.#memoryPaths(false);
+      if (!paths) return createMemory();
+      await restoreAtomicWriteBackup(paths.filePath, { maxBytes: MAX_MEMORY_FILE_BYTES, decode: decodeMemoryRecord });
+      snapshot = await this.#readSnapshot();
+      if (!snapshot) return createMemory();
+    }
     const migration = PERSISTENCE_SCHEMA_REGISTRY.migrate('memory', snapshot.memory);
     validateMemory(migration.record);
     if (!migration.migrated) return migration.record;
@@ -385,6 +394,13 @@ export class MemoryStore {
       throw Object.assign(new Error(`${this.scopeLabel} directory resolves outside the ${this.rootLabel}`), { code: 'MEMORY_PATH_UNSAFE' });
     return { filePath: path.join(actual, this.memoryFilename), lockPath: path.join(actual, this.lockFilename) };
   }
+}
+
+function decodeMemoryRecord(serialized) {
+  const parsed = JSON.parse(serialized);
+  const migration = PERSISTENCE_SCHEMA_REGISTRY.migrate('memory', parsed);
+  validateMemory(migration.record);
+  return parsed;
 }
 
 /** Same validated/locked format as project memory, stored under the user data root. */

@@ -787,6 +787,33 @@ test('memory store separates sections and supports append, update and delete', a
   await assert.rejects(store.append('instructions', 'no'), /Unknown memory section/);
 });
 
+test('project and global memory restore one validated replacement backup instead of reading empty memory', async (t) => {
+  const projectRoot = await createTempDirectory('xyst-memory-backup-recovery-');
+  const globalRoot = await createTempDirectory('xyst-global-memory-backup-recovery-');
+  t.after(() => Promise.all([fs.rm(projectRoot, { recursive: true, force: true }), fs.rm(globalRoot, { recursive: true, force: true })]));
+  for (const store of [new MemoryStore(projectRoot), new GlobalMemoryStore(globalRoot)]) {
+    await store.append('lessons_learned', 'Preserve this memory entry.', { source: 'user' });
+    const backup = `${store.filePath}.00000000-0000-4000-8000-000000000001.bak`;
+    await fs.rename(store.filePath, backup);
+
+    const memory = await store.read();
+    assert.equal(memory.sections.lessons_learned[0].text, 'Preserve this memory entry.');
+    await assert.rejects(fs.lstat(backup), { code: 'ENOENT' });
+  }
+});
+
+test('project goals restore one validated replacement backup instead of reading an empty goal store', async (t) => {
+  const root = await createTempDirectory('xyst-goals-backup-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new GoalStore(root);
+  const created = await store.add('Preserve this project goal.');
+  const backup = `${store.filePath}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(store.filePath, backup);
+
+  assert.equal((await store.list())[0].id, created.id);
+  await assert.rejects(fs.lstat(backup), { code: 'ENOENT' });
+});
+
 test('concurrent memory appends from independent stores preserve every update', async (t) => {
   const root = await createTempDirectory('xyst-memory-concurrent-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
