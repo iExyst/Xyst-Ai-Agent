@@ -71,6 +71,22 @@ test('revocation feed rejects sequence rollback and same-sequence equivocation',
   });
 });
 
+test('revocation refresh restores an interrupted cache before checking replay sequence', async (t) => {
+  const root = await createTempDirectory('xyst-revocation-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const { trustedKeys, pair } = setupFeed({ sequence: 4 });
+  const options = { installRoot: root, url: 'https://example.test/revocations.json', keyId: 'feed-key', trustedKeys };
+  await refreshRevocationFeed({ ...options, fetchImpl: async () => response(setupFeed({ sequence: 4, pair }).feed) });
+  const cachePath = path.join(root, 'revocations.json');
+  const backupPath = `${cachePath}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(cachePath, backupPath);
+  await assert.rejects(refreshRevocationFeed({ ...options, fetchImpl: async () => response(setupFeed({ sequence: 3, pair }).feed) }), {
+    code: 'REVOCATION_FEED_REPLAY',
+  });
+  assert.deepEqual(await getCachedRevocations(options), { revokedKeyIds: ['package-key'], revokedPackages: [] });
+  await assert.rejects(fs.stat(backupPath), { code: 'ENOENT' });
+});
+
 test('concurrent revocation refreshes cannot let a late response restore older revocation state', async (t) => {
   const root = await createTempDirectory('xyst-revocation-concurrent-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

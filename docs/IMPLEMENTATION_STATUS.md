@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-27
 
+## Signed update and revocation cache recovery — 2026-10-27
+
+- Application update, package update, and revocation refresh restore one bounded JSON backup under the feed-cache lock before sequence comparison. A missing cache primary can no longer be mistaken for a first run after an interrupted replacement, allowing a lower signed sequence to bypass rollback protection.
+- Focused application-update, update-feed, and revocation-feed tests pass 27/27, including new interrupted-replacement replay regressions. Biome formatting/lint and whitespace checks pass. Exact-source hosted CI is pending.
+
 ## Usage-ledger replacement-backup recovery — 2026-10-27
 
 - The Windows atomic-write fallback can leave the destination absent with a UUID-named `.bak` if the process exits after moving the old file aside. The shared-lock-protected usage-ledger reader now restores exactly one bounded, regular, single-link backup only after JSON and ledger-schema validation; exclusive linking prevents overwriting a concurrently created primary. It cleans only the same-file duplicate link left by an interrupted restore and preserves ambiguous, invalid, or unsupported candidates with an explicit recovery error.

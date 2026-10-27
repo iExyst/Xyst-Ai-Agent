@@ -2,7 +2,7 @@ import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { canonicalJson, installSignedPackageBundle } from './signed-packages.mjs';
 import { withFeedCacheLock } from './feed-cache-lock.mjs';
 
@@ -53,6 +53,10 @@ export async function refreshPackageUpdateFeed({
     });
     const hash = digest(feed.statement);
     return await withFeedCacheLock(cacheRoot, CACHE_NAME, async () => {
+      await restoreAtomicWriteBackup(path.join(cacheRoot, CACHE_NAME), {
+        maxBytes: MAX_BYTES,
+        decode: (serialized) => JSON.parse(serialized),
+      });
       const latest = await readCache(cacheRoot).catch((error) => (error.code === 'ENOENT' ? null : Promise.reject(error)));
       if (latest) {
         const prior = validateFeed(latest.feed, { keyId, trustedKeys, revokedKeyIds, now, maxAgeHours, allowExpired: true });

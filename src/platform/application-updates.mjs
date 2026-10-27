@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWriteJson } from './files.mjs';
+import { atomicWriteJson, restoreAtomicWriteBackup } from './files.mjs';
 import { canonicalJson } from '../extensions/signed-packages.mjs';
 import { withFeedCacheLock } from '../extensions/feed-cache-lock.mjs';
 
@@ -226,6 +226,7 @@ async function commitSequence(directory, channel, feed) {
     const name = `application-updates-${channel}.json`;
     return await withFeedCacheLock(root, name, async () => {
       const filePath = path.join(root, name);
+      await restoreAtomicWriteBackup(filePath, { maxBytes: 4096, decode: (serialized) => JSON.parse(serialized) });
       const previous = await readSequenceState(filePath).catch((error) => {
         if (error.code === 'ENOENT') return null;
         throw error;

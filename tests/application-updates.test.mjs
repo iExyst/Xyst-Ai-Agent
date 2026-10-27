@@ -343,6 +343,31 @@ test('application update metadata cannot roll back or equivocate after a signed 
   assert.ok((await fs.stat(path.join(cacheDirectory, 'application-updates-stable.json'))).isFile());
 });
 
+test('application update refresh restores an interrupted cache before checking replay sequence', async (t) => {
+  const cacheDirectory = await createTempDirectory('xyst-app-update-recovery-');
+  t.after(() => fs.rm(cacheDirectory, { recursive: true, force: true }));
+  const first = signedFeed({ sequence: 7 });
+  const options = {
+    settings: settings(first.publicKey),
+    currentVersion: '0.1.0',
+    platform: 'win32',
+    arch: 'x64',
+    now: NOW,
+    cacheDirectory,
+  };
+  await checkApplicationUpdates({ ...options, fetchImpl: async () => Response.json(first.feed) });
+  const cachePath = path.join(cacheDirectory, 'application-updates-stable.json');
+  const backupPath = `${cachePath}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(cachePath, backupPath);
+  const replay = signedFeed({ sequence: 6 });
+  await assert.rejects(
+    checkApplicationUpdates({ ...options, settings: settings(replay.publicKey), fetchImpl: async () => Response.json(replay.feed) }),
+    { code: 'APP_UPDATE_FEED_REPLAY' },
+  );
+  assert.ok((await fs.stat(cachePath)).isFile());
+  await assert.rejects(fs.stat(backupPath), { code: 'ENOENT' });
+});
+
 test('application update check ignores other platforms, architectures, channels, and versions already installed', async () => {
   const { publicKey, feed } = signedFeed({ platform: 'linux', arch: 'arm64', version: '0.1.0' });
   const fetchImpl = async () => Response.json(feed);

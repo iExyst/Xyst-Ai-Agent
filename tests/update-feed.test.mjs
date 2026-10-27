@@ -143,6 +143,30 @@ test('update metadata rejects untrusted signatures, expired feeds, and replayed 
   await assert.rejects(getCachedPackageUpdateFeed({ ...options, now: Date.now() + 120_000 }), { code: 'UPDATE_FEED_EXPIRED' });
 });
 
+test('update-feed refresh restores an interrupted cache before checking replay sequence', async (t) => {
+  const root = await createTempDirectory('xyst-update-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const pair = generateKeyPairSync('ed25519');
+  const trustedKeys = { 'updates-key': pair.publicKey.export({ type: 'spki', format: 'pem' }) };
+  const options = { installRoot: root, url: 'https://updates.example.test/feed.json', keyId: 'updates-key', trustedKeys };
+  const entry = {
+    package_type: 'skill',
+    package_id: 'release-check',
+    version: '1.0.0',
+    manifest_sha256: 'a'.repeat(64),
+    package_url: 'https://packages.example.test/release-check',
+  };
+  await refreshPackageUpdateFeed({ ...options, fetchImpl: async () => response(signedFeed(pair, [entry], 4)) });
+  const cachePath = path.join(root, 'updates.json');
+  const backupPath = `${cachePath}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(cachePath, backupPath);
+  await assert.rejects(refreshPackageUpdateFeed({ ...options, fetchImpl: async () => response(signedFeed(pair, [entry], 3)) }), {
+    code: 'UPDATE_FEED_REPLAY',
+  });
+  assert.equal((await getCachedPackageUpdateFeed(options)).sequence, 4);
+  await assert.rejects(fs.stat(backupPath), { code: 'ENOENT' });
+});
+
 test('concurrent update-feed refreshes cannot let a late response roll the cache backwards', async (t) => {
   const root = await createTempDirectory('xyst-update-concurrent-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
