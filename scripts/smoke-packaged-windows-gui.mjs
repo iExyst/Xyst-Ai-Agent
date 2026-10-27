@@ -19,6 +19,9 @@ if (!scratchRelative || scratchRelative.startsWith("..") || isAbsolute(scratchRe
 }
 const installDir = join(scratch, "installed-app");
 const installedExe = join(installDir, "Xyst.exe");
+const packagedResources = join(installDir, "resources", "app.asar.unpacked");
+const bundledNode = join(packagedResources, "apps", "desktop", "runtime", "node.exe");
+const packagedCli = join(packagedResources, "apps", "cli", "dist", "index.js");
 const dataDir = join(scratch, "data");
 const workDir = join(scratch, "workspace");
 const env = {
@@ -73,9 +76,23 @@ async function cdpCommand(page, method, params, id) {
 }
 
 async function evaluate(page, expression, id) {
-  const result = await cdpCommand(page, "Runtime.evaluate", { expression, returnByValue: true }, id);
+  const result = await cdpCommand(page, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, id);
   if (result?.exceptionDetails) throw new Error(result.exceptionDetails.text ?? "Renderer evaluation failed");
   return result?.result?.value ?? result?.result;
+}
+
+function runInstalledCli(args) {
+  const result = spawnSync(bundledNode, ["--experimental-wasm-modules", packagedCli, "--json", ...args], {
+    cwd: workDir,
+    env,
+    encoding: "utf8",
+    timeout: 60_000,
+    windowsHide: true
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`Installed CLI ${args[0]} ${args[1]} failed (${result.status}): ${(result.stderr || result.stdout).slice(-4000)}`);
+  try { return JSON.parse(result.stdout.trim()); }
+  catch (error) { throw new Error(`Installed CLI returned invalid JSON for ${args[0]} ${args[1]}: ${result.stdout.slice(-4000)}`, { cause: error }); }
 }
 
 async function waitForUi(page, timeoutMs = 45_000) {
@@ -105,10 +122,18 @@ try {
   if (setup.error) throw setup.error;
   if (setup.status !== 0) throw new Error(`Silent clean installation failed with exit code ${setup.status}`);
 
-  // NSIS can launch the app after installation. Stop that copy, then start the
-  // installed executable with an isolated profile and DevTools enabled.
+  // NSIS can launch the app after installation. Stop that copy before seeding
+  // the isolated profile through the bundled CLI, then verify the installed
+  // renderer reads the same persisted session.
   stopInstalledCopies(installedExe);
   await new Promise((resolveWait) => setTimeout(resolveWait, 800));
+
+  const sessionTitle = `Clean install profile sharing ${Date.now()}`;
+  const createdSession = runInstalledCli(["session", "new", sessionTitle]);
+  assert.equal(createdSession.created, true, "Bundled CLI did not create a session in the isolated install profile");
+  assert.equal(typeof createdSession.id, "string", "Bundled CLI did not return the new session ID");
+
+  // Start the installed executable with the isolated profile and DevTools enabled.
   let executable;
   try { await access(installedExe); executable = installedExe; } catch {}
   assert.ok(executable, `Installed Xyst.exe was not found under ${process.env.LOCALAPPDATA}`);
@@ -123,10 +148,12 @@ try {
   const appError = new Promise((_, reject) => app.once("error", reject));
   const page = await Promise.race([waitForTarget(port), appError]);
   const snapshot = await waitForUi(page);
+  const visibleSessionIds = JSON.parse(await evaluate(page, "(() => window.xyst.snapshot().then(value => JSON.stringify(value.sessions.map(session => session.id))))()", 3));
+  assert.ok(visibleSessionIds.includes(createdSession.id), "Clean-installed desktop did not read the session created by its bundled CLI from the isolated persisted profile");
   const screenshot = await cdpCommand(page, "Page.captureScreenshot", { format: "png", fromSurface: true }, 2);
   assert.ok(screenshot?.data, "Packaged renderer did not return a screenshot");
   await writeFile(join(packageDir, "windows-gui-smoke.png"), Buffer.from(screenshot.data, "base64"));
-  process.stdout.write(`Clean Windows install UI smoke passed: ${JSON.stringify(snapshot)}\n`);
+  process.stdout.write(`Clean Windows install and CLI/desktop profile-sharing smoke passed: ${JSON.stringify({ ...snapshot, sharedSessionId: createdSession.id })}\n`);
 } finally {
   if (app?.pid) spawnSync("taskkill.exe", ["/PID", String(app.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
   if (app?.pid) stopInstalledCopies(installedExe);
