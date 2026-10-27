@@ -3,7 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteFile } from '../platform/files.mjs';
+import { atomicWriteFile, hasAtomicWriteBackup, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { ToolAuditStore } from './audit.mjs';
 
 export const MIN_APPROVAL_RULE_MS = 60_000;
@@ -122,7 +122,13 @@ export class ApprovalRuleStore {
       before = await fs.lstat(file);
       assertRuleFile(before);
     } catch (error) {
-      if (error.code === 'ENOENT') return { schema_version: 1, rules: [] };
+      if (error.code === 'ENOENT') {
+        if (await hasAtomicWriteBackup(file))
+          throw Object.assign(new Error('Approval rules have an interrupted replacement backup; update rules to recover them safely'), {
+            code: 'APPROVAL_RULE_RECOVERY_REQUIRED',
+          });
+        return { schema_version: 1, rules: [] };
+      }
       throw error;
     }
 
@@ -219,6 +225,20 @@ export class ApprovalRuleStore {
       await handle.writeFile(JSON.stringify({ pid: process.pid, hostname: os.hostname(), started_at: new Date().toISOString() }));
       await handle.sync();
       await this.#assertDirectoryChain(directory);
+      await restoreAtomicWriteBackup(path.join(directory.path, 'rules.json'), {
+        maxBytes: MAX_APPROVAL_RULE_BYTES,
+        decode: (serialized) => {
+          const state = JSON.parse(serialized);
+          if (
+            state?.schema_version !== 1 ||
+            !Array.isArray(state.rules) ||
+            state.rules.length > MAX_APPROVAL_RULES ||
+            state.rules.some((rule) => !isValidRule(rule))
+          )
+            throw invalidRuleStore('Approval rule recovery backup has an invalid schema');
+          return state;
+        },
+      });
       return await operation();
     } finally {
       await handle.close().catch(() => {});

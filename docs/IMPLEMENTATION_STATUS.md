@@ -6,6 +6,7 @@
 - Focused application-update, update-feed, and revocation-feed tests pass 27/27, including new interrupted-replacement replay regressions. Biome formatting/lint and whitespace checks pass. Exact-source hosted CI is pending.
 - Package-registry mutations now restore a single bounded, schema-valid replacement backup under the registry lock. The focused signed-package suite passes 12/12, including an activation-state recovery regression. Exact-source hosted CI is pending.
 - Runtime settings detect a missing primary with an atomic-write backup and fail closed rather than treating the settings as empty. Updates restore one bounded schema-valid backup under the settings lock before merging. Focused runtime-settings tests pass 10/10, including preserving existing preferences across recovery. Exact-source hosted CI is pending.
+- Approval-rule reads now fail closed when only a replacement backup exists, and rule mutations restore a bounded schema-valid backup under the rule lock before changing policy. Focused approval-rule tests pass 9/9; two symbolic-link capability cases skip on this Windows host. Exact-source hosted CI is pending.
 
 ## Usage-ledger replacement-backup recovery — 2026-10-27
 

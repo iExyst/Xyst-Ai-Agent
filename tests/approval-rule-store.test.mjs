@@ -38,6 +38,19 @@ test('approval rule store refuses linked rules files without following them', as
   assert.equal(await fs.readFile(outside, 'utf8'), contents);
 });
 
+test('approval rule update restores an interrupted rules file without dropping saved decisions', async (t) => {
+  const root = await createTempDirectory('xyst-approval-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new ApprovalRuleStore(root);
+  await store.add({ tool: 'write_file', scope: 'path_glob', pattern: 'generated/**', decision: 'allow', durationMs: 60_000 });
+  const backup = `${store.file}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(store.file, backup);
+  await assert.rejects(store.list(), { code: 'APPROVAL_RULE_RECOVERY_REQUIRED' });
+  await store.add({ tool: 'run_shell_script', scope: 'tool', decision: 'deny', durationMs: 60_000 });
+  assert.equal((await store.list()).length, 2);
+  await assert.rejects(fs.stat(backup), { code: 'ENOENT' });
+});
+
 test('approval rule store refuses hard-linked rules files', async (t) => {
   const root = await createTempDirectory('xyst-approval-file-hardlink-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
