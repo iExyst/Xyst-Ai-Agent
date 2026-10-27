@@ -138,9 +138,8 @@ export class SessionStore {
         if (!name.startsWith(backupPrefix) || !name.endsWith('.bak')) return false;
         return ID_PATTERN.test(name.slice(backupPrefix.length, -'.bak'.length));
       });
-      if (backupNames.length !== 1) {
-        throw sessionBackupRecoveryError(id, backupNames.length ? 'multiple backups were found' : 'no recovery backup was found');
-      }
+      if (backupNames.length === 0) throw sessionNotFoundError(id);
+      if (backupNames.length !== 1) throw sessionBackupRecoveryError(id, 'multiple backups were found');
 
       const backup = path.join(this.directory, backupNames[0]);
       try {
@@ -714,6 +713,10 @@ function sessionBackupRecoveryError(id, reason, cause) {
     ),
     { code: 'SESSION_BACKUP_RECOVERY_REQUIRED' },
   );
+}
+
+function sessionNotFoundError(id) {
+  return Object.assign(new Error(`Session ${id} does not exist`), { code: 'ENOENT' });
 }
 
 async function readSafeSessionRecord(workspaceRoot, directory, file) {

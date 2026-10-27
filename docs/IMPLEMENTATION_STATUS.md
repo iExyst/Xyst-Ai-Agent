@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-27
 
+## Session backup-recovery CI regression — 2026-10-27
+
+- Hosted run [40599777689](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40599777689) for commit `856c4160d6fb58dbb79a246a177293a5bbe61a1b` exposed an interaction between backup recovery and ordinary missing-session handling: when neither a primary nor any backup existed, `SessionStore.load()` returned `SESSION_BACKUP_RECOVERY_REQUIRED` instead of `ENOENT`. This broke session deletion, stale-writer checks, and VS Code session lifecycle cases on both Windows and Ubuntu; other failures in the same Node matrices remain the hosted ConPTY and network-namespace limits recorded below. Security and formatting/lint passed; desktop package jobs were still in progress when inspected.
+- `SessionStore.load()` now returns `ENOENT` only when there is no primary and no backup, while preserving `SESSION_BACKUP_RECOVERY_REQUIRED` for multiple or invalid recovery candidates. The focused regression plus the two hosted-failing session deletion and stale-writer cases pass locally (3/3); Biome and `git diff --check` pass. Exact-source hosted confirmation is pending.
+
 ## Windows session replacement-backup recovery — 2026-10-27
 
 - `SessionStore.load()` now repairs the process-crash state where Windows has moved the previous session JSON to its atomic-write `.bak` but has not installed the replacement. It takes the per-session lock, accepts exactly one canonical UUID-named backup, and validates it through the existing no-follow, regular-file, single-link, size, schema, and session-ID checks before atomically restoring it.

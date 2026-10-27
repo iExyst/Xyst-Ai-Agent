@@ -67,6 +67,14 @@ test('sessions save, load, list, fork, rename, archive and delete', async (t) =>
   assert.equal((await store.list()).length, 1);
 });
 
+test('session load keeps ordinary missing records distinguishable from interrupted-write recovery', async (t) => {
+  const root = await createTempDirectory('xyst-session-missing-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore(root);
+  const id = '00000000-0000-4000-8000-000000000001';
+  await assert.rejects(store.load(id), { code: 'ENOENT' });
+});
+
 test('session load restores one validated Windows atomic-replacement backup', async (t) => {
   const root = await createTempDirectory('xyst-session-backup-recovery-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
