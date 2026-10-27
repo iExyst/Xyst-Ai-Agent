@@ -599,7 +599,7 @@ export class AgentRunner {
       const requiredToolCriteria = requiredToolEvidence.map((requirement) => `Required tool evidence: ${requirement.tool}${requirement.exitCode === undefined ? "" : ` exitCode=${requirement.exitCode}`}${requirement.nodeTestRunner ? " using node --test" : ""}${requirement.nodeTestSuite ? " registering a real node:test case" : ""}${requirement.stdoutEquals === undefined ? "" : ` stdout must exactly match the configured value${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}${requirement.stdoutIncludes === undefined ? "" : ` stdout must include ${JSON.stringify(this.deps.provider.redact(requirement.stdoutIncludes))}${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}`);
       const evidenceRequirements = [...inferredToolEvidence.values(), ...requestedUrlCriteria.values(), ...inferredOutputPaths];
       const prioritized = [...new Set([...originalRequirements, ...requiredToolCriteria, ...evidenceRequirements])].slice(0, 50);
-      const remaining = requiredCompletionCriteria.filter((criterion) => !prioritized.includes(criterion) && !inferredOutputPaths.some((path) => normalizedOutputPath(criterion) === normalizedOutputPath(path)));
+      const remaining = requiredCompletionCriteria.filter((criterion) => !prioritized.includes(criterion) && !criterion.startsWith("Required tool evidence:") && !inferredOutputPaths.some((path) => normalizedOutputPath(criterion) === normalizedOutputPath(path)));
       requiredCompletionCriteria.splice(0, requiredCompletionCriteria.length, ...prioritized, ...remaining.slice(0, 50 - prioritized.length));
     };
     const refreshEvidenceRequirements = (criteria: string[]) => {

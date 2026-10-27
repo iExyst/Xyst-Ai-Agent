@@ -1278,6 +1278,27 @@ test("node:test completion requires --test execution and a registered test case"
   assert.doesNotThrow(() => assertRequiredToolEvidence("file_read", { text: 'const { test } = require("node:test"); test("passes", () => assert.equal(2, 2));' }, suite));
 });
 
+test("explicit node:test completion keeps one correctly typed process evidence requirement", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "node-test-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  let systemPrompt = "";
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
+      systemPrompt = String(request.messages.find((message) => message.role === "system")?.content ?? "");
+      return { choices: [{ message: { role: "assistant", content: "I still need to run and inspect the test suite." } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Run the test suite using node --test and verify it registers a real node:test case.", { workspace: root, maxTurns: 2 });
+    assert.equal(result.status, "unverified");
+    assert.equal((systemPrompt.match(/Required tool evidence: run_process exitCode=0 using node --test/g) ?? []).length, 1);
+    assert.equal((systemPrompt.match(/Required tool evidence: run_process exitCode=0(?! using node --test)/g) ?? []).length, 0);
+    assert.equal((systemPrompt.match(/Required tool evidence: file_read registering a real node:test case/g) ?? []).length, 1);
+  } finally { store.close(); }
+}));
+
 test("mission completion evidence must reference each declared file output path", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "expected-output-path.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
