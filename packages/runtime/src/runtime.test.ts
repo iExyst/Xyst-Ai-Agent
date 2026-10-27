@@ -804,6 +804,29 @@ test("a file-create request for a filesystem root is a definite failure, not an 
   } finally { store.close(); }
 }));
 
+test("a patch of a missing file is definite no-effect, not an uncertain external action", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "missing-file-patch.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model"); let round = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      round++;
+      return round === 1
+        ? { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "patch-missing-file", type: "function", function: { name: "file_patch", arguments: JSON.stringify({ path: "missing.txt", expected_sha256: "a".repeat(64), old_text: "old", new_text: "new" }) } }] } }] }
+        : { choices: [{ message: { role: "assistant", content: "The missing file could not be patched." } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Patch missing.txt from old to new.", { workspace: root, maxTurns: 2 });
+    assert.equal(result.status, "unverified");
+    const action = store.db.prepare("SELECT status,output_json FROM tool_calls WHERE id='patch-missing-file'").get() as { status: string; output_json: string };
+    assert.equal(action.status, "failed");
+    assert.match(action.output_json, /ENOENT: no such file or directory/);
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE status='uncertain'").get() as { count: number }).count, 0);
+  } finally { store.close(); }
+}));
+
 test("agent setup failures mark the newly created session failed instead of leaving it active", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "agent-setup-failure.sqlite"));
   const config = new ConfigStore(store);

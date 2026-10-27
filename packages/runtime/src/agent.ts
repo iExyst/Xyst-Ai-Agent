@@ -41,7 +41,7 @@ export class ExternalActionApprovalError extends Error {
 function isDefiniteNoEffect(error: unknown): boolean {
   if (error instanceof GitHubError && error.status !== undefined && error.status >= 400 && error.status < 500) return true;
   if (!(error instanceof Error)) return false;
-  return error.name === "ZodError" || error instanceof ExternalActionApprovalError || /denies|disabled in Xyst settings|Invalid branch name|changed since it was read|already exists|was not found|more than once|Repeated tool-call loop detected|File path resolves to a filesystem root/i.test(error.message);
+  return error.name === "ZodError" || error instanceof ExternalActionApprovalError || /ENOENT: no such file or directory|denies|disabled in Xyst settings|Invalid branch name|changed since it was read|already exists|was not found|more than once|Repeated tool-call loop detected|File path resolves to a filesystem root/i.test(error.message);
 }
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
