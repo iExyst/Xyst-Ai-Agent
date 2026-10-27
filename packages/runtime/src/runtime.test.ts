@@ -1067,7 +1067,7 @@ test("same-response live fetch completion retries against refreshed evidence ind
       inferenceRound++;
       if (inferenceRound === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [
         { id: "same-turn-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } },
-        { id: "same-turn-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }
+        { id: "same-turn-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1, 2] }) } }
       ] } }] };
       sawStaleEvidenceReminder = request.messages.some((message) => message.role === "user" && String(message.content).includes("used an evidence snapshot from before same-response tools finished"));
       return { choices: [{ message: { role: "assistant", content: "The live repository data was retrieved and verified.", tool_calls: [{ id: "refreshed-evidence-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
