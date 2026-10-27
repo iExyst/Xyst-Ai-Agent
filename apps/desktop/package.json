@@ -1,0 +1,87 @@
+{
+  "name": "@xyst/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "build": "npm run typecheck && tsc -p tsconfig.node.json && vite build",
+    "start": "electron .",
+    "package": "npm run build --workspace @xyst/runtime && npm run build --workspace @xyst/cli && npm run build && node scripts/prepare-runtime.cjs && node scripts/package.cjs"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "@xyst/cli": "0.1.0",
+    "@xyst/runtime": "0.1.0",
+    "electron-updater": "6.8.11",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "@types/react": "19.1.16",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "5.0.4",
+    "concurrently": "^9.2.5",
+    "electron": "45.0.0",
+    "electron-builder": "^26.18.0",
+    "typescript": "5.9.3",
+    "vite": "^7.3.7",
+    "wait-on": "8.0.4"
+  },
+  "build": {
+    "appId": "com.xyst.agent",
+    "npmRebuild": false,
+    "productName": "Xyst",
+    "electronUpdaterCompatibility": ">=2.16",
+    "directories": {
+      "app": "../..",
+      "output": "../../release"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "apps/cli/**",
+      "apps/desktop/runtime/**",
+      "packages/runtime/**",
+      "node_modules/**"
+    ],
+    "files": [
+      "apps/desktop/dist/**",
+      "apps/desktop/resources/**",
+      "apps/desktop/package.json",
+      "apps/cli/dist/**",
+      "apps/cli/package.json",
+      "apps/desktop/runtime/**",
+      "packages/runtime/dist/**",
+      "packages/runtime/package.json",
+      {
+        "from": "packages/runtime",
+        "to": "node_modules/@xyst/runtime",
+        "filter": [
+          "package.json",
+          "dist/**"
+        ]
+      },
+      "node_modules/**",
+      "package.json"
+    ],
+    "win": {
+      "icon": "resources/xyst-icon.ico",
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "linux": {
+      "icon": "resources/xyst-icon.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "syncDesktopName": true
+    }
+  }
+}

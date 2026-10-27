@@ -1,0 +1,25 @@
+{
+  "name": "@xyst/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "xyst": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --tsBuildInfoFile tsconfig.typecheck.tsbuildinfo",
+    "test": "tsx --test src/load-options.test.ts src/chat-options.test.ts src/responses-options.test.ts src/process-pty.test.ts src/config-context.test.ts src/status-diagnostics.test.ts src/webhook-server.test.ts src/agent-outcome.test.ts",
+    "dev": "node --experimental-wasm-modules --import tsx src/index.ts",
+    "start": "node --experimental-wasm-modules dist/index.js"
+  },
+  "dependencies": {
+    "@xyst/runtime": "0.1.0",
+    "node-pty": "1.1.0",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3"
+  }
+}

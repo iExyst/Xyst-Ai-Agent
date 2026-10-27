@@ -1,0 +1,43 @@
+{
+  "name": "@xyst/runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --tsBuildInfoFile tsconfig.typecheck.tsbuildinfo",
+    "test": "node --experimental-wasm-modules --import tsx --test src/runtime.test.ts"
+  },
+  "dependencies": {
+    "@lmstudio/sdk": "^2.1.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@napi-rs/canvas": "^1.0.9",
+    "@napi-rs/keyring": "^2.1.2",
+    "@tesseract.js-data/deu": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/fra": "^1.0.0",
+    "@tesseract.js-data/spa": "^1.0.0",
+    "better-sqlite3": "^12.4.1",
+    "croner": "^10.0.1",
+    "docx": "9.14.0",
+    "formualizer": "^0.12.0",
+    "jszip": "3.10.2",
+    "node-notifier": "^10.0.1",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "5.4.394",
+    "playwright-core": "^1.64.1",
+    "pptxgenjs": "4.0.0",
+    "tesseract.js": "^7.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

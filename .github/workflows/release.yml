@@ -1,0 +1,88 @@
+name: Signed desktop release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyst-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+          - platform: linux
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - run: npm ci
+      - name: Run runtime and CLI tests before packaging
+        run: npm test
+      - name: Require a Windows publisher certificate
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if (-not $env:WIN_CSC_LINK -or -not $env:WIN_CSC_KEY_PASSWORD) {
+            throw "Set the WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD repository secrets before publishing a release."
+          }
+      - name: Verify tag matches package version
+        run: node scripts/verify-release-tag.cjs
+      - name: Build signed Windows package
+        if: matrix.platform == 'windows'
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npm run package --workspace @xyst/desktop -- --win nsis --x64 --config.forceCodeSigning=true
+      - name: Build Linux AppImage
+        if: matrix.platform == 'linux'
+        run: npm run package --workspace @xyst/desktop -- --linux AppImage --x64
+      - name: Verify artifact and update manifest
+        run: node scripts/verify-release-metadata.cjs ${{ matrix.platform }} release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: xyst-${{ matrix.platform }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: xyst-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify all four platform feed files are present
+        run: |
+          test -f release-assets/latest.yml
+          test -f release-assets/latest-linux.yml
+          test "$(find release-assets -maxdepth 1 -type f -name 'Xyst Setup *.exe' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'Xyst-*.AppImage' | wc -l)" -eq 1
+      - name: Publish immutable versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "Xyst $GITHUB_REF_NAME" --generate-notes release-assets/*

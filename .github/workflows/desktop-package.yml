@@ -1,0 +1,40 @@
+name: Desktop packages
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: xyst-windows
+          - os: ubuntu-latest
+            artifact: xyst-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:package
+      - name: Verify Windows update manifest and installer
+        if: runner.os == 'Windows'
+        run: node scripts/verify-release-metadata.cjs windows release
+      - name: Verify Linux update manifest and AppImage
+        if: runner.os == 'Linux'
+        run: node scripts/verify-release-metadata.cjs linux release
+      - name: Smoke test clean Windows install and renderer
+        if: runner.os == 'Windows'
+        run: node scripts/smoke-packaged-windows-gui.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14
