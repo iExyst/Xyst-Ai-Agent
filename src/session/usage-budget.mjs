@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
 
 const VERSION = 1;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -198,22 +198,12 @@ export class UsageBudgetStore {
       const info = await fs.lstat(this.file);
       if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_FILE_BYTES)
         throw new Error('Usage budget ledger is not a bounded regular file');
-      const state = JSON.parse(await fs.readFile(this.file, 'utf8'));
-      if (state.version !== VERSION || !isRecord(state.days) || !isRecord(state.months) || !isRecord(state.reservations))
-        throw new Error('Usage budget ledger is invalid; inspect it before recovery');
-      if (state.attribution === undefined) state.attribution = { version: 1, days: {}, months: {} };
-      if (
-        !isRecord(state.attribution) ||
-        state.attribution.version !== 1 ||
-        !isRecord(state.attribution.days) ||
-        !isRecord(state.attribution.months)
-      )
-        throw new Error('Usage attribution ledger is invalid; inspect it before recovery');
-      migrateCacheMetrics(state);
-      return state;
+      return decodeUsageState(await fs.readFile(this.file, 'utf8'));
     } catch (error) {
-      if (error.code === 'ENOENT')
-        return { version: VERSION, days: {}, months: {}, reservations: {}, attribution: { version: 1, days: {}, months: {} } };
+      if (error.code === 'ENOENT') {
+        const recovered = await restoreAtomicWriteBackup(this.file, { maxBytes: MAX_FILE_BYTES, decode: decodeUsageState });
+        return recovered ?? emptyLedger();
+      }
       throw error;
     }
   }
@@ -259,6 +249,26 @@ export class UsageBudgetStore {
       await fs.rm(this.lock, { force: true }).catch(() => {});
     }
   }
+}
+
+function emptyLedger() {
+  return { version: VERSION, days: {}, months: {}, reservations: {}, attribution: { version: 1, days: {}, months: {} } };
+}
+
+function decodeUsageState(serialized) {
+  const state = JSON.parse(serialized);
+  if (state.version !== VERSION || !isRecord(state.days) || !isRecord(state.months) || !isRecord(state.reservations))
+    throw new Error('Usage budget ledger is invalid; inspect it before recovery');
+  if (state.attribution === undefined) state.attribution = { version: 1, days: {}, months: {} };
+  if (
+    !isRecord(state.attribution) ||
+    state.attribution.version !== 1 ||
+    !isRecord(state.attribution.days) ||
+    !isRecord(state.attribution.months)
+  )
+    throw new Error('Usage attribution ledger is invalid; inspect it before recovery');
+  migrateCacheMetrics(state);
+  return state;
 }
 
 async function isExistingLockContention(error, lockPath) {

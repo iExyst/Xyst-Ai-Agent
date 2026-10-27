@@ -9,6 +9,52 @@ import { UsageBudgetStore } from '../src/session/usage-budget.mjs';
 
 const execFileAsync = promisify(execFile);
 
+test('usage ledger restores one validated atomic-replacement backup instead of resetting totals', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-backup-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const now = Date.parse('2026-10-27T12:00:00.000Z');
+  const store = new UsageBudgetStore(root);
+  const reservation = await store.reserve({
+    inputTokens: 17,
+    outputTokens: 4,
+    costUsd: 0.02,
+    limits: { max_daily_input_tokens: 100 },
+    now,
+  });
+  await store.settle(reservation, { inputTokens: 17, outputTokens: 4, costUsd: 0.02, now });
+  const backup = `${store.file}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(store.file, backup);
+
+  const snapshot = await store.snapshot({ now });
+  assert.equal(snapshot.daily.input_tokens, 17);
+  assert.equal(snapshot.daily.output_tokens, 4);
+  assert.equal(snapshot.active_reservations, 0);
+  await assert.rejects(fs.lstat(backup), { code: 'ENOENT' });
+});
+
+test('usage ledger preserves ambiguous replacement backups and refuses an empty reset', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-backup-ambiguous-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const now = Date.parse('2026-10-27T12:00:00.000Z');
+  const store = new UsageBudgetStore(root);
+  const reservation = await store.reserve({
+    inputTokens: 17,
+    outputTokens: 4,
+    costUsd: 0.02,
+    limits: { max_daily_input_tokens: 100 },
+    now,
+  });
+  await store.settle(reservation, { inputTokens: 17, outputTokens: 4, costUsd: 0.02, now });
+  const first = `${store.file}.00000000-0000-4000-8000-000000000001.bak`;
+  const second = `${store.file}.00000000-0000-4000-8000-000000000002.bak`;
+  await fs.rename(store.file, first);
+  await fs.copyFile(first, second);
+
+  await assert.rejects(store.snapshot({ now }), { code: 'ATOMIC_WRITE_RECOVERY_REQUIRED' });
+  assert.equal(await fs.readFile(first, 'utf8'), await fs.readFile(second, 'utf8'));
+  await assert.rejects(fs.lstat(store.file), { code: 'ENOENT' });
+});
+
 test('usage budget waits for an existing lock file instead of failing on Windows sharing errors', async (t) => {
   const root = await createTempDirectory('xyst-usage-budget-existing-lock-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-27
 
+## Usage-ledger replacement-backup recovery — 2026-10-27
+
+- The Windows atomic-write fallback can leave the destination absent with a UUID-named `.bak` if the process exits after moving the old file aside. The shared-lock-protected usage-ledger reader now restores exactly one bounded, regular, single-link backup only after JSON and ledger-schema validation; exclusive linking prevents overwriting a concurrently created primary. It cleans only the same-file duplicate link left by an interrupted restore and preserves ambiguous, invalid, or unsupported candidates with an explicit recovery error.
+- The focused valid-recovery and ambiguous-backup tests pass (2/2) when run with local Windows hard-link capability. The default restricted local shell denies `fs.link` with `EPERM`, which the helper now reports as `ATOMIC_WRITE_RECOVERY_REQUIRED` while preserving the source backup. Formatting and exact-source hosted CI are pending. Equivalent missing-primary recovery for project/global memory, goals, and subagent task history remains open.
+
 ## Session backup-recovery CI regression — 2026-10-27
 
 - Hosted run [40599777689](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40599777689) for commit `856c4160d6fb58dbb79a246a177293a5bbe61a1b` exposed an interaction between backup recovery and ordinary missing-session handling: when neither a primary nor any backup existed, `SessionStore.load()` returned `SESSION_BACKUP_RECOVERY_REQUIRED` instead of `ENOENT`. This broke session deletion, stale-writer checks, and VS Code session lifecycle cases on both Windows and Ubuntu; other failures in the same Node matrices remain the hosted ConPTY and network-namespace limits recorded below. Security and formatting/lint passed; desktop package jobs were still in progress when inspected.
