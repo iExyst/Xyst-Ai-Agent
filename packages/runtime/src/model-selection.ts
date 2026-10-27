@@ -4,13 +4,22 @@ import type { ModelPerformanceStats } from "./model-performance.js";
 
 export interface ModelChoice { model: LMStudioModel; reason: string; considered: number }
 export type ModelTaskCategory = "coding" | "research" | "document" | "spreadsheet" | "vision" | "workflow" | "general";
-export function classifyModelTask(objective: string, visionRequired = false): ModelTaskCategory {
-  if (visionRequired) return "vision";
+function classifyObjectiveText(objective: string): ModelTaskCategory {
   if (/\b(code|coding|program(?:ming)?|developer|software|repository|repo|pull request|bug|feature|refactor|compile|typecheck|source file|function|script|module|implement)\b/i.test(objective)) return "coding";
   if (/\b(spreadsheet|workbook|excel|xlsx|csv|table|formula|chart)\b/i.test(objective)) return "spreadsheet";
   if (/\b(document|docx|word|report|memo|letter|presentation|slides|powerpoint|pptx)\b/i.test(objective)) return "document";
   if (/\b(research|sources|compare|current|latest|news|look up|investigate|summari[sz]e)\b/i.test(objective)) return "research";
   if (/\b(mission|workflow|schedule|repeat|automate|recurring|orchestrat)\b/i.test(objective)) return "workflow";
+  return "general";
+}
+export function classifyModelTask(objective: string, visionRequired = false, priorTaskContext: string[] = []): ModelTaskCategory {
+  if (visionRequired) return "vision";
+  const currentCategory = classifyObjectiveText(objective);
+  if (currentCategory !== "general" || !/\b(continue|resume|retry|finish|complete|keep going|keep working|try again)\b/i.test(objective)) return currentCategory;
+  for (const previous of [...priorTaskContext].reverse()) {
+    const category = classifyObjectiveText(previous);
+    if (category !== "general") return category;
+  }
   return "general";
 }
 export const MODEL_CONTEXT_HEADROOM_TOKENS = 2048;

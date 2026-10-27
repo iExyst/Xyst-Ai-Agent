@@ -251,6 +251,8 @@ test("model task categories are persisted and automatic selection uses matching 
   assert.equal(classifyModelTask("Research current weather sources and summarize findings"), "research");
   assert.equal(classifyModelTask("Create an Excel spreadsheet with formulas"), "spreadsheet");
   assert.equal(classifyModelTask("Describe the attached image", true), "vision");
+  assert.equal(classifyModelTask("Continue and verify the saved result", false, ["Implement a JavaScript module"]), "coding");
+  assert.equal(classifyModelTask("Tell me a joke", false, ["Implement a JavaScript module"]), "general", "new general prompts do not inherit an old task category");
   const store = new XystStore(join(root, "task-categories.sqlite"));
   const insert = store.db.prepare("INSERT INTO usage(id,session_id,provider,model,input_tokens,output_tokens,duration_ms,details_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
   for (const [model, session, outcome, category] of [

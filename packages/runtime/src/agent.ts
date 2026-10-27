@@ -250,8 +250,8 @@ export class AgentRunner {
     const taskCategoryContext = contextMessages.filter((message) => message.role === "user").map((message) => {
       const content = message.content;
       return typeof content === "string" ? content : Array.isArray(content) ? content.flatMap((part) => part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string" ? [(part as Record<string, unknown>).text as string] : []).join("\n") : "";
-    }).filter(Boolean).join("\n").slice(-20_000);
-    const taskCategory = classifyModelTask(taskCategoryContext || objective, visionRequired);
+    }).filter(Boolean);
+    const taskCategory = classifyModelTask(objective, visionRequired, [...taskCategoryContext, ...requiredCompletionCriteria].slice(-50));
     let model = options.model ?? (typeof savedModel === "string" ? savedModel : "");
     let selectionReason = options.model ? (options.automaticModelAssignment ? "automatic resource-aware mission assignment" : "manual command-line override") : typeof savedModel === "string" ? "configured default model" : "";
     let inventory: Awaited<ReturnType<LMStudioProvider["models"]>> | undefined;
