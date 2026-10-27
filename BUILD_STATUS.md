@@ -1,10 +1,17 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Current PR Linux mission-service lifecycle (2026-10-27)
+
+- Downloaded `xyst-linux` from package run `40434051030`, built at `57bd49d`. The AppImage is 325,108,023 bytes; SHA-512 `gsuE/BmBHO8UYRYMz/zbbWANyW1eg0n4XCjctaYnlVXhTcVpFEEB9G4m6GcjlO+c9hFPQ+StJO6SAys81IoC9A==` matches `latest-linux.yml`.
+- In Ubuntu 24.04 WSL2, the bundled Node 22.23.3 CLI reported `runtime: ready` and healthy SQLite using an isolated `/tmp` profile. The packaged CLI installed its systemd user service with the requested `XYST_ROOT` and `XDG_DATA_HOME`; systemd reported `active/running`.
+- Sent `SIGKILL` to the service's main process. systemd restarted it (`NRestarts=1`), and the packaged CLI still reported a healthy database. Uninstall left the unit `not-found/inactive`, removed the unit file, and retained a healthy empty test database. No mission task or model request ran.
+- This closes current-package service install/start/restart/stop/remove acceptance under WSL2. Bare-metal Linux startup/reboot and recovery of an active mission remain open. Detailed evidence: [verification history](docs/verification-history.md#current-linux-package-mission-service-install-restart-and-cleanup-2026-10-27).
+
 ## Task-type-aware local model selection (2026-10-27)
 
 - Local model task outcomes are now categorized as coding, research, document, spreadsheet, vision, workflow, or general. Automatic selection prefers matching category outcomes when any candidate has them, and otherwise falls back to existing local task history. Generic resume messages inherit the saved task's category; a new general question does not inherit an unrelated earlier category. Only the coarse category is persisted; prompts remain excluded. Agent retries and resource-aware mission assignment carry the category, and selection reasons identify the evidence used.
 - Verification: `npm test` passed (runtime 154 passed, 2 host-dependent skips; CLI 21 passed); `npm run typecheck` passed for runtime, CLI, and desktop. Regression coverage verifies classification, persisted category aggregation, coding-vs-unrelated outcome ranking, and local telemetry privacy.
-- Real model evidence still shows coding quality needs improvement: the previously auto-selected Qwen3-0.6B had 3/5 verified general task outcomes but failed the first code-generation acceptance. Qwen3.5-9B passed a one-file create/read/complete tool task; the more context-heavy coding retry has not yet completed. The user-profile telemetry now separates those task types, so global success no longer masks a model's measured coding outcomes. Current package/live coding acceptance remains open.
+- Real model evidence still shows coding quality needs improvement: the previously auto-selected Qwen3-0.6B had 3/5 verified general task outcomes but failed the first code-generation acceptance. Qwen3.5-9B passed a one-file create/read/complete tool task; two current multi-file attempts narrated intended actions without creating files. A Qwen3-0.6B retry listed the empty workspace, then emitted an invalid `file_create` path; the failed write was verified to have made no file and reconciled for retry. No current coding attempt passed. Task-category telemetry keeps these results separate from general success. Current package/live coding acceptance remains open.
 
 ## Live data and current API access rechecked (2026-10-27)
 
