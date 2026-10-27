@@ -820,6 +820,7 @@ fn configure_service_proxy(command: &mut Command) {
     if explicit_setting.is_some() && explicit_setting.as_deref() != Some(OsStr::new("1")) {
         return;
     }
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut proxy_configured = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]
         .iter()
         .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty()));
@@ -845,6 +846,7 @@ fn configure_service_proxy(command: &mut Command) {
     }
 
     command.env("NODE_USE_ENV_PROXY", "1");
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut existing_bypass =
         combined_proxy_bypass(env::var_os("NO_PROXY"), env::var_os("no_proxy"));
     #[cfg(windows)]

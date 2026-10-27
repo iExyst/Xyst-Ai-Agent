@@ -72,7 +72,11 @@ fn read_string(name: &str) -> Option<String> {
             &mut bytes,
         )
     };
-    if status != ERROR_SUCCESS || bytes < 2 || bytes as usize > MAX_VALUE_BYTES || bytes % 2 != 0 {
+    if status != ERROR_SUCCESS
+        || bytes < 2
+        || bytes as usize > MAX_VALUE_BYTES
+        || !bytes.is_multiple_of(2)
+    {
         return None;
     }
     let units = &buffer[..bytes as usize / 2];

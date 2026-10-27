@@ -71,8 +71,8 @@ export async function smokeWindowsDesktopWindow({
     assert.equal(initialWindow.hung, false, 'The new Windows desktop window must respond to the operating system');
 
     const resizedWindow = await invokeControl(powershell, 'resize', first.pid, {
-      width: 760,
-      height: 540,
+      width: 800,
+      height: 600,
       timeoutMs: Math.min(timeoutMs, 15_000),
       env: processEnvironment,
     });
