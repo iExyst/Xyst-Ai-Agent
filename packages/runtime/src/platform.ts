@@ -26,6 +26,14 @@ export interface ProcessOptions {
 }
 export interface ProcessResult { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string; durationMs: number }
 
+/** The OS rejected process creation; no program executed. */
+export class ProcessStartError extends Error {
+  constructor(cause: Error) {
+    super(`Process did not start: ${cause.message}`, { cause });
+    this.name = "ProcessStartError";
+  }
+}
+
 async function killTree(child: ChildProcess): Promise<void> {
   if (!child.pid) return;
   if (process.platform === "win32") {
@@ -40,7 +48,14 @@ async function killTree(child: ChildProcess): Promise<void> {
 
 export async function runProcess(command: string, args: string[], options: ProcessOptions = {}): Promise<ProcessResult> {
   const started = Date.now();
-  const child = spawn(command, args, { cwd: options.cwd, env: options.env, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: [options.stdin ? "pipe" : "ignore", "pipe", "pipe"] });
+  let child: ChildProcess;
+  try {
+    child = spawn(command, args, { cwd: options.cwd, env: options.env, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: [options.stdin ? "pipe" : "ignore", "pipe", "pipe"] });
+  } catch (error) {
+    throw new ProcessStartError(error instanceof Error ? error : new Error(String(error)));
+  }
+  let spawned = false;
+  child.once("spawn", () => { spawned = true; });
   if (options.stdin && child.stdin) options.onStdinWriter?.((value) => { if (child.stdin && !child.stdin.destroyed) child.stdin.write(value); }, () => child.stdin?.end());
   let stdout = ""; let stderr = ""; let timedOut = false;
   const maxOutputChars = options.maxOutputChars ?? 200_000;
@@ -53,7 +68,7 @@ export async function runProcess(command: string, args: string[], options: Proce
   if (options.timeoutMs && options.timeoutMs > 0) timer = setTimeout(() => { timedOut = true; cancel(); }, options.timeoutMs);
   try {
     const result = await new Promise<ProcessResult>((resolveDone, reject) => {
-      child.once("error", reject);
+      child.once("error", (error) => reject(!spawned && child.pid === undefined ? new ProcessStartError(error) : error));
       child.once("close", (code, signal) => resolveDone({ code, signal, stdout, stderr, durationMs: Date.now() - started }));
     });
     if (timedOut) throw new Error(`Process timed out after ${options.timeoutMs} ms`);

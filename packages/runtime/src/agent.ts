@@ -18,6 +18,7 @@ import { parseLmStudioResourceEstimate, readHostResourceStats } from "./system-r
 import { createBrowserTools } from "./tools/browser.js";
 import type { ModelAcquisitionService } from "./integrations/model-acquisition.js";
 import { runBoundedOrdered } from "./orchestration/tool-batches.js";
+import { ProcessStartError } from "./platform.js";
 
 const MESSAGE_PREFIX = "__xyst_api_message__:";
 type ApiMessage = Record<string, unknown> & { role: string; content?: unknown };
@@ -39,6 +40,7 @@ export class ExternalActionApprovalError extends Error {
   constructor(readonly code: "EXTERNAL_ACTION_APPROVAL_REQUIRED" | "EXTERNAL_ACTION_DENIED", message: string) { super(`${code}: ${message}`); this.name = "ExternalActionApprovalError"; }
 }
 function isDefiniteNoEffect(error: unknown, toolName?: string): boolean {
+  if (toolName === "run_process" && error instanceof ProcessStartError) return true;
   if (error instanceof GitHubError && error.status !== undefined && error.status >= 400 && error.status < 500) return true;
   if (!(error instanceof Error)) return false;
   if (["file_patch", "file_delete", "file_move"].includes(toolName ?? "") && /ENOENT: no such file or directory/i.test(error.message)) return true;

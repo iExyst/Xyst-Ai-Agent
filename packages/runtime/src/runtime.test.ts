@@ -832,6 +832,54 @@ test("a file-create request for a filesystem root is a definite failure, not an 
   } finally { store.close(); }
 }));
 
+test("a process that cannot start lets the agent correct its command without reconciliation", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "process-start.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model"); let round = 0;
+  const marker = join(root, "executed.txt");
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      round++;
+      const input = round === 1
+        ? { executable: join(root, "missing-executable"), args: [] }
+        : round === 2
+          ? { executable: process.execPath, args: ["\u0000"] }
+          : { executable: process.execPath, args: ["-e", "require('node:fs').writeFileSync(process.argv[1], 'executed')", marker] };
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: `start-${round}`, type: "function", function: { name: "run_process", arguments: JSON.stringify(input) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Execute the requested program.", { workspace: root, maxTurns: 3 });
+    assert.equal(result.status, "limit");
+    const failed = store.db.prepare("SELECT status,output_json FROM tool_calls WHERE id='start-1'").get() as { status: string; output_json: string };
+    assert.equal(failed.status, "failed");
+    assert.match(failed.output_json, /Process did not start:.*ENOENT/);
+    assert.equal((store.db.prepare("SELECT status FROM tool_calls WHERE id='start-2'").get() as { status: string }).status, "failed");
+    assert.equal((store.db.prepare("SELECT status FROM tool_calls WHERE id='start-3'").get() as { status: string }).status, "completed");
+    assert.equal(await readFileAsync(marker, "utf8"), "executed");
+    assert.equal(round, 3);
+  } finally { store.close(); }
+}));
+
+test("a process timeout after writing a file still requires external-action reconciliation", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "process-timeout.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const marker = join(root, "partial-effect.txt");
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => ({ choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "started-then-timeout", type: "function", function: { name: "run_process", arguments: JSON.stringify({ executable: process.execPath, args: ["-e", "require('node:fs').writeFileSync(process.argv[1], 'partial'); setInterval(() => {}, 1000)", marker], timeout_ms: 2000 }) } }] } }] })
+  };
+  try {
+    await assert.rejects(() => new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Execute the requested program.", { workspace: root, maxTurns: 2 }), /EXTERNAL_ACTION_UNCERTAIN/);
+    assert.equal(await readFileAsync(marker, "utf8"), "partial");
+    const action = store.db.prepare("SELECT status,output_json FROM tool_calls WHERE id='started-then-timeout'").get() as { status: string; output_json: string };
+    assert.equal(action.status, "uncertain");
+    assert.match(action.output_json, /timed out/);
+  } finally { store.close(); }
+}));
+
 test("a patch of a missing file is definite no-effect, not an uncertain external action", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "missing-file-patch.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model"); let round = 0;

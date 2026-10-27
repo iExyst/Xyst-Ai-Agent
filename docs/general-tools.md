@@ -8,6 +8,8 @@ Attach files to a new task or a resumed session with `xyst agent run --attach pa
 
 External actions from GitHub writes, MCP tools, process execution, and workspace mutations are journaled with a stable session or mission-task scope and a normalized argument hash. Repeating the same completed action in that scope returns its saved result instead of issuing it again. If execution stops after an external action starts but before its outcome is recorded, Xyst marks it uncertain and blocks the affected continuation. Inspect tool calls with `xyst session calls <session-id>` or `xyst mission show <mission-id>`. After checking the external system, use `xyst agent reconcile <session-id> <tool-call-id> completed|retry` or `xyst mission reconcile <mission-id> <run-id> <task-id> <tool-call-id> completed|retry`. `completed` records that the action took effect; `retry` records that it did not and permits a retry. Reconciliation requires the `externalActions` capability.
 
+If the operating system rejects a `run_process` request before creating a process (for example, an executable does not exist), Xyst records a definite failed start and lets the agent correct the executable or arguments. Timeouts and failures after a process has started can leave partial effects and still require reconciliation.
+
 ## Project instructions
 
 At task start, the agent loads `AGENTS.md` files under the selected workspace, up to eight directory levels, while skipping dependency and build-output folders. Instruction context is capped at 50 files and 50,000 characters. Nested files apply within their directory subtree and take precedence over broader files there. Project instructions cannot expand the active access profile or override the user's task or higher-priority safety rules.
