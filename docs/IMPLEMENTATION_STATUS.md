@@ -2,8 +2,8 @@
 
 ## Bounded tool result transport — 2026-10-27
 
-- Built-in tool responses now have a hard 1 MB runtime ceiling, including unrestricted mode, and file reads are capped at 32 MiB. This prevents a single large tool response from bypassing the runtime's memory and context boundary; larger files must be read in bounded line chunks.
-- Focused output-cap and unrestricted file-read regressions pass (3/3). Biome and whitespace checks pass. Exact-source hosted CI is pending.
+- Built-in JSON tool responses now have a hard 1 MB runtime ceiling, including unrestricted mode. File reads are capped at 32 MiB, and directory listings at 5,000 entries, so large results are bounded before transport truncation; larger files must be read in bounded line chunks. Screenshot images retain the separate 8 MiB decoded-image limit.
+- Focused output-cap and unrestricted file-read regressions pass; Biome and whitespace checks pass. Exact-source hosted CI is pending.
 
 ## Signed update and revocation cache recovery — 2026-10-27
 

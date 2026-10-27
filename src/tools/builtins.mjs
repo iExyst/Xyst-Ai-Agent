@@ -18,6 +18,7 @@ const DEFAULT_OUTPUT_LIMIT = 100_000;
 const DEFAULT_FILE_LIMIT = 1_000_000;
 const MAX_TOOL_RESULT_BYTES = 1_000_000;
 const MAX_TOOL_FILE_READ_BYTES = 32 * 1024 * 1024;
+const MAX_TOOL_LIST_ENTRIES = 5_000;
 
 export function createBuiltinTools({
   workspaceRoot,
@@ -282,7 +283,10 @@ async function listDir(root, args, config) {
     throw new Error('Recursive directory listing is disabled in configuration');
   const entries = [];
   const pending = [base];
-  const maxEntries = isUnrestricted(config) ? Number.MAX_SAFE_INTEGER : config.tools?.max_list_entries || 500;
+  const maxEntries = Math.min(
+    isUnrestricted(config) ? MAX_TOOL_LIST_ENTRIES : (config.tools?.max_list_entries ?? 500),
+    MAX_TOOL_LIST_ENTRIES,
+  );
   while (pending.length && entries.length < maxEntries) {
     const current = pending.shift();
     for (const item of await fs.readdir(current, { withFileTypes: true })) {

@@ -559,4 +559,9 @@ test('unrestricted tool output remains bounded by the runtime transport limit', 
   });
   assert.ok(Buffer.byteLength(output) <= 1_000_000);
   assert.match(output, /tool output truncated at 1000000 bytes/);
+
+  await fs.writeFile(path.join(root, 'large-read.txt'), 'r'.repeat(1_200_000));
+  const fileOutput = await tools.call('read_file', { path: 'large-read.txt' });
+  assert.ok(Buffer.byteLength(fileOutput) <= 1_000_000);
+  assert.match(fileOutput, /tool output truncated at 1000000 bytes/);
 });
