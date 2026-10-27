@@ -1,5 +1,13 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Test-suite completion evidence and latest verification (2026-10-27)
+
+- Fixed a false-positive completion path: when a user's objective says to run/execute/check tests and the suite passes, Xyst now requires a successful `run_process` result (`exitCode=0`) before accepting completion. This prevents a file creation or a print-only pseudo-test from satisfying the objective.
+- Regression test includes ordinary-language test requirements, rejects completion without a successful process run, executes an actual Node built-in test suite, then accepts completion from the passing run evidence.
+- Commit `96b676a` is pushed to PR #1. Local `npm test` passed (runtime 156 passed, 2 host-dependent skips; CLI 21 passed). `npm run typecheck` passed for runtime, CLI, and desktop.
+- All four hosted workflow runs passed on this head: Cross-platform CI `40441343774`, `40441347613`; Desktop packages `40441343752`, `40441347609`. Windows and Ubuntu tests passed; the clean Windows installer/renderer and Linux AppImage/renderer smoke checks passed.
+- Live model probe with Qwen3-0.6B created a JavaScript module but its purported test only printed labels and it attempted to launch the `.js` file as an executable (`spawn EFTYPE`). Xyst withheld completion as intended. This is not a model coding acceptance; the live-model coding gate remains open.
+
 ## Current PR Linux mission-service lifecycle (2026-10-27)
 
 - Downloaded `xyst-linux` from package run `40434051030`, built at `57bd49d`. The AppImage is 325,108,023 bytes; SHA-512 `gsuE/BmBHO8UYRYMz/zbbWANyW1eg0n4XCjctaYnlVXhTcVpFEEB9G4m6GcjlO+c9hFPQ+StJO6SAys81IoC9A==` matches `latest-linux.yml`.

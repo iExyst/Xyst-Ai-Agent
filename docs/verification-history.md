@@ -1,5 +1,11 @@
 # Xyst verification history
 
+## Test-suite completion evidence (2026-10-27)
+
+- A fresh isolated Qwen3-0.6B probe asked for a JavaScript addition module and a test suite. The model wrote code but supplied print-only pseudo-tests, then tried to execute the test file directly; the process launcher returned `spawn EFTYPE`. The runtime did not falsely accept completion: it stopped with an uncertain process action, and the session remains unverified. No coding acceptance is claimed.
+- This exposed a gap where generic completion criteria could be satisfied by file creation even when ordinary-language criteria explicitly required running tests. Commit `96b676a` adds detection for test-execution intent and injects required evidence for a successful `run_process` exit (`exitCode=0`). A deterministic runtime regression creates a real Node test suite, rejects completion before execution, runs `node --test`, and accepts completion only after the successful result.
+- Verification: `npm test` passed (runtime 156 passed, 2 host-dependent skips; CLI 21 passed); `npm run typecheck` passed for runtime, CLI, and desktop. All four hosted workflow runs passed on source head `96b676a` (Cross-platform CI `40441343774`, `40441347613`; Desktop packages `40441343752`, `40441347609`). Windows and Ubuntu tests passed, as did the clean Windows installer/renderer and Linux AppImage/renderer smoke checks.
+
 ## Task-type-aware local model selection (2026-10-27)
 
 - The runtime now classifies each local agent objective into coding, research, document, spreadsheet, vision, workflow, or general. A generic resume/retry message retains the prior task category, while a new general question does not inherit unrelated history. It persists only that coarse category with local session outcome telemetry; prompts remain excluded. Selection uses task-category completion outcomes when any candidate has category evidence and otherwise retains the previous global reliability fallback. Agent fallback selection and resource-aware mission assignment carry the same category; reasons report matching local evidence and sample counts.
