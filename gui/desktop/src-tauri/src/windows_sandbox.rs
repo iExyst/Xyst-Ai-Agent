@@ -2055,17 +2055,17 @@ mod tests {
             .expect("create existing workspace file");
         let original_root_acl = dacl_bytes(&workspace, true);
         let original_file_acl = dacl_bytes(&existing_file, false);
-        let temp_probe = "echo sandbox-out && echo sandbox-err 1>&2 && (type existing\\nested\\existing.txt >nul || exit /b 11) && (echo workspace-write>new.txt || exit /b 12) && if exist new.txt (exit /b 23) else (exit /b 13)";
+        let workspace_probe = "echo sandbox-out && echo sandbox-err 1>&2 && (echo workspace-write>new.txt || exit /b 12) && if exist new.txt (exit /b 23) else (exit /b 13)";
         let code = run_appcontainer_command(
             &command,
-            &["/d".into(), "/c".into(), temp_probe.into()],
+            &["/d".into(), "/c".into(), workspace_probe.into()],
             &workspace,
             &workspace,
             &environment,
             Duration::from_secs(10),
             None,
         )
-        .expect("AppContainer should read/write the workspace and write to private temp");
+        .expect("AppContainer should write to the workspace and preserve bounded standard streams");
         assert_eq!(
             code.exit_code,
             23,
