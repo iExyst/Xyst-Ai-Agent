@@ -12,7 +12,7 @@ import { createText, patchText, readText, searchFiles } from "./tools/files.js";
 import { normalizeUserPath, runProcess } from "./platform.js";
 import { AccessController } from "./access.js";
 import { credentialStoreError, redactSecrets } from "./credentials.js";
-import { chooseAgentModel, estimateRequiredContextTokens, modelLoadContextLength } from "./model-selection.js";
+import { chooseAgentModel, classifyModelTask, estimateRequiredContextTokens, modelLoadContextLength } from "./model-selection.js";
 import { readModelPerformance } from "./model-performance.js";
 import { createHash, createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 import { createGitHubWebhookHandler, GitHubProvider, recordWebhookDelivery, verifyGitHubWebhook } from "./integrations/github.js";
@@ -246,6 +246,31 @@ test("local model performance aggregates and informs automatic selection without
   } finally { store.close(); }
 }));
 
+test("model task categories are persisted and automatic selection uses matching task outcomes", async () => withTemp(async (root) => {
+  assert.equal(classifyModelTask("Implement a JavaScript module and run its checks"), "coding");
+  assert.equal(classifyModelTask("Research current weather sources and summarize findings"), "research");
+  assert.equal(classifyModelTask("Create an Excel spreadsheet with formulas"), "spreadsheet");
+  assert.equal(classifyModelTask("Describe the attached image", true), "vision");
+  const store = new XystStore(join(root, "task-categories.sqlite"));
+  const insert = store.db.prepare("INSERT INTO usage(id,session_id,provider,model,input_tokens,output_tokens,duration_ms,details_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
+  for (const [model, session, outcome, category] of [
+    ["coder", "code-1", "verified_success", "coding"], ["coder", "code-2", "verified_success", "coding"],
+    ["coder", "research-1", "unverified", "research"], ["general", "research-2", "verified_success", "research"]
+  ] as const) insert.run(randomUUID(), session, "lm-studio", model, 10, 10, 1000, JSON.stringify({ outcome: "success", task_outcome: outcome, task_category: category }), new Date().toISOString());
+  try {
+    const performance = readModelPerformance(store);
+    assert.deepEqual(performance.coder?.taskCategories?.coding, { taskSamples: 2, taskSuccesses: 2, taskSuccessRate: 1 });
+    assert.deepEqual(performance.coder?.taskCategories?.research, { taskSamples: 1, taskSuccesses: 0, taskSuccessRate: 0 });
+    const models = ["general", "coder"].map((key) => ({ type: "llm" as const, publisher: "test", key, display_name: key, size_bytes: 1_000_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }));
+    const choice = chooseAgentModel(models, { taskCategory: "coding", performanceByModel: {
+      ...performance,
+      general: { samples: 1, successes: 1, successRate: 1, medianLatencyMs: 100, tokensPerSecond: 10, taskSamples: 1, taskSuccesses: 1, taskSuccessRate: 1, taskCategories: { research: { taskSamples: 1, taskSuccesses: 1, taskSuccessRate: 1 } } }
+    } });
+    assert.equal(choice.model.key, "coder", "measured coding outcomes should outrank unrelated general task success");
+    assert.match(choice.reason, /observed locally over 2 coding tasks: 2\/2 verified completions/);
+  } finally { store.close(); }
+}));
+
 test("resuming a task on a different model preserves the earlier model's terminal outcome", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "resumed-model-outcomes.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   const originalFetch = globalThis.fetch;
@@ -267,7 +292,7 @@ test("resuming a task on a different model preserves the earlier model's termina
   globalThis.fetch = async () => new Response(JSON.stringify({ default_branch: "main" }), { status: 200, headers: { "content-type": "application/json" } });
   try {
     const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
-    const initial = await agent.run(`Use web_fetch to retrieve exactly ${url}, then report the default branch.`, { workspace: root, model: "small", maxTurns: 3 });
+    const initial = await agent.run(`In this coding task, use web_fetch to retrieve exactly ${url}, then report the default branch.`, { workspace: root, model: "small", maxTurns: 3 });
     assert.equal(initial.status, "unverified");
     const resumed = await agent.run("Continue and verify the saved API result.", { workspace: root, sessionId: initial.sessionId, model: "large", maxTurns: 3 });
     assert.equal(resumed.status, "completed");
@@ -276,6 +301,8 @@ test("resuming a task on a different model preserves the earlier model's termina
     assert.equal(performance.small?.taskSuccessRate, 0, "the earlier model's terminal unverified attempt remains measurable after another model resumes");
     assert.equal(performance.large?.taskSamples, 1);
     assert.equal(performance.large?.taskSuccessRate, 1);
+    assert.equal(performance.small?.taskCategories?.coding?.taskSuccessRate, 0);
+    assert.equal(performance.large?.taskCategories?.coding?.taskSuccessRate, 1, "a generic resume message retains the original coding category");
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
@@ -3457,7 +3484,7 @@ test("automatic model switching retries once on another installed local model", 
   const observations = store.db.prepare("SELECT model,duration_ms,details_json FROM usage ORDER BY rowid").all() as Array<{ model: string; duration_ms: number; details_json: string }>;
   assert.equal(observations.length, 2); assert.ok(observations.every((entry) => entry.duration_ms > 0));
   assert.deepEqual(observations.map((entry) => [entry.model, JSON.parse(entry.details_json).outcome]), [["unavailable-model", "failure"], ["fallback-model", "success"]]);
-  assert.deepEqual(JSON.parse(observations[1]!.details_json), { outcome: "success", task_outcome: "unverified" }, "success metrics store no response or provider payload details");
+  assert.deepEqual(JSON.parse(observations[1]!.details_json), { outcome: "success", task_outcome: "unverified", task_category: "general" }, "success metrics store no response or provider payload details");
   store.close();
 }));
 

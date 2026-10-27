@@ -15,7 +15,7 @@ import { freemem, totalmem } from "node:os";
 import type { LMStudioProvider } from "../providers/lm-studio.js";
 import { planResourceAwareBatch, type ResourceTaskAssignment, type ResourceTaskCandidate } from "./resource-scheduler.js";
 import { readModelPerformance } from "../model-performance.js";
-import { chooseAgentModel, estimateRequiredContextTokens, modelLoadContextLength } from "../model-selection.js";
+import { chooseAgentModel, classifyModelTask, estimateRequiredContextTokens, modelLoadContextLength } from "../model-selection.js";
 import { parseLmStudioResourceEstimate, readHostResourceStats } from "../system-resources.js";
 
 const profileSchema = z.object({ mode: z.enum(["full", "restricted"]), readRoots: z.array(z.string()).optional(), writeRoots: z.array(z.string()).optional(), allowedExecutables: z.array(z.string()).optional(), network: z.boolean().optional(), integrations: z.boolean().optional(), backgroundJobs: z.boolean().optional(), externalActions: z.boolean().optional() }).strict();
@@ -392,9 +392,10 @@ export class PersistentMissionRunner {
         const resourceCandidateFor = (task: MissionTaskDefinition): ResourceTaskCandidate => {
             const priorAttempts = attemptedModelsByTask.get(task.id!);
             const modelAssignment = taskModels.get(task.id!);
-            return { id: task.id!, requiredContextTokens: estimateRequiredContextTokens([{ content: taskObjective(task) }]), ...(modelAssignment?.requested ? { model: modelAssignment.requested } : {}), ...(modelAssignment?.automatic ? { automatic: true } : {}), ...(priorAttempts ? { previouslyAttemptedModels: priorAttempts } : {}) };
+            return { id: task.id!, taskCategory: classifyModelTask(taskObjective(task)), requiredContextTokens: estimateRequiredContextTokens([{ content: taskObjective(task) }]), ...(modelAssignment?.requested ? { model: modelAssignment.requested } : {}), ...(modelAssignment?.automatic ? { automatic: true } : {}), ...(priorAttempts ? { previouslyAttemptedModels: priorAttempts } : {}) };
         };
         const resourceCandidates: ResourceTaskCandidate[] = candidates.map(resourceCandidateFor);
+        const commonTaskCategory = resourceCandidates.length > 0 && resourceCandidates.every((candidate) => candidate.taskCategory === resourceCandidates[0]!.taskCategory) ? resourceCandidates[0]!.taskCategory : undefined;
         const performanceByModel = this.deps.config.resolve<boolean>("telemetry.localMetrics", { ...(mission.definition.projectId ? { project: mission.definition.projectId } : {}), mission: missionId })?.value === false ? {} : readModelPerformance(this.deps.store);
         let availableGpuMemoryBytes: number | undefined;
         const estimatedGpuMemoryBytesByModel: Record<string, number> = {};
@@ -412,7 +413,7 @@ export class PersistentMissionRunner {
               const toolModels = installedModels.some((candidate) => candidate.type === "llm" && candidate.capabilities?.trained_for_tool_use === true);
               const eligible = installedModels.filter((candidate) => candidate.type === "llm" && (!toolModels || candidate.capabilities?.trained_for_tool_use === true)
                 && (typeof candidate.max_context_length !== "number" || candidate.max_context_length >= requiredContextTokens));
-              const best = eligible.length ? chooseAgentModel(eligible, { requiredContextTokens, performanceByModel }).model : undefined;
+              const best = eligible.length ? chooseAgentModel(eligible, { requiredContextTokens, ...(commonTaskCategory ? { taskCategory: commonTaskCategory } : {}), performanceByModel }).model : undefined;
               const shortlist = [...new Set([...pinnedKeys, ...(best ? [best.key] : []), ...[...eligible].sort((left, right) => left.size_bytes - right.size_bytes).map((candidate) => candidate.key)])].slice(0, Math.max(3, Math.min(8, maxConcurrency)));
               for (const modelKey of shortlist) {
                 if (controller.signal.aborted) throw new Error("Mission cancelled");
@@ -609,7 +610,7 @@ export class PersistentMissionRunner {
                 const toolModels = currentModels.some((candidate) => candidate.type === "llm" && candidate.capabilities?.trained_for_tool_use === true);
                 const eligible = currentModels.filter((candidate) => candidate.type === "llm" && (!toolModels || candidate.capabilities?.trained_for_tool_use === true)
                   && (typeof candidate.max_context_length !== "number" || candidate.max_context_length >= requiredContextTokens));
-                const best = eligible.length ? chooseAgentModel(eligible, { requiredContextTokens, performanceByModel }).model : undefined;
+                const best = eligible.length ? chooseAgentModel(eligible, { requiredContextTokens, ...(commonTaskCategory ? { taskCategory: commonTaskCategory } : {}), performanceByModel }).model : undefined;
                 const pinnedKeys = resourceCandidates.flatMap((candidate) => candidate.model ? [candidate.model] : []);
                 const shortlist = [...new Set([...pinnedKeys, ...(best ? [best.key] : []), ...[...eligible].sort((left, right) => left.size_bytes - right.size_bytes).map((candidate) => candidate.key)])].slice(0, 8);
                 for (const modelKey of shortlist) {

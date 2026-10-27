@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Task-type-aware local model selection (2026-10-27)
+
+- Local model task outcomes are now categorized as coding, research, document, spreadsheet, vision, workflow, or general. Automatic selection prefers matching category outcomes when any candidate has them, and otherwise falls back to existing local task history. Only the coarse category is persisted; prompts remain excluded. Agent retries and resource-aware mission assignment carry the category, and selection reasons identify the evidence used.
+- Verification: `npm test` passed (runtime 154 passed, 2 host-dependent skips; CLI 21 passed); `npm run typecheck` passed for runtime, CLI, and desktop. Regression coverage verifies classification, persisted category aggregation, coding-vs-unrelated outcome ranking, and local telemetry privacy.
+- Real model evidence still shows coding quality needs improvement: the previously auto-selected Qwen3-0.6B had 3/5 verified general task outcomes but failed the first code-generation acceptance. Qwen3.5-9B passed a one-file create/read/complete tool task; the more context-heavy coding retry has not yet completed. The user-profile telemetry now separates those task types, so global success no longer masks a model's measured coding outcomes. Current package/live coding acceptance remains open.
+
 ## Live data and current API access rechecked (2026-10-27)
 
 - Fresh current-source Xyst agent calls used the real `web_fetch` tool against both GitHub REST (`https://api.github.com/repos/iExyst/Xyst-Ai-Agent`) and Open-Meteo current conditions (`https://api.open-meteo.com/v1/forecast?...`). Both returned HTTP 200 with full JSON and `task_complete` verified the exact-URL evidence. Retrieval timestamps: `2026-10-27T01:07:33.378Z` and `2026-10-27T01:08:09.150Z`. Open-Meteo returned an observation at `2026-10-26T21:00` America/New_York: 58.5 °F and 5.0 mph wind.

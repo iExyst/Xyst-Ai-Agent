@@ -3,6 +3,16 @@ import type { LMStudioModel } from "./providers/lm-studio.js";
 import type { ModelPerformanceStats } from "./model-performance.js";
 
 export interface ModelChoice { model: LMStudioModel; reason: string; considered: number }
+export type ModelTaskCategory = "coding" | "research" | "document" | "spreadsheet" | "vision" | "workflow" | "general";
+export function classifyModelTask(objective: string, visionRequired = false): ModelTaskCategory {
+  if (visionRequired) return "vision";
+  if (/\b(code|coding|program(?:ming)?|developer|software|repository|repo|pull request|bug|feature|refactor|compile|typecheck|source file|function|script|module|implement)\b/i.test(objective)) return "coding";
+  if (/\b(spreadsheet|workbook|excel|xlsx|csv|table|formula|chart)\b/i.test(objective)) return "spreadsheet";
+  if (/\b(document|docx|word|report|memo|letter|presentation|slides|powerpoint|pptx)\b/i.test(objective)) return "document";
+  if (/\b(research|sources|compare|current|latest|news|look up|investigate|summari[sz]e)\b/i.test(objective)) return "research";
+  if (/\b(mission|workflow|schedule|repeat|automate|recurring|orchestrat)\b/i.test(objective)) return "workflow";
+  return "general";
+}
 export const MODEL_CONTEXT_HEADROOM_TOKENS = 2048;
 export function modelLoadContextLength(maxContextTokens: number | null | undefined, requiredContextTokens: number): number | undefined {
   if (!Number.isSafeInteger(requiredContextTokens) || requiredContextTokens < 1 || typeof maxContextTokens !== "number" || !Number.isSafeInteger(maxContextTokens) || maxContextTokens < requiredContextTokens) return undefined;
@@ -44,7 +54,7 @@ function effectiveContextLength(model: LMStudioModel): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-export function chooseAgentModel(models: LMStudioModel[], requirements: { vision?: boolean; requiredContextTokens?: number; requireDeclaredContext?: boolean; performanceByModel?: Record<string, ModelPerformanceStats> } = {}): ModelChoice {
+export function chooseAgentModel(models: LMStudioModel[], requirements: { vision?: boolean; taskCategory?: ModelTaskCategory; requiredContextTokens?: number; requireDeclaredContext?: boolean; performanceByModel?: Record<string, ModelPerformanceStats> } = {}): ModelChoice {
   const llms = models.filter((model) => model.type === "llm");
   const candidates = requirements.vision ? llms.filter((model) => model.capabilities?.vision === true) : llms;
   if (requirements.vision && !candidates.length) throw new Error("This task includes an image, but no installed LLM declares vision support; load or select a vision-capable model first");
@@ -64,10 +74,16 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
   const fitting = suitable.filter((model) => model.size_bytes <= memoryBudget);
   const pool = (fitting.length ? fitting : suitable).slice();
   const performance = requirements.performanceByModel ?? {};
+  const hasCategoryMetrics = requirements.taskCategory !== undefined && pool.some((candidate) => (performance[candidate.key]?.taskCategories?.[requirements.taskCategory!]?.taskSamples ?? 0) > 0);
+  const taskMetrics = (modelKey: string) => {
+    const stats = performance[modelKey];
+    return hasCategoryMetrics && requirements.taskCategory ? stats?.taskCategories?.[requirements.taskCategory] : stats;
+  };
   pool.sort((a, b) => {
     const aMeasured = performance[a.key]; const bMeasured = performance[b.key];
-    const aTaskRate = aMeasured?.taskSamples ? aMeasured.taskSuccessRate : null;
-    const bTaskRate = bMeasured?.taskSamples ? bMeasured.taskSuccessRate : null;
+    const aTaskMetrics = taskMetrics(a.key); const bTaskMetrics = taskMetrics(b.key);
+    const aTaskRate = aTaskMetrics?.taskSamples ? aTaskMetrics.taskSuccessRate : null;
+    const bTaskRate = bTaskMetrics?.taskSamples ? bTaskMetrics.taskSuccessRate : null;
     // A model with observed task failures should not keep winning solely because
     // it is smaller when an eligible model has no local task evidence yet. Keep
     // unknown reliability distinct from measured reliability; don't invent a
@@ -93,7 +109,7 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
     model.loaded_instances.length ? "already loaded" : "available in the local inventory",
     model.size_bytes <= memoryBudget ? `model file size ${model.size_bytes} bytes is within the approximate ${memoryBudget} byte memory budget` : `smallest suitable model exceeds the approximate ${memoryBudget} byte memory budget`,
     ...(typeof requirements.requiredContextTokens === "number" ? [contextSatisfied ? `estimated task context ${requirements.requiredContextTokens} tokens; ${effectiveContextLength(model) === undefined ? "selected model context is undeclared" : `selected model supports ${effectiveContextLength(model)} tokens`}` : `no candidate declares enough context for the estimated ${requirements.requiredContextTokens} token requirement; selected the best available model (${effectiveContextLength(model) ?? "context unknown"} tokens)`] : [(model.max_context_length ?? 0) > 0 ? `declares up to ${model.max_context_length} context tokens` : "context length not declared"]),
-    ...(performance[model.key] && performance[model.key]!.taskSamples >= 1 && performance[model.key]!.taskSuccessRate !== null ? [`observed locally over ${performance[model.key]!.taskSamples} tasks: ${performance[model.key]!.taskSuccesses}/${performance[model.key]!.taskSamples} verified completions`] : [`local task completion reliability is unmeasured`]),
+    ...(taskMetrics(model.key) && taskMetrics(model.key)!.taskSamples >= 1 && taskMetrics(model.key)!.taskSuccessRate !== null ? [`observed locally over ${taskMetrics(model.key)!.taskSamples} ${hasCategoryMetrics && requirements.taskCategory ? `${requirements.taskCategory} ` : ""}tasks: ${taskMetrics(model.key)!.taskSuccesses}/${taskMetrics(model.key)!.taskSamples} verified completions`] : [`local ${hasCategoryMetrics && requirements.taskCategory ? `${requirements.taskCategory} ` : ""}task completion reliability is unmeasured`]),
     ...(performance[model.key] && performance[model.key]!.samples >= 3 ? [`measured locally over ${performance[model.key]!.samples} inference calls: ${Math.round(performance[model.key]!.successRate * 100)}% response success, ${performance[model.key]!.medianLatencyMs} ms median latency${performance[model.key]!.tokensPerSecond === null ? "" : `, ${performance[model.key]!.tokensPerSecond} tokens/s`}`] : [])
   ];
   return { model, reason: reasons.join("; "), considered: candidates.length };

@@ -1,5 +1,11 @@
 # Xyst verification history
 
+## Task-type-aware local model selection (2026-10-27)
+
+- The runtime now classifies each local agent objective into coding, research, document, spreadsheet, vision, workflow, or general. It persists only that coarse category with local session outcome telemetry; prompts remain excluded. Selection uses task-category completion outcomes when any candidate has category evidence and otherwise retains the previous global reliability fallback. Agent fallback selection and resource-aware mission assignment carry the same category; reasons report matching local evidence and sample counts.
+- Regression verification passed: `npm test` (runtime 154 passed, 2 host-dependent skips; CLI 21 passed) and `npm run typecheck` (runtime, CLI, desktop). Tests cover classification, category-specific outcome aggregation, telemetry persistence, matching-category ranking, and preservation of existing global metrics.
+- Live acceptance finding: Qwen3-0.6B, selected automatically before this feature, had 3/5 verified general tasks but produced invalid code in a coding probe. Qwen3.5-9B completed a simple exact-file tool workflow, while a fresh coding task was still running at this checkpoint. This feature enables future selection to distinguish those outcomes; it does not establish broad coding quality by itself.
+
 ## Fresh live API access from the current-source runtime (2026-10-27)
 
 - From the current Windows PR checkout, Xyst's LM Studio-backed agent called the actual `web_fetch` tool on the public GitHub repository API. It returned HTTP 200, complete JSON, `full_name=iExyst/Xyst-Ai-Agent`, `default_branch=main`, and `retrieved_at=2026-10-27T01:07:33.378Z`. Persisted `task_complete` evidence verified the exact requested URL.

@@ -9,7 +9,7 @@ import { AccessController, type AccessProfile } from "./access.js";
 import type { ConfigStore, SettingScope, XystStore, SessionStore, MemoryStore } from "./storage.js";
 import { LMStudioProvider, type LMStudioModel } from "./providers/lm-studio.js";
 import { GitHubError, type GitHubProvider } from "./integrations/github.js";
-import { chooseAgentModel, estimateRequiredContextTokens, modelLoadContextLength } from "./model-selection.js";
+import { chooseAgentModel, classifyModelTask, estimateRequiredContextTokens, modelLoadContextLength } from "./model-selection.js";
 import { readModelPerformance } from "./model-performance.js";
 import { createMemoryTools, requestEmbeddings } from "./tools/memory.js";
 import { loadProjectInstructions } from "./project-instructions.js";
@@ -247,6 +247,11 @@ export class AgentRunner {
       }
     }
     let requiredContextTokens = estimateRequiredContextTokens(contextMessages);
+    const taskCategoryContext = contextMessages.filter((message) => message.role === "user").map((message) => {
+      const content = message.content;
+      return typeof content === "string" ? content : Array.isArray(content) ? content.flatMap((part) => part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string" ? [(part as Record<string, unknown>).text as string] : []).join("\n") : "";
+    }).filter(Boolean).join("\n").slice(-20_000);
+    const taskCategory = classifyModelTask(taskCategoryContext || objective, visionRequired);
     let model = options.model ?? (typeof savedModel === "string" ? savedModel : "");
     let selectionReason = options.model ? (options.automaticModelAssignment ? "automatic resource-aware mission assignment" : "manual command-line override") : typeof savedModel === "string" ? "configured default model" : "";
     let inventory: Awaited<ReturnType<LMStudioProvider["models"]>> | undefined;
@@ -274,7 +279,7 @@ export class AgentRunner {
       access.assertCapability("network");
       inventory ??= await this.deps.provider.models(options.signal);
       try {
-        const requirements = { vision: visionRequired, requiredContextTokens, requireDeclaredContext: onlineDiscoveryEnabled, performanceByModel };
+        const requirements = { vision: visionRequired, taskCategory, requiredContextTokens, requireDeclaredContext: onlineDiscoveryEnabled, performanceByModel };
         let choice = chooseAgentModel(inventory, requirements);
         let gpuResourceReason = "";
         if (typeof this.deps.provider.supportsLocalCliModelLifecycle === "function" && this.deps.provider.supportsLocalCliModelLifecycle() && typeof this.deps.provider.estimateLoad === "function") {
@@ -353,7 +358,7 @@ export class AgentRunner {
         const verified = await acquisition.verify(acquired.id, options.signal, { visionRequired }) as { capabilityCheck?: { status?: string } };
         if (verified.capabilityCheck?.status !== "passed") throw new Error(`Downloaded model ${acquired.modelKey} did not pass the LM Studio load and inference check`);
         inventory = await this.deps.provider.models(options.signal);
-        const choice = chooseAgentModel(inventory, { vision: visionRequired, requiredContextTokens, requireDeclaredContext: true, performanceByModel });
+        const choice = chooseAgentModel(inventory, { vision: visionRequired, taskCategory, requiredContextTokens, requireDeclaredContext: true, performanceByModel });
         model = choice.model.key; selectionReason = `downloaded, integrity checked, and capability verified from ${acquired.repository}@${acquired.revision}; ${choice.reason}`;
       }
     } else if (visionRequired && !inventory?.some((candidate) => candidate.key === model && candidate.type === "llm" && candidate.capabilities?.vision === true)) {
@@ -800,7 +805,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
               inventory = await this.deps.provider.models(options.signal);
               const alternatives = inventory.filter((candidate) => candidate.key !== selected && candidate.type === "llm" && (!visionRequired || candidate.capabilities?.vision === true));
               if (!alternatives.length) throw error;
-              const choice = chooseAgentModel(alternatives, { vision: visionRequired, requiredContextTokens, performanceByModel: localMetricsEnabled ? readModelPerformance(this.deps.store) : {} });
+              const choice = chooseAgentModel(alternatives, { vision: visionRequired, taskCategory, requiredContextTokens, performanceByModel: localMetricsEnabled ? readModelPerformance(this.deps.store) : {} });
               switchedModel = true;
               const prepared = await prepareModel(choice.model.key);
               selected = prepared.modelKey; inferenceModel = prepared.inferenceModel; contextPreparedForTokens = requiredContextTokens;
@@ -1000,7 +1005,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
       options.onRunClosing?.();
       if (options.signal?.aborted) status = "cancelled";
       this.deps.sessions.setStatus(sessionId, status);
-      if (localMetricsEnabled && this.isLocalMetricsProvider(activeProvider)) this.recordTaskOutcome(sessionId, selected, status);
+      if (localMetricsEnabled && this.isLocalMetricsProvider(activeProvider)) this.recordTaskOutcome(sessionId, selected, status, taskCategory);
       const result = { sessionId, model: selected, selectionReason, turns, status, response: finalResponse };
       this.deps.events.emit("agent.finished", result, sessionId);
       return result;
@@ -1009,13 +1014,13 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
       if (options.signal?.aborted) {
         const uncertainExternalActions = (this.deps.store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE session_id=? AND effect='external' AND status='uncertain'").get(sessionId) as { count: number }).count;
         this.deps.sessions.setStatus(sessionId, "cancelled");
-        if (localMetricsEnabled && this.isLocalMetricsProvider(activeProvider)) this.recordTaskOutcome(sessionId, selected, "cancelled");
+        if (localMetricsEnabled && this.isLocalMetricsProvider(activeProvider)) this.recordTaskOutcome(sessionId, selected, "cancelled", taskCategory);
         const result = { sessionId, model: selected, selectionReason, turns, status: "cancelled" as const, response: finalResponse };
         this.deps.events.emit("agent.finished", { ...result, ...(uncertainExternalActions ? { actionReviewRequired: true } : {}) }, sessionId);
         return result;
       }
       this.deps.sessions.setStatus(sessionId, "failed");
-      if (localMetricsEnabled && this.isLocalMetricsProvider(activeProvider)) this.recordTaskOutcome(sessionId, selected, "failed");
+      if (localMetricsEnabled && this.isLocalMetricsProvider(activeProvider)) this.recordTaskOutcome(sessionId, selected, "failed", taskCategory);
       this.deps.events.emit("agent.failed", { sessionId, model: selected, error: message }, sessionId);
       throw error;
     } finally { await browser.close(); await mcp.close(); }
@@ -1046,10 +1051,10 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
     return provider === this.deps.provider && (typeof provider.isLocalServer !== "function" || provider.isLocalServer());
   }
 
-  private recordTaskOutcome(sessionId: string, model: string, status: string): void {
+  private recordTaskOutcome(sessionId: string, model: string, status: string, taskCategory: string): void {
     const outcome = status === "completed" ? "verified_success" : status === "cancelled" ? "cancelled" : status === "unverified" ? "unverified" : "failed";
-    this.deps.store.db.prepare("UPDATE usage SET details_json=json_set(details_json,'$.task_outcome',CASE WHEN model=? THEN ? ELSE COALESCE(json_extract(details_json,'$.task_outcome'),'not_final_model') END) WHERE session_id=? AND provider='lm-studio'")
-      .run(model, outcome, sessionId);
+    this.deps.store.db.prepare("UPDATE usage SET details_json=json_set(details_json,'$.task_outcome',CASE WHEN model=? THEN ? ELSE COALESCE(json_extract(details_json,'$.task_outcome'),'not_final_model') END,'$.task_category',?) WHERE session_id=? AND provider='lm-studio'")
+      .run(model, outcome, taskCategory, sessionId);
   }
 
   private async generateWithRetry(request: { model: string; messages: ApiMessage[]; tools: unknown[]; temperature?: number; max_tokens?: number; top_p?: number; presence_penalty?: number; frequency_penalty?: number; stop?: string | string[]; reasoning_effort?: "none" | "low" | "medium" | "high"; ttl?: number }, onText?: (text: string) => void, signal?: AbortSignal, provider: LMStudioProvider = this.deps.provider, timeoutMs?: number): Promise<Record<string, unknown>> {

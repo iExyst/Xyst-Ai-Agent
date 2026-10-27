@@ -1,6 +1,7 @@
 import type { LMStudioModel } from "../providers/lm-studio.js";
 import { chooseAgentModel } from "../model-selection.js";
 import type { ModelPerformanceStats } from "../model-performance.js";
+import type { ModelTaskCategory } from "../model-selection.js";
 
 const MIB = 1024 ** 2;
 const UNKNOWN_MODEL_LOAD = 1_500 * MIB;
@@ -9,6 +10,7 @@ const MIN_WORKER_MEMORY = 384 * MIB;
 export interface ResourceTaskCandidate {
   id: string;
   requiredContextTokens?: number;
+  taskCategory?: ModelTaskCategory;
   /** A mission, agent, or task-level assignment. Never replaced automatically. */
   model?: string;
   /** True only when the assignment is automatic and may be reconsidered once. */
@@ -86,11 +88,13 @@ export function planResourceAwareBatch(
       let reliabilityExploration = false;
       const allGpuFittingModelsFailed = fitting.length > 0 && fitting.every((candidate) => {
         const measured = options.performanceByModel?.[candidate.key];
-        return measured?.taskSamples && measured.taskSuccessRate === 0;
+        const taskStats = task.taskCategory ? measured?.taskCategories?.[task.taskCategory] : measured;
+        return taskStats?.taskSamples && taskStats.taskSuccessRate === 0;
       });
       if (allGpuFittingModelsFailed && fitsRam.length > 0) {
         const bestRamCandidate = chooseAgentModel(fitsRam, {
           ...(task.requiredContextTokens === undefined ? {} : { requiredContextTokens: task.requiredContextTokens }),
+          ...(task.taskCategory ? { taskCategory: task.taskCategory } : {}),
           ...(options.performanceByModel ? { performanceByModel: options.performanceByModel } : {})
         }).model;
         const bestMetrics = options.performanceByModel?.[bestRamCandidate.key];
@@ -110,6 +114,7 @@ export function planResourceAwareBatch(
       const pool = untried.length ? untried : resourcePool;
       const choice = chooseAgentModel(pool, {
         ...(task.requiredContextTokens === undefined ? {} : { requiredContextTokens: task.requiredContextTokens }),
+        ...(task.taskCategory ? { taskCategory: task.taskCategory } : {}),
         ...(options.performanceByModel ? { performanceByModel: options.performanceByModel } : {})
       });
       model = choice.model;
