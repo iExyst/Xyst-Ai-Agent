@@ -29,7 +29,7 @@ import { createWebTools } from "./tools/web.js";
 import { AgentRunner, ExternalActionApprovalError, assertRequiredToolEvidence } from "./agent.js";
 import { createServer } from "node:http";
 import { LMStudioProvider } from "./providers/lm-studio.js";
-import { SessionCompactor } from "./session-compaction.js";
+import { getSessionCompactionModel, SessionCompactor } from "./session-compaction.js";
 import { parseLmsDaemonStatus } from "./lm-studio-daemon.js";
 import { createOfficeTools, extractPdfAttachmentText } from "./tools/office.js";
 import { createDesktopAutomationTools, inspectNativeAutomation } from "./tools/desktop-automation.js";
@@ -512,15 +512,32 @@ test("saved sessions rename, fork structured history, export, archive, and delet
   } finally { store.close(); }
 }));
 
+test("session compaction model selection targets the loaded instance with the largest context", async () => {
+  const provider = {
+    models: async () => [{
+      type: "llm", key: "local-test", size_bytes: 1_000_000, max_context_length: 32768,
+      loaded_instances: [
+        { id: "local-test", config: { context_length: 8192 } },
+        { id: "local-test:small", config: { context_length: 8192 } },
+        { id: "local-test:large", config: { context_length: 32768 } }
+      ]
+    }]
+  };
+  assert.deepEqual(await getSessionCompactionModel(provider as never), { model: "local-test:large", reason: "largest-context loaded local model instance" });
+  assert.deepEqual(await getSessionCompactionModel(provider as never, "local-test"), { model: "local-test:large", reason: "largest-context loaded instance for selected local model" });
+  assert.deepEqual(await getSessionCompactionModel(provider as never, "local-test:small"), { model: "local-test:small", reason: "explicit loaded instance selection" });
+});
+
 test("session compaction persists a resumable summary and preserves raw history and paired tool evidence", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "session-compaction.sqlite")); const sessions = new SessionStore(store); const sessionId = sessions.create("Long work");
   const callId = "tool-pair-1"; const now = new Date().toISOString(); let capturedPayload: Record<string, unknown> | undefined;
   const append = (role: "user" | "assistant" | "tool", value: Record<string, unknown>) => sessions.addMessage(sessionId, role, `__xyst_api_message__:${JSON.stringify(value)}`);
   const response = { choices: [{ message: { content: JSON.stringify({ decisions: ["Use persistent summaries"], dependencies: [], completed_work: ["Reviewed the prior turns"], outstanding_actions: [], durable_facts: ["Original transcript remains available"] }) } }] };
+  let usedModel: string | undefined;
   const provider = {
     isLocalServer: () => true,
-    models: async () => [{ type: "llm", key: "local-test", size_bytes: 1_000_000, loaded_instances: [], max_context_length: 8192 }],
-    structuredOutput: async (options: { messages: Array<{ role: string; content: string }> }) => { capturedPayload = JSON.parse(options.messages[1]!.content) as Record<string, unknown>; return response; },
+    models: async () => [{ type: "llm", key: "local-test", size_bytes: 1_000_000, loaded_instances: [{ id: "local-test:large", config: { context_length: 32768 } }], max_context_length: 32768 }],
+    structuredOutput: async (options: { model: string; messages: Array<{ role: string; content: string }> }) => { usedModel = options.model; capturedPayload = JSON.parse(options.messages[1]!.content) as Record<string, unknown>; return response; },
     redact: (value: string) => value
   };
   try {
@@ -539,8 +556,9 @@ test("session compaction persists a resumable summary and preserves raw history 
     store.db.prepare("INSERT INTO mission_tasks(run_id,mission_id,task_key,objective,dependencies_json,state,attempts,session_id,updated_at) VALUES('run-compaction','mission-compaction','task-b','Finish B',?,'running',1,?,?)").run(JSON.stringify(["task-a"]), sessionId, now);
     const before = sessions.messages(sessionId) as Array<{ id: string; role: string; content: string }>;
     const compactor = new SessionCompactor(store, sessions, provider as never);
-    const result = await compactor.compact(sessionId, "local-test");
+    const result = await compactor.compact(sessionId, "local-test:large");
     const summary = (result.summary as Record<string, unknown>);
+    assert.equal(usedModel, "local-test:large", "the request targets the selected loaded instance rather than LM Studio's default instance");
     assert.equal(summary.primary_goal, "Please finish the Xyst build and retain this primary goal.");
     assert.ok((summary.user_goals as string[]).some((goal) => goal.includes("Decision: keep original session messages")));
     assert.ok((summary.dependencies as string[]).includes("task-b depends on task-a"));

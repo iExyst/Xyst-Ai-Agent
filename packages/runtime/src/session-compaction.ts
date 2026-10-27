@@ -110,9 +110,12 @@ export class SessionCompactor {
       remaining = rows.slice(previousIndex + 1);
     }
     const inventory = await this.provider.models(signal);
-    const selectedModel = inventory.find((item) => item.key === model && item.type === "llm");
+    const selectedModel = inventory.find((item) => item.type === "llm" && (item.key === model || item.loaded_instances.some((instance) => instance.id === model)));
     if (!selectedModel) throw new Error(`Compaction model is not present in the LM Studio LLM inventory: ${model}`);
-    const configuredContext = selectedModel.loaded_instances.map((item) => item.config.context_length).filter((value): value is number => typeof value === "number" && value > 0);
+    const selectedInstance = model === selectedModel.key ? undefined : selectedModel.loaded_instances.find((instance) => instance.id === model);
+    const configuredContext = selectedInstance
+      ? [selectedInstance.config.context_length].filter((value): value is number => typeof value === "number" && value > 0)
+      : selectedModel.loaded_instances.map((item) => item.config.context_length).filter((value): value is number => typeof value === "number" && value > 0);
     const contextTokens = configuredContext.length ? Math.max(...configuredContext) : selectedModel.max_context_length ?? 8192;
     const candidate = compactableHistory(remaining, Math.max(500, Math.min(28_000, (contextTokens - 1800) * 2)));
     if (!candidate.boundary || candidate.messages.length < 4) throw new Error("No safe completed-turn prefix is available to compact. Xyst keeps recent turns, image attachments, and incomplete tool-call/result pairs intact.");
@@ -204,13 +207,19 @@ export function getSessionCompactionModel(provider: LMStudioProvider, preferred?
     const llms = models.filter((item) => item.type === "llm");
     if (!llms.length) throw new Error("No local LM Studio language model is available for session compaction");
     if (preferred) {
-      if (!llms.some((item) => item.key === preferred)) throw new Error(`Compaction model is not in the LM Studio LLM inventory: ${preferred}`);
-      return { model: preferred, reason: "explicit model selection" };
+      const selected = llms.find((item) => item.key === preferred || item.loaded_instances.some((instance) => instance.id === preferred));
+      if (!selected) throw new Error(`Compaction model is not in the LM Studio LLM inventory: ${preferred}`);
+      const requestedInstance = preferred === selected.key ? undefined : selected.loaded_instances.find((instance) => instance.id === preferred);
+      if (requestedInstance) return { model: requestedInstance.id, reason: "explicit loaded instance selection" };
+      const largestLoaded = [...selected.loaded_instances].sort((left, right) => (Number(right.config.context_length) || 0) - (Number(left.config.context_length) || 0))[0];
+      if (largestLoaded) return { model: largestLoaded.id, reason: "largest-context loaded instance for selected local model" };
+      return { model: selected.key, reason: "explicit model selection; no loaded instance was reported" };
     }
     const selected = [...llms].sort((a, b) => {
       const aLoaded = a.loaded_instances.length ? 1 : 0; const bLoaded = b.loaded_instances.length ? 1 : 0;
       return bLoaded - aLoaded || (b.max_context_length ?? 0) - (a.max_context_length ?? 0) || b.size_bytes - a.size_bytes;
     })[0]!;
-    return { model: selected.key, reason: selected.loaded_instances.length ? "largest-context loaded local model" : "largest-context installed local model" };
+    const largestLoaded = [...selected.loaded_instances].sort((left, right) => (Number(right.config.context_length) || 0) - (Number(left.config.context_length) || 0))[0];
+    return { model: largestLoaded?.id ?? selected.key, reason: largestLoaded ? "largest-context loaded local model instance" : "largest-context installed local model" };
   });
 }
