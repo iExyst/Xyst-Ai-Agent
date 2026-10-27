@@ -87,7 +87,16 @@ function inferNamedOutputPaths(criteria: string[]): string[] {
     // "the prior run created .wrong.json instead of requested right.json").
     // That historical mention must not become a new declared output.
     if (/\b(?:prior|previous|earlier|last|failed)\s+(?:run|attempt|session|task)\b/i.test(criterion) && /\binstead\s+of\b/i.test(criterion)) continue;
-    const withoutUrls = criterion.replace(/https?:\/\/[^\s<>"'`]+/gi, "");
+    // Source-file references in code examples and acceptance criteria are
+    // dependencies, not outputs. Remove common JS/TS import forms before
+    // looking for file-like names so `require("./add.cjs")` is not treated
+    // as a second deliverable when the requested output is `src/add.cjs`.
+    const withoutImports = criterion
+      .replace(/\brequire\s*\(\s*["'`][^"'`]*["'`]\s*\)/g, " ")
+      .replace(/\bfrom\s+["'`][^"'`]*["'`]/g, " ")
+      .replace(/\bimport\s*\(\s*["'`][^"'`]*["'`]\s*\)/g, " ")
+      .replace(/\bimport\s+["'`][^"'`]*["'`]/g, " ");
+    const withoutUrls = withoutImports.replace(/https?:\/\/[^\s<>"'`]+/gi, "");
     for (const match of withoutUrls.matchAll(/(?:^|[\s"'`])((?:[A-Za-z]:[\\/])?[^\s"'`<>|?*]+\.(?:txt|md|csv|json|ya?ml|html?|js|mjs|cjs|ts|tsx|jsx|py|sh|ps1|log|xml|pdf|docx|xlsx|pptx))(?![\w])/gi)) {
       const path = match[1]?.replace(/[),.;:]+$/, "");
       if (path) paths.add(path);

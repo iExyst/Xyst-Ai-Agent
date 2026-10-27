@@ -1137,6 +1137,36 @@ test("completion of a requested test suite requires a successful process result"
   } finally { store.close(); }
 }));
 
+test("JavaScript module imports are not inferred as additional declared outputs", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "import-not-output.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  let turn = 0;
+  const source = `function add(a, b) {\n  if (typeof a !== "number" || !Number.isFinite(a) || typeof b !== "number" || !Number.isFinite(b)) throw new TypeError("Expected finite numbers");\n  return a + b;\n}\nmodule.exports = { add };\n`;
+  const suite = `const test = require("node:test");\nconst assert = require("node:assert/strict");\nconst { add } = require("./add.cjs");\ntest("adds finite numbers", () => assert.equal(add(2, 3), 5));\ntest("rejects non-numbers", () => assert.throws(() => add("2", 3), TypeError));\n`;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      const call = (name: string, id: string, args: Record<string, unknown>) => ({ id, type: "function", function: { name, arguments: JSON.stringify(args) } });
+      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [call("file_create", "create-add", { path: "src/add.cjs", content: source })] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [call("file_create", "create-suite", { path: "src/add.test.cjs", content: suite })] } }] };
+      if (turn === 3) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [call("run_process", "run-tests", { executable: process.execPath, args: ["-e", "const {add}=require('./src/add.cjs');if(add(2,3)!==5)process.exit(1);try{add('2',3);process.exit(1)}catch(e){if(!(e instanceof TypeError))process.exit(1)}"], cwd: root })] } }] };
+      if (turn === 4) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [call("file_read", "read-add", { path: "src/add.cjs" })] } }] };
+      if (turn === 5) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [call("file_read", "read-suite", { path: "src/add.test.cjs" })] } }] };
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [call("task_complete", `complete-add-${turn}`, { evidence_tool_call_indexes: [1, 2, 3] })] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run('Create src/add.cjs and src/add.test.cjs. The test uses require("./add.cjs"). Run a direct Node check and verify both outputs.', { workspace: root, maxTurns: 8 });
+    assert.equal(result.status, "completed");
+    const calls = store.db.prepare("SELECT name,status,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId) as Array<{ name: string; status: string; output_json: string | null }>;
+    assert.deepEqual(calls.map(({ name, status }) => [name, status]), [["file_create", "completed"], ["file_create", "completed"], ["run_process", "completed"], ["file_read", "completed"], ["file_read", "completed"], ["task_complete", "completed"]]);
+    assert.equal(JSON.parse(calls[2]!.output_json!).code, 0);
+    assert.equal(JSON.parse(calls[5]!.output_json!).verified, true);
+  } finally { store.close(); }
+}));
+
 test("malformed external tool arguments fail before durable intent and do not quarantine the mission", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "malformed-external-tool.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
