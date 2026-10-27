@@ -1,5 +1,11 @@
 # Xyst verification history
 
+## Clean Windows install shares the packaged CLI profile with the desktop (2026-10-27)
+
+- Extended the Windows installer smoke to create a saved session through the installed package's bundled Node and CLI in an isolated `%APPDATA%` profile, then query `window.xyst.snapshot()` in the clean-installed desktop and assert the same session ID is present. The existing 25-control renderer readiness check and screenshot still run.
+- Exact PR-head `20e2c9e` acceptance passed in push and pull-request runs: Windows/Ubuntu verification and Windows/Linux packaging (8/8). The Windows package job passed the clean install, metadata checks, and the CLI-to-desktop profile-sharing assertion. PR package run `40428351681` completed at `2026-10-27T00:49:03Z`; test session `b824dbf9-df85-4bac-a7ce-f709a48c9f4c` was isolated to the temporary CI profile, which the smoke removes after exit.
+- The first run of the expanded smoke failed because its helper did not unwrap the CLI's `{type:"result", data:...}` JSON envelope. Updated the helper to read the documented envelope, then reran the full cross-platform workflows successfully. This verifies fresh installed-profile persistence and renderer sharing; it does not test migration of an existing user profile.
+
 ## Linux mission service preserves a configured data home (2026-10-26)
 
 - `mission service install` now passes the configured Linux `XDG_DATA_HOME` into its generated `systemd --user` unit, so a daemon started by systemd opens the same Xyst profile as the CLI and desktop. The systemd formatter normalizes data-home paths with POSIX semantics, including when deterministic tests run on Windows.
