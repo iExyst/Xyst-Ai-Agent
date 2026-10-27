@@ -624,7 +624,8 @@ export class AgentRunner {
         const receivedIndexCount = Array.isArray(indexes) ? indexes.length : 0;
         if (!requiredCompletionCriteria.length || requiredCompletionCriteria.length > 50 || !Array.isArray(indexes) || indexes.length !== requiredCompletionCriteria.length || !indexes.every((item) => Number.isSafeInteger(item) && (item as number) >= 1 && (item as number) <= currentEvidence.length)) {
           const persistedEvidenceCount = this.deps.store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE name!='task_complete' AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?)").get(sessionId, executionScope) as { count: number };
-          if (Array.isArray(indexes) && indexes.length === requiredCompletionCriteria.length && indexes.every((item) => Number.isSafeInteger(item) && (item as number) >= 1) && persistedEvidenceCount.count > currentEvidence.length) {
+          if (persistedEvidenceCount.count > currentEvidence.length) {
+            staleCompletionEvidence = true;
             throw new Error("Successful evidence was completed after the displayed evidence list was sent. Call task_complete again in a new turn using the refreshed evidence indexes.");
           }
           throw new Error(`Completion verification needs exactly ${requiredCompletionCriteria.length} evidence indexes in criterion order; received ${receivedIndexCount}. One index is accepted only when the same tool result supports every criterion.`);
@@ -697,7 +698,7 @@ export class AgentRunner {
     };
     const definitions = Object.values(tools).map((tool) => tool.definition);
     const seenCalls = new Map<string, number>();
-    let completionNudges = 0;
+    let completionNudges = 0; let staleCompletionEvidence = false;
     const sessionMessages = () => {
       const rows = this.deps.sessions.contextMessages(sessionId);
       const messages = rows.map((row): ApiMessage => row.content.startsWith(MESSAGE_PREFIX) ? JSON.parse(row.content.slice(MESSAGE_PREFIX.length)) as ApiMessage : { role: row.role, content: row.content });
@@ -977,6 +978,11 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
         if (parallelReadBatch.length) {
           this.deps.events.emit("agent.tools.batch_started", { kind: "parallel_read", calls: parallelReadBatch.length, concurrency: parallelReadLimit }, sessionId);
           for (const toolMessage of await runBoundedOrdered(parallelReadBatch, parallelReadLimit)) save(toolMessage);
+        }
+        if (staleCompletionEvidence && completionNudges < 2 && !options.signal?.aborted) {
+          const criteria = requiredCompletionCriteria.map((item) => `- ${item}`).join("\n");
+          save({ role: "user", content: `The previous task_complete attempt used an evidence snapshot from before same-response tools finished. Do not repeat its indexes. Review the refreshed evidence list in the next system message, perform any missing required action (including reading declared output files), and call task_complete by itself in a fresh turn with evidence for every criterion. Do not repeat completed requests. Required criteria:\n${criteria}` });
+          completionNudges++; staleCompletionEvidence = false;
         }
         if (uncertainExternalAction) throw new Error(uncertainExternalAction);
         if (status === "cancelled") break;

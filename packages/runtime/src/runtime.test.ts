@@ -1059,16 +1059,17 @@ test("task completion rejects truncated web fetch evidence and accepts a success
 test("same-response live fetch completion retries against refreshed evidence indexes", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "same-response-fetch-completion.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
-  const originalFetch = globalThis.fetch; const url = "https://8.8.8.8/api/repository"; let fetchCalls = 0; let inferenceRound = 0;
+  const originalFetch = globalThis.fetch; const url = "https://8.8.8.8/api/repository"; let fetchCalls = 0; let inferenceRound = 0; let sawStaleEvidenceReminder = false;
   globalThis.fetch = async () => { fetchCalls++; return new Response(JSON.stringify({ full_name: "example/repository", default_branch: "main", pushed_at: "2026-10-27T02:10:47Z" }), { status: 200, headers: { "content-type": "application/json" } }); };
   const provider = {
     redact: (value: string) => value,
-    streamChatWithTools: async () => {
+    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }) => {
       inferenceRound++;
       if (inferenceRound === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [
         { id: "same-turn-fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url }) } },
         { id: "same-turn-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }
       ] } }] };
+      sawStaleEvidenceReminder = request.messages.some((message) => message.role === "user" && String(message.content).includes("used an evidence snapshot from before same-response tools finished"));
       return { choices: [{ message: { role: "assistant", content: "The live repository data was retrieved and verified.", tool_calls: [{ id: "refreshed-evidence-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
     }
   };
@@ -1081,6 +1082,7 @@ test("same-response live fetch completion retries against refreshed evidence ind
     assert.deepEqual(calls.map(({ name, status }) => [name, status]), [["web_fetch", "completed"], ["task_complete", "failed"], ["task_complete", "completed"]]);
     assert.match(calls[1]!.output_json!, /completed after the displayed evidence list was sent/);
     assert.equal(JSON.parse(calls[2]!.output_json!).verified, true);
+    assert.equal(sawStaleEvidenceReminder, true, "the runtime prompts for a refreshed verification turn after the stale snapshot is rejected");
     assert.equal(inferenceRound, 2);
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
