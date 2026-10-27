@@ -9,6 +9,17 @@ import { UsageBudgetStore } from '../src/session/usage-budget.mjs';
 
 const execFileAsync = promisify(execFile);
 
+test('usage budget waits for an existing lock file instead of failing on Windows sharing errors', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-existing-lock-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root, { lockWaitMs: 60 });
+  await fs.mkdir(path.dirname(store.lock), { recursive: true });
+  await fs.writeFile(store.lock, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+
+  await assert.rejects(store.snapshot(), { code: 'BUDGET_LEDGER_LOCKED' });
+  await assert.rejects(fs.access(store.file), { code: 'ENOENT' });
+});
+
 test('daily reservations enforce the shared cap across independent processes', async (t) => {
   const root = await createTempDirectory('xyst-usage-budget-processes-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

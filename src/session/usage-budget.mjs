@@ -226,7 +226,7 @@ export class UsageBudgetStore {
       try {
         handle = await fs.open(this.lock, 'wx', 0o600);
       } catch (error) {
-        if (error.code !== 'EEXIST') throw error;
+        if (error.code !== 'EEXIST' && !(await isExistingLockContention(error, this.lock))) throw error;
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     }
@@ -258,6 +258,19 @@ export class UsageBudgetStore {
       await handle.close().catch(() => {});
       await fs.rm(this.lock, { force: true }).catch(() => {});
     }
+  }
+}
+
+async function isExistingLockContention(error, lockPath) {
+  // Windows may report EPERM/EACCES instead of EEXIST when another process
+  // created the exclusive lock file and still has it open.
+  if (process.platform !== 'win32' || !['EACCES', 'EPERM'].includes(error.code)) return false;
+  try {
+    await fs.lstat(lockPath);
+    return true;
+  } catch (statError) {
+    if (statError.code === 'ENOENT') return false;
+    throw statError;
   }
 }
 
