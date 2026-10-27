@@ -1,4 +1,12 @@
-# Xyst resume checkpoint · 2026-10-26 (refreshed)
+# Xyst resume checkpoint · 2026-10-27 (refreshed)
+
+## Latest continuation · live-data access and current PR checks (2026-10-27)
+
+- Confirmed the live-data boundary in the current shared runtime: full-access agents can fetch bounded public HTTPS/JSON APIs with `web_fetch`; results include exact URL, HTTP status, content type, UTC retrieval timestamp, and truncation state. GitHub and Hugging Face API integrations are also available. Scheduled missions poll on their configured schedule, and configured signed GitHub webhooks/MCP subscriptions can deliver event-driven updates. Public API reads need no provider token.
+- Existing current-source and packaged acceptance already completed real GitHub REST and Open-Meteo requests through Xyst, with persisted timestamps and verified task/file evidence. See the live-data and package acceptance entries in [verification history](docs/verification-history.md). Brave Search requires a stored Brave API key; authenticated/private services require their provider credentials or a configured authenticated MCP integration. The generic `web_fetch` tool intentionally restricts targets to public addresses and does not attach arbitrary private API secrets.
+- Checked the currently configured LM Studio server at `127.0.0.1:1235`; it is running and advertises 51 models. An additional two-source Qwen 3.5 9B inference attempt remained in generation for over three minutes and was cancelled before producing a result; it is not counted as acceptance. Previously accepted packaged API runs remain the valid evidence.
+- All 8 checks for current PR head `03aafbd` passed: Windows/Ubuntu verification and Windows/Linux packaging in both push and pull-request workflows. Run IDs: `40424097371`, `40424097343`, `40424103174`, and `40424103166`. PR #1 remains open and draft.
+- Preserve the primary checkout and untracked `.help recover` / `.xyst-live-acceptance/` artifacts. The full build remains active; see the remaining acceptance gates below.
 
 ## Latest continuation · exact Windows package live API mission (2026-10-27)
 
