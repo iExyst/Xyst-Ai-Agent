@@ -3,6 +3,7 @@
 > Execution order and release priorities are defined in [BUILD_PLAN.md](BUILD_PLAN.md). Use that plan to decide what to do next; this roadmap remains the detailed feature inventory.
 
 - **Modern MCP control-flow response safety — 2026-10-27:** stdio and Streamable HTTP now inspect 2026-07-28 `resultType` responses. `complete` and the specification's absent-as-complete form pass through; `input_required` and task results fail with explicit unsupported-feature errors, while unknown types fail as invalid responses. Focused regressions pass on both transports. This closes the unsafe interpretation gap for those control-flow results; full capability, content-block, and method-result schema validation remains open.
+- **Interrupted tool-call resume safety — 2026-10-27:** when a saved transcript contains proposed tool calls without persisted results, resume now appends untrusted error observations stating that each missing outcome is unknown. Existing results remain intact, recovery is idempotent, and actions are never re-executed as part of transcript repair. Focused recovery and AgentRuntime resume regressions pass. Broader crash injection at every tool/audit/session persistence boundary remains open.
 
 ## Purpose and scope
 

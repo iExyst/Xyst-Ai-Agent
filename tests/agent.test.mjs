@@ -118,6 +118,53 @@ test('agent correlates tool results with provider-generated normalized tool-call
   assert.match(toolResult.content, /normalized tool call result/);
 });
 
+test('agent resumes an interrupted session with a safe result for an unresolved tool call', async (t) => {
+  const root = await createTempDirectory('xyst-agent-interrupted-tool-call-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const sessionStore = new SessionStore(root);
+  const session = sessionStore.create();
+  session.messages.push({
+    role: 'assistant',
+    content: null,
+    tool_calls: [
+      {
+        id: 'interrupted-write',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{"path":"marker.txt","content":"must not be replayed"}' },
+      },
+    ],
+  });
+  const requests = [];
+  const runtime = new AgentRuntime({
+    config: config(),
+    workspaceRoot: root,
+    sessionStore,
+    fetchImpl: async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'I will inspect the current state first.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+
+  const result = await runtime.run({ prompt: 'Continue after the interruption.', session });
+
+  assert.equal(result.status, 'complete');
+  const assistantIndex = requests[0].messages.findIndex(
+    (message) => message.role === 'assistant' && message.tool_calls?.some((call) => call.id === 'interrupted-write'),
+  );
+  const toolResult = requests[0].messages[assistantIndex + 1];
+  assert.equal(toolResult.role, 'tool');
+  assert.equal(toolResult.tool_call_id, 'interrupted-write');
+  assert.match(toolResult.content, /outcome is unknown/);
+  assert.equal(
+    await fs.stat(path.join(root, 'marker.txt')).then(
+      () => true,
+      () => false,
+    ),
+    false,
+  );
+});
+
 test('agent refreshes its available tools when a paused-run sandbox policy changes', async (t) => {
   const root = await createTempDirectory('xyst-agent-live-sandbox-policy-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -17,6 +17,7 @@ import { createSessionGrant, findSessionGrant, MAX_SESSION_GRANTS } from '../too
 import { evaluateApprovalRules } from '../tools/approval-rules.mjs';
 import { ApprovalRuleStore } from '../tools/approval-rule-store.mjs';
 import { encodeToolObservation } from './observations.mjs';
+import { recoverInterruptedToolCalls } from './interrupted-tools.mjs';
 import { inspectUntrustedContent } from './injection-signals.mjs';
 import { loadProjectInstructions } from './project-instructions.mjs';
 import { BackgroundProcessManager } from '../platform/background-processes.mjs';
@@ -316,6 +317,8 @@ export class AgentRuntime {
     const preparedImages = await prepareImageInputs(images);
     let transientToolImages = [];
     const working = session || this.sessionStore.create();
+    const interruptedTools = recoverInterruptedToolCalls(working.messages);
+    if (interruptedTools.recovered > 0) working.messages = interruptedTools.messages;
     const completedDelegationTasks = new Map();
     const inheritedMcpServers = mcpServers === undefined;
     const requestedMcpServers = inheritedMcpServers ? (working.mcp_servers ?? null) : mcpServers;
