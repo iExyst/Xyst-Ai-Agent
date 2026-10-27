@@ -296,6 +296,7 @@ class McpStdioSession {
     child.stderr.on('data', (chunk) => {
       this.stderr = (this.stderr + chunk).slice(-8192);
     });
+    child.stdin.on('error', () => this.#failAll(`Unable to write to MCP server '${this.name}'`, 'MCP_TRANSPORT_ERROR'));
     child.once('error', () => this.#failAll('MCP server process failed to start', 'MCP_SPAWN_FAILED'));
     child.once('close', () => this.#failAll('MCP server process exited', 'MCP_SERVER_EXITED'));
   }

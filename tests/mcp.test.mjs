@@ -279,6 +279,22 @@ test('MCP startup isolates one failed server and retains healthy server tools', 
   assert.equal(broken.error_code, 'MCP_SERVER_UNAVAILABLE');
 });
 
+test('MCP startup handles a child that exits before accepting its first request', async (t) => {
+  const root = await createTempDirectory('xyst-mcp-early-exit-');
+  const config = managerConfig();
+  config.mcp.servers.fixture.args = ['-e', 'process.exit(0)'];
+  const manager = new StdioMcpManager({ config, workspaceRoot: root });
+  t.after(async () => {
+    await manager.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await manager.initialize();
+  const failed = manager.serverCatalog.find((server) => server.name === 'fixture');
+  assert.equal(failed.connection_state, 'error');
+  assert.ok(['MCP_SERVER_EXITED', 'MCP_SERVER_UNAVAILABLE', 'MCP_TRANSPORT_ERROR'].includes(failed.error_code));
+});
+
 test('required Linux sandbox launches a signed MCP package read-only with network isolation', async (t) => {
   const bubblewrap = await findBubblewrap();
   const requiredTest = process.env.XYST_REQUIRE_BWRAP_TEST === 'true';
