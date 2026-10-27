@@ -1087,6 +1087,38 @@ test("same-response live fetch completion retries against refreshed evidence ind
   } finally { globalThis.fetch = originalFetch; store.close(); }
 }));
 
+test("completion of a requested test suite requires a successful process result", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "test-suite-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  let inferenceRound = 0;
+  const testSource = `import test from "node:test";\nimport assert from "node:assert/strict";\nfunction add(a, b) { return a + b; }\ntest("addition covers positive, negative, and zero inputs", () => {\n  assert.equal(add(2, 3), 5);\n  assert.equal(add(-1, 0), -1);\n  assert.equal(add(0, 0), 0);\n});\n`;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      inferenceRound++;
+      if (inferenceRound === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [
+        { id: "create-suite-before-complete", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "addition.test.mjs", content: testSource }) } },
+        { id: "complete-before-tests", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }
+      ] } }] };
+      if (inferenceRound === 2) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "complete-without-tests", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+      if (inferenceRound === 3) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "run-addition-tests", type: "function", function: { name: "run_process", arguments: JSON.stringify({ executable: process.execPath, args: ["--test", "addition.test.mjs"], cwd: root }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "complete-after-tests", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Implement a small addition helper and a JavaScript test suite; run the suite and only complete after it passes.", { workspace: root, maxTurns: 6 });
+    assert.equal(result.status, "completed");
+    const calls = store.db.prepare("SELECT name,status,input_json,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId) as Array<{ name: string; status: string; input_json: string; output_json: string | null }>;
+    assert.deepEqual(calls.map(({ name, status }) => [name, status]), [["file_create", "completed"], ["task_complete", "failed"], ["task_complete", "failed"], ["run_process", "completed"], ["task_complete", "completed"]]);
+    assert.match(calls[1]!.output_json!, /completed after the displayed evidence list was sent/);
+    assert.match(calls[2]!.output_json!, /must come from run_process/);
+    assert.equal(JSON.parse(calls[3]!.output_json!).code, 0);
+    assert.equal(JSON.parse(calls[4]!.output_json!).verified, true);
+    assert.equal(inferenceRound, 4);
+  } finally { store.close(); }
+}));
+
 test("malformed external tool arguments fail before durable intent and do not quarantine the mission", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "malformed-external-tool.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

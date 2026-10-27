@@ -61,6 +61,12 @@ function inferExplicitToolEvidence(criteria: string[], availableTools: string[])
   return required;
 }
 
+function requestsTestExecution(criteria: string[]): boolean {
+  const asksToRun = criteria.some((criterion) => /\b(?:run|execute|perform|pass|passed|verify|check)\b/i.test(criterion));
+  const namesTests = criteria.some((criterion) => /\b(?:unit\s+tests?|unittest(?:\s+suite)?|test\s+suite|tests?)\b|\b(?:pytest|jest|vitest|npm\s+test|cargo\s+test|go\s+test)\b/i.test(criterion));
+  return asksToRun && namesTests;
+}
+
 function inferRequestedUrls(criteria: string[]): string[] {
   const urls = new Set<string>();
   for (const criterion of criteria) {
@@ -146,7 +152,7 @@ export class AgentRunner {
     const workspace = resolve(options.workspace ?? (options.sessionId ? this.deps.sessions.workspace(options.sessionId) : undefined) ?? process.cwd());
     const safeObjective = this.deps.provider.redact(objective);
     const baseCompletionCriteria = [...new Set((options.completionCriteria?.length ? options.completionCriteria : [safeObjective]).map((item) => this.deps.provider.redact(String(item)).trim()).filter((item) => Boolean(item) && (Boolean(options.completionCriteria?.length) || !options.sessionId || !isControlOnlyUserMessage(item))))].slice(0, 50);
-    const requiredToolEvidence = options.requiredToolEvidence ?? [];
+    const requiredToolEvidence = [...(options.requiredToolEvidence ?? [])];
     const requiredCompletionCriteria = [
       ...baseCompletionCriteria,
       ...requiredToolEvidence.map((requirement) => `Required tool evidence: ${requirement.tool}${requirement.exitCode === undefined ? "" : ` exitCode=${requirement.exitCode}`}${requirement.stdoutEquals === undefined ? "" : ` stdout must exactly match the configured value${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}${requirement.stdoutIncludes === undefined ? "" : ` stdout must include ${JSON.stringify(this.deps.provider.redact(requirement.stdoutIncludes))}${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}`)
@@ -536,6 +542,11 @@ export class AgentRunner {
     };
     const refreshEvidenceRequirements = (criteria: string[]) => {
       for (const [tool, criterion] of inferExplicitToolEvidence(criteria, Object.keys(tools))) { inferredToolEvidence.set(tool, criterion); addCompletionCriterion(criterion); }
+      if (Object.hasOwn(tools, "run_process") && requestsTestExecution(criteria) && !requiredToolEvidence.some((requirement) => requirement.tool === "run_process" && requirement.exitCode === 0)) {
+        const requirement: RequiredToolEvidence = { tool: "run_process", exitCode: 0 };
+        requiredToolEvidence.push(requirement);
+        addCompletionCriterion("Required tool evidence: run_process exitCode=0");
+      }
       const directUrlFetchRequested = criteria.some((criterion) => /\b(?:fetch|retrieve|request|query)\b/i.test(criterion) && inferRequestedUrls([criterion]).length > 0);
       const directUrlFetchProhibited = criteria.some((criterion) => /\b(?:do\s+not|don't|dont|never|avoid)\s+(?:fetch|retrieve|request|query)\b/i.test(criterion) || /\b(?:do\s+not|don't|dont|never|avoid)\s+(?:use|call|invoke)\s+(?:the\s+)?(?:web_fetch|`web_fetch`)\b/i.test(criterion));
       if (directUrlFetchRequested && !directUrlFetchProhibited && !inferredToolEvidence.has("web_fetch") && Object.hasOwn(tools, "web_fetch")) {
