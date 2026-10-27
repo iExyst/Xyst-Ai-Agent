@@ -1,4 +1,10 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
+## Latest continuation · output inference false positive (2026-10-27)
+
+- A persisted Ministral coding task had correct implementation/tests and a passing six-case Node test run, but completion was blocked by an inferred output named `console.log`. The phrase came from the user's explicit negative instruction not to use `console.log` as a substitute for registered tests. Updated output inference to exclude JavaScript console methods and expanded the exact end-to-end regression prompt; full `npm test` passed.
+- Retrying the saved task reached LM Studio after the structured-resume bridge, and it read the two existing files. The subsequent LM Studio request returned HTTP 500 for a Jinja role-alternation error after the parallel read results. This remains an open live-model completion edge case, not accepted coding evidence.
+- Exact PR head `b88e084` had passed all push/PR Windows and Ubuntu CI/package jobs and artifact manifest checks; details and hashes are in the next checkpoint below. The output-inference fix is local and is being sent through hosted verification. Live public HTTP/JSON/REST access, timestamped fetch evidence, GitHub/HF integrations, scheduled polling, and configured webhook/MCP event delivery remain implemented and previously verified on source and packaged Windows/Linux runtimes.
+
 ## Latest continuation · resumed live coding, live data, and exact-head verification (2026-10-27)
 
 - User-confirmed requirement: Xyst must reach live data sources and current API information. This is implemented through the bounded, policy-controlled `web_fetch` HTTP(S)/JSON/REST tool, timestamped source evidence, GitHub/Hugging Face integrations, scheduled polling, and configured webhook/MCP event delivery. Live public API access has already been exercised from current source and packaged Windows/Linux runtimes; it is not a universal always-on streaming feed. Authenticated/private APIs still need credentials.

@@ -1206,7 +1206,7 @@ test("completion of a requested test suite requires a successful process result"
   } finally { store.close(); }
 }));
 
-test("JavaScript module imports are not inferred as additional declared outputs", async () => withTemp(async (root) => {
+test("JavaScript module imports and console methods are not inferred as declared outputs", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "import-not-output.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
   let turn = 0;
@@ -1227,7 +1227,7 @@ test("JavaScript module imports are not inferred as additional declared outputs"
   };
   try {
     const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
-      .run('Create src/add.cjs and src/add.test.cjs. The test uses require("./add.cjs"). Run a direct Node check and verify both outputs.', { workspace: root, maxTurns: 8 });
+      .run('Create src/add.cjs and src/add.test.cjs. The test uses require("./add.cjs"). Do not use console.log as a substitute for node:test. Run a direct Node check and verify both outputs.', { workspace: root, maxTurns: 8 });
     assert.equal(result.status, "completed");
     const calls = store.db.prepare("SELECT name,status,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId) as Array<{ name: string; status: string; output_json: string | null }>;
     assert.deepEqual(calls.map(({ name, status }) => [name, status]), [["file_create", "completed"], ["file_create", "completed"], ["run_process", "completed"], ["file_read", "completed"], ["file_read", "completed"], ["task_complete", "completed"]]);

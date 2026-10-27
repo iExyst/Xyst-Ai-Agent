@@ -97,7 +97,12 @@ function inferNamedOutputPaths(criteria: string[]): string[] {
       .replace(/\bfrom\s+["'`][^"'`]*["'`]/g, " ")
       .replace(/\bimport\s*\(\s*["'`][^"'`]*["'`]\s*\)/g, " ")
       .replace(/\bimport\s+["'`][^"'`]*["'`]/g, " ");
-    const withoutUrls = withoutImports.replace(/https?:\/\/[^\s<>"'`]+/gi, "");
+    const withoutUrls = withoutImports
+      .replace(/https?:\/\/[^\s<>"'`]+/gi, "")
+      // Console methods are examples of code, not filesystem outputs. This
+      // commonly appears in a negative requirement such as "do not use
+      // console.log as a substitute for tests".
+      .replace(/\bconsole\.(?:log|error|warn|info|debug|trace|dir|table)\b/gi, " ");
     for (const match of withoutUrls.matchAll(/(?:^|[\s"'`])((?:[A-Za-z]:[\\/])?[^\s"'`<>|?*]+\.(?:txt|md|csv|json|ya?ml|html?|js|mjs|cjs|ts|tsx|jsx|py|sh|ps1|log|xml|pdf|docx|xlsx|pptx))(?![\w])/gi)) {
       const path = match[1]?.replace(/[),.;:]+$/, "");
       if (path) paths.add(path);
