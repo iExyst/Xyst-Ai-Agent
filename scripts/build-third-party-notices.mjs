@@ -39,7 +39,11 @@ export async function buildThirdPartyNotices({ check = false } = {}) {
     const info = await fs.lstat(temporary);
     if (!info.isFile() || info.isSymbolicLink() || info.size < 512 || info.size > MAX_NOTICE_BYTES)
       throw new Error('Generated third-party license notice is missing or outside its size bounds');
-    const generated = await fs.readFile(temporary);
+    const rawGenerated = await fs.readFile(temporary);
+    // Crate license files can contain CRLF even when generated on Linux.
+    // Keep the committed inventory byte-for-byte stable across Windows and Linux.
+    const generated = Buffer.from(rawGenerated.toString('utf8').replace(/\r\n?/g, '\n'));
+    await fs.writeFile(temporary, generated);
     const text = generated.toString('utf8');
     if (!text.startsWith('THIRD-PARTY LICENSE NOTICES\n') || !text.includes('SPDX: '))
       throw new Error('Generated third-party notice is missing its title or license entries');
@@ -48,7 +52,8 @@ export async function buildThirdPartyNotices({ check = false } = {}) {
         if (error.code === 'ENOENT') throw new Error('Committed third-party notices are missing; run pnpm licenses:desktop');
         throw error;
       });
-      if (!committed.equals(generated))
+      const normalizedCommitted = Buffer.from(committed.toString('utf8').replace(/\r\n?/g, '\n'));
+      if (!normalizedCommitted.equals(generated))
         throw new Error('Third-party notices are stale; run pnpm licenses:desktop and review the updated file');
       return { path: OUTPUT, bytes: generated.length, changed: false };
     }

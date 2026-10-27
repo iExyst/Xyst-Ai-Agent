@@ -89,6 +89,7 @@ jobs:
         run: node scripts/check.mjs
         env:
           XYST_REQUIRE_WINDOWS_CONPTY_TEST: 'true'
+          XYST_CONPTY_DEBUG: '1'
           XYST_REQUIRE_BWRAP_TEST: 'false'
           XYST_REQUIRE_PIDFD_TEST: 'false'
           XYST_REQUIRE_LINK_TESTS: 'false'

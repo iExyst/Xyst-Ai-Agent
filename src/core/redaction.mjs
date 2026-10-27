@@ -1,5 +1,5 @@
 const SECRET_ASSIGNMENT =
-  /((?:"[^"\r\n]+"|'[^'\r\n]+'|[A-Za-z][A-Za-z0-9_-]*)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|Bearer\s+[^\s,;#]+|[^\s,;#]+)/gi;
+  /(?!(?:[A-Za-z]:[\\/]))((?:"[^"\r\n]+"|'[^'\r\n]+'|[A-Za-z][A-Za-z0-9_-]*)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|Bearer\s+[^\s,;#]+|[^\s,;#]+)/gi;
 const SECRET_FIELD_NAME =
   /^(?:[a-z0-9]+_)*(?:api_?key|access_?token|refresh_?token|auth(?:orization|_?token)?|client_?secret|private_?key|key|token|secret|password|passwd|credential)(?:_value)?$/;
 const SECRET_REFERENCE_FIELD_NAME = /^(?:api_key_secret|(?:secret|credential|token|key)_(?:ref|name|id))$/;

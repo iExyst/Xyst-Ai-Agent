@@ -783,7 +783,7 @@ test('provider distinguishes its request timeout from a connection failure', asy
   });
 
   await assert.rejects(
-    provider.chat([]),
+    () => keepEventLoopAlive(() => provider.chat([]), 10),
     (error) => error.code === 'REQUEST_TIMEOUT' && error.retryable && /timed out/.test(error.message),
   );
 });
@@ -801,7 +801,7 @@ test('chat requests can use a shorter per-call timeout than their profile defaul
   });
 
   await assert.rejects(
-    provider.chat([], { timeoutMs: 10 }),
+    () => keepEventLoopAlive(() => provider.chat([], { timeoutMs: 10 }), 10),
     (error) => error.code === 'REQUEST_TIMEOUT' && error.retryable && /timed out/.test(error.message),
   );
 });
@@ -820,7 +820,10 @@ test('provider maps timeouts while reading JSON and SSE bodies', async () => {
     timeoutMs: 30,
     fetchImpl: async (_url, { signal }) => new Response(timedBody(signal), { headers: { 'content-type': 'application/json' } }),
   });
-  await assert.rejects(jsonProvider.chat([]), (error) => error.code === 'REQUEST_TIMEOUT' && /timed out/.test(error.message));
+  await assert.rejects(
+    () => keepEventLoopAlive(() => jsonProvider.chat([]), 30),
+    (error) => error.code === 'REQUEST_TIMEOUT' && /timed out/.test(error.message),
+  );
 
   const streamProvider = new OpenAICompatibleProvider({
     baseUrl: 'http://localhost/v1',
@@ -829,14 +832,24 @@ test('provider maps timeouts while reading JSON and SSE bodies', async () => {
     fetchImpl: async (_url, { signal }) => new Response(timedBody(signal), { headers: { 'content-type': 'text/event-stream' } }),
   });
   await assert.rejects(
-    async () => {
-      for await (const _event of streamProvider.stream([])) {
-        /* consume until the request timeout */
-      }
-    },
+    () =>
+      keepEventLoopAlive(async () => {
+        for await (const _event of streamProvider.stream([])) {
+          /* consume until the request timeout */
+        }
+      }, 30),
     (error) => error.code === 'REQUEST_TIMEOUT' && error.retryable && /timed out/.test(error.message),
   );
 });
+
+async function keepEventLoopAlive(run, timeoutMs) {
+  const keepAlive = setTimeout(() => {}, timeoutMs + 250);
+  try {
+    return await run();
+  } finally {
+    clearTimeout(keepAlive);
+  }
+}
 
 test('provider reads only a bounded prefix of an HTTP error response', async () => {
   let cancelled = false;

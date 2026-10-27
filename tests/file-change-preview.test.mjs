@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { applyFileChangeHunks, prepareFileChange, assertFileChangeUnchanged } from '../src/tools/file-change-preview.mjs';
-import { createSymlinkOrSkip } from './helpers.mjs';
+import { createSymlinkOrSkip, createTempDirectory } from './helpers.mjs';
 
 async function tempDirectory() {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'xyst-file-preview-'));
+  return createTempDirectory('xyst-file-preview-');
 }
 
 test('file change preview renders an exact line diff for an edit', async (t) => {

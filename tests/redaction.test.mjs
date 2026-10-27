@@ -42,6 +42,13 @@ test('text redaction recognizes camel-case credentials, authorization headers, a
   assert.equal(redactStructuredSecrets({ accessTokenValue: 'token-value-canary' }).accessTokenValue, '[REDACTED]');
 });
 
+test('text redaction continues past Windows drive prefixes to redact secret assignments in paths', () => {
+  const message = String.raw`No models configured. Create D:\a\Xyst-Ai-Agent\.test-tmp\missing-api_key=outer-handler-secret.toml using config.example.toml.`;
+  const redacted = redactSecrets(message);
+  assert.doesNotMatch(redacted, /outer-handler-secret/);
+  assert.match(redacted, /missing-api_key=\[REDACTED\]/);
+});
+
 test('portable session export redacts structured credential fields nested in message data', async (t) => {
   const workspace = await createTempDirectory('xyst-structured-secret-export-');
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
