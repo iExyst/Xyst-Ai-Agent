@@ -2932,9 +2932,9 @@ export class LocalControlServer {
     const terminalEventError = validateControlApiTerminalEvent(event.type, event);
     if (terminalEventError) throw new TypeError(terminalEventError);
     const stored = {
+      ...event,
       sequence: run.nextEventId++,
       timestamp: new Date().toISOString(),
-      ...event,
       run_id: run.id,
       correlation_id: run.correlationId,
     };
