@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-27
 
+## Windows session replacement-backup recovery — 2026-10-27
+
+- `SessionStore.load()` now repairs the process-crash state where Windows has moved the previous session JSON to its atomic-write `.bak` but has not installed the replacement. It takes the per-session lock, accepts exactly one canonical UUID-named backup, and validates it through the existing no-follow, regular-file, single-link, size, schema, and session-ID checks before atomically restoring it.
+- Missing, ambiguous, or invalid recovery backups produce `SESSION_BACKUP_RECOVERY_REQUIRED`; recovery candidates remain untouched for manual recovery. Focused tests pass for one valid backup and for preserving ambiguous backups. Biome and whitespace checks pass. Hosted verification is pending; this does not recover backups for non-session JSON stores.
+
 ## Hosted CI findings
 
 - Hosted CI run `40595818168` for commit `7f6cffac7fc7fc8172c0835040af94f72709e909` verified committed-session-write recovery. The security audit and both Windows/Ubuntu desktop package, lifecycle, and native checks passed. Both Ubuntu matrices passed 926/934 tests, including the directory-flush fault injection; their two failures are the hosted Bubblewrap loopback restriction and dependent signed-MCP isolation test. Windows passed 912/934 with 21 skips and one failure, only the known ConPTY startup failure; the Linux-specific fault injection correctly skips on Windows. Formatting and lint passed on all four matrices.

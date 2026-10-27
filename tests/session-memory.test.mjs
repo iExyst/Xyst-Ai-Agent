@@ -67,6 +67,43 @@ test('sessions save, load, list, fork, rename, archive and delete', async (t) =>
   assert.equal((await store.list()).length, 1);
 });
 
+test('session load restores one validated Windows atomic-replacement backup', async (t) => {
+  const root = await createTempDirectory('xyst-session-backup-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore(root);
+  const session = store.create({ messages: [{ role: 'user', content: 'Keep this session.' }] });
+  await store.save(session);
+
+  const filename = path.join(root, '.agent', 'sessions', `${session.id}.json`);
+  const backup = `${filename}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(filename, backup);
+
+  const recovered = await store.load(session.id);
+  assert.equal(recovered.id, session.id);
+  assert.equal(recovered.messages[0].content, 'Keep this session.');
+  assert.match(await fs.readFile(filename, 'utf8'), /Keep this session/);
+  await assert.rejects(fs.lstat(backup), { code: 'ENOENT' });
+  assert.equal((await store.load(session.id)).revision, session.revision);
+});
+
+test('session load preserves ambiguous atomic-replacement backups for manual recovery', async (t) => {
+  const root = await createTempDirectory('xyst-session-backup-ambiguous-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore(root);
+  const session = store.create();
+  await store.save(session);
+
+  const filename = path.join(root, '.agent', 'sessions', `${session.id}.json`);
+  const first = `${filename}.00000000-0000-4000-8000-000000000001.bak`;
+  const second = `${filename}.00000000-0000-4000-8000-000000000002.bak`;
+  await fs.rename(filename, first);
+  await fs.copyFile(first, second);
+
+  await assert.rejects(store.load(session.id), { code: 'SESSION_BACKUP_RECOVERY_REQUIRED' });
+  assert.equal(await fs.readFile(first, 'utf8'), await fs.readFile(second, 'utf8'));
+  await assert.rejects(fs.lstat(filename), { code: 'ENOENT' });
+});
+
 test('session store advances its revision when rename committed but directory sync failed', async (t) => {
   if (process.platform === 'win32') {
     t.skip('The session store directory-sync durability boundary is exercised on Linux');

@@ -120,6 +120,44 @@ export class SessionStore {
       label: 'Session store',
     });
     const file = path.join(this.directory, `${id}.json`);
+    try {
+      return await this.#readSessionFile(file, id);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    return this.#withSessionLock(id, async () => {
+      try {
+        return await this.#readSessionFile(file, id);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+
+      const backupPrefix = `${id}.json.`;
+      const backupNames = (await fs.readdir(this.directory)).filter((name) => {
+        if (!name.startsWith(backupPrefix) || !name.endsWith('.bak')) return false;
+        return ID_PATTERN.test(name.slice(backupPrefix.length, -'.bak'.length));
+      });
+      if (backupNames.length !== 1) {
+        throw sessionBackupRecoveryError(id, backupNames.length ? 'multiple backups were found' : 'no recovery backup was found');
+      }
+
+      const backup = path.join(this.directory, backupNames[0]);
+      try {
+        await this.#readSessionFile(backup, id);
+      } catch (error) {
+        throw sessionBackupRecoveryError(id, 'the backup failed session validation', error);
+      }
+
+      // The per-session lock prevents Xyst writers from racing this restore.
+      // The backup is renamed atomically; it is never overwritten or deleted
+      // when validation fails or more than one candidate exists.
+      await fs.rename(backup, file);
+      return this.#readSessionFile(file, id);
+    });
+  }
+
+  async #readSessionFile(file, id) {
     const session = await readSafeSessionRecord(this.workspaceRoot, this.directory, file);
     if (session && typeof session === 'object' && !Array.isArray(session)) assertSupportedSessionVersion(session.schema_version);
     validateSession(session);
@@ -664,6 +702,18 @@ function sessionDiagnosticReason(error) {
   if (error instanceof TypeError) return 'session record failed validation';
   if (/does not match its filename/.test(error.message)) return 'session ID does not match its filename';
   return 'session record could not be safely read';
+}
+
+function sessionBackupRecoveryError(id, reason, cause) {
+  return Object.assign(
+    new Error(
+      `Session ${id} is missing its primary record and cannot be recovered automatically: ${reason}. Preserve the session files for manual recovery.`,
+      {
+        cause,
+      },
+    ),
+    { code: 'SESSION_BACKUP_RECOVERY_REQUIRED' },
+  );
 }
 
 async function readSafeSessionRecord(workspaceRoot, directory, file) {
