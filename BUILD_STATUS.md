@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Latest continuation · live API proof and clean installer smoke (2026-10-27)
+
+- Verified a fresh current-source Xyst agent session against `https://api.github.com/repos/iExyst/Xyst-Ai-Agent`: `web_fetch` returned HTTP 200 with the live repository JSON (`full_name=iExyst/Xyst-Ai-Agent`, `default_branch=main`) and Xyst UTC `retrieved_at=2026-10-27T00:31:36.263Z`; persisted `task_complete` evidence is verified. This confirms public REST API access in the current runtime. The shared tool supports on-demand live public APIs; scheduled mission polling and configured event subscriptions/webhooks provide recurring or event-driven updates, not a universal continuous stream.
+- All 8 hosted checks passed for PR head `aa465a7` (full SHA `aa465a726d8a4e9897863271b0193a212db6a526`): push and PR Windows/Ubuntu verification and Windows/Linux packaging. The Windows package job passed clean installer and renderer smoke; Linux package metadata verification passed. Run IDs: `40425921327`, `40425921343`, `40425926627`, `40425926673`. PR #1 remains open and draft.
+- Live public API access is working without provider credentials. Brave Search still needs a stored Brave key; private APIs need their own credentials or authenticated integration. Remaining full-spec gates include clean installed-profile recovery, physical/bare-metal Linux desktop and service acceptance, production signing/update-feed trust, and broader model/mission recovery coverage. Preserve `.help recover` and `.xyst-live-acceptance/`.
+
 ## Latest continuation · exact LM Studio MCP server permissions (2026-10-27)
 
 - Read the current official [LM Studio server settings](https://lmstudio.ai/docs/developer/core/server/settings) and [MCP API guide](https://lmstudio.ai/docs/developer/core/mcp). In a read-only inspection of the installed LM Studio 0.4.26 Server Settings at `127.0.0.1:1235`, `Allow per-request MCPs` is on, `Require Authentication` is off, and `Allow calling servers from mcp.json` is off; the server reports 51 models. The official docs state configured `mcp.json` servers require authentication. This matches the prior configured-plugin HTTP 403 and explains why ephemeral MCP can work while configured plugin calls cannot.
