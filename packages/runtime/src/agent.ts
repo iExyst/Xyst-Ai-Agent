@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { basename, extname, resolve, sep } from "node:path";
+import { readFile } from "node:fs/promises";
 import type { RuntimeEvents } from "./events.js";
 import { createAgentTools } from "./tools/registry.js";
 import { validatePdfOcrLanguages } from "./tools/office.js";
@@ -1076,7 +1077,10 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
             }
             this.deps.store.db.prepare("UPDATE tool_calls SET output_json=?,status='completed',finished_at=? WHERE id=?").run(safeOutput, new Date().toISOString(), callId);
             this.deps.events.emit("tool.completed", { id: callId, name }, sessionId);
-            save({ role: "tool", tool_call_id: callId, content: safeOutput });
+            const toolContent = name === "office_preview" && typeof artifactPath === "string"
+              ? [{ type: "text", text: safeOutput }, { type: "image_url", image_url: { url: `data:image/png;base64,${(await readFile(artifactPath)).toString("base64")}` } }]
+              : safeOutput;
+            save({ role: "tool", tool_call_id: callId, content: toolContent });
           } catch (error) {
             const message = this.deps.provider.redact(error instanceof Error ? error.message : String(error));
             const external = isExternalAction(name);
