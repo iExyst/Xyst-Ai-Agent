@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
+import { atomicWriteJson, hasAtomicWriteBackup, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { acquirePackageInstallLock, verifySignedPackage } from './signed-packages.mjs';
 import { getCachedRevocations } from './revocation-feed.mjs';
 
@@ -376,7 +376,14 @@ async function readRegistry(root) {
   try {
     info = await fs.lstat(file);
   } catch (error) {
-    if (error.code === 'ENOENT') return { schema_version: 1, packages: {} };
+    if (error.code === 'ENOENT') {
+      if (await hasAtomicWriteBackup(file))
+        throw registryError(
+          'Extension registry has an interrupted replacement backup; update activation state to recover it safely',
+          'PACKAGE_REGISTRY_RECOVERY_REQUIRED',
+        );
+      return { schema_version: 1, packages: {} };
+    }
     throw error;
   }
   if (info.isSymbolicLink() || !info.isFile() || info.size > MAX_REGISTRY_BYTES)

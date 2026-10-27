@@ -492,6 +492,7 @@ test('package registry mutation restores an interrupted registry before applying
   const registryPath = path.join(installRoot, 'registry.json');
   const backupPath = `${registryPath}.00000000-0000-4000-8000-000000000001.bak`;
   await fs.rename(registryPath, backupPath);
+  await assert.rejects(listInstalledPackageActivations({ installRoot }), { code: 'PACKAGE_REGISTRY_RECOVERY_REQUIRED' });
   assert.deepEqual(await disableInstalledSkill({ installRoot, packageId: 'release-check' }), { changed: true, active_version: null });
   assert.deepEqual(await listInstalledPackageActivations({ installRoot }), [
     { package_type: 'skill', package_id: 'release-check', active_version: null, previous_versions: ['1.2.3'] },
