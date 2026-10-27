@@ -1661,6 +1661,18 @@ mod tests {
         directory
     }
 
+    fn test_workspace_directory(name: &str) -> PathBuf {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.test-tmp");
+        std::fs::create_dir_all(&root).expect("create desktop test temp root");
+        let workspace = root.join(format!(
+            "xyst-sandbox-{name}-workspace-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).expect("create isolated sandbox workspace");
+        std::fs::canonicalize(workspace).expect("resolve isolated sandbox workspace")
+    }
+
     fn dacl_bytes(path: &Path, directory: bool) -> Vec<u8> {
         use super::{
             CreateFileW, GetSecurityInfo, LocalFree, OwnedHandle, DACL_SECURITY_INFORMATION,
@@ -2027,9 +2039,7 @@ mod tests {
                 local_app_data.to_string_lossy().into_owned(),
             ),
         ]);
-        let workspace =
-            std::env::temp_dir().join(format!("xyst-sandbox-workspace-{}", std::process::id()));
-        std::fs::create_dir_all(&workspace).expect("create sandbox workspace");
+        let workspace = test_workspace_directory("appcontainer-process");
         std::fs::write(workspace.join("existing.txt"), "workspace-readable")
             .expect("create existing workspace file");
         let original_root_acl = dacl_bytes(&workspace, true);
