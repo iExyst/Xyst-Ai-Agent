@@ -242,8 +242,6 @@ export class GoalStore {
       PERSISTENCE_SCHEMA_REGISTRY.assertVersion('goals', document?.schema_version);
       if (document.schema_version !== GOALS_SCHEMA_VERSION || !Array.isArray(document.goals))
         throw new Error('Goals file has an unsupported schema');
-      if (document.goal_order !== undefined && (!document.goal_order || typeof document.goal_order !== 'object' || Array.isArray(document.goal_order)))
-        throw new Error('Goals file contains an invalid goal order');
       if (document.goals.length > MAX_GOALS) throw new Error('Goals file exceeds its entry limit');
       for (const goal of document.goals) {
         if (!goal.id || !goal.title || !STATUS.has(goal.status)) throw new Error('Goals file contains an invalid entry');
