@@ -43,7 +43,7 @@ export function sha256Hex(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-async function downloadVerifiedArchive(spec, temporaryDirectory) {
+async function downloadVerifiedArchive(spec) {
   const url = new URL(spec.artifact.archive, spec.release_url);
   if (url.protocol !== 'https:' || url.hostname !== 'nodejs.org')
     throw new Error('Desktop runtime URL must use the official Node.js HTTPS origin');
@@ -66,16 +66,23 @@ async function downloadVerifiedArchive(spec, temporaryDirectory) {
   const digest = sha256Hex(archive);
   if (digest !== spec.artifact.sha256)
     throw new Error(`Node.js archive checksum mismatch: expected ${spec.artifact.sha256}, received ${digest}`);
-  const temporaryPath = path.join(temporaryDirectory, spec.artifact.archive);
   const archivePath = path.join(cacheDirectory, spec.artifact.archive);
   await fs.mkdir(cacheDirectory, { recursive: true });
-  await fs.writeFile(temporaryPath, archive, { flag: 'wx' });
+  // Keep the temporary download beside the cache target. The system temp folder
+  // can be on another volume on hosted Windows runners, where rename fails with EXDEV.
+  const downloadDirectory = await fs.mkdtemp(path.join(cacheDirectory, '.download-'));
+  const temporaryPath = path.join(downloadDirectory, spec.artifact.archive);
   try {
-    await fs.rename(temporaryPath, archivePath);
-  } catch (error) {
-    if (process.platform !== 'win32' || error.code !== 'EEXIST') throw error;
-    await fs.rm(archivePath, { force: true });
-    await fs.rename(temporaryPath, archivePath);
+    await fs.writeFile(temporaryPath, archive, { flag: 'wx' });
+    try {
+      await fs.rename(temporaryPath, archivePath);
+    } catch (error) {
+      if (process.platform !== 'win32' || !['EEXIST', 'EPERM'].includes(error.code)) throw error;
+      await fs.rm(archivePath, { force: true });
+      await fs.rename(temporaryPath, archivePath);
+    }
+  } finally {
+    await fs.rm(downloadDirectory, { recursive: true, force: true });
   }
   return archivePath;
 }
@@ -214,7 +221,7 @@ export async function prepareDesktopRuntime({ platform = process.platform, arch 
     await fs.mkdir(cacheDirectory, { recursive: true });
     let archivePath = path.join(cacheDirectory, spec.artifact.archive);
     if ((await sha256File(archivePath).catch(() => null)) !== spec.artifact.sha256) {
-      archivePath = await downloadVerifiedArchive(spec, temporaryDirectory);
+      archivePath = await downloadVerifiedArchive(spec);
     }
     const extracted = await extractRuntime(spec, archivePath, extractedDirectory);
     for (const filename of [extracted.node, extracted.license]) {
