@@ -169,6 +169,19 @@ test('semantic index exclusion rules apply immediately, reject traversal, and ex
   assert.equal((await index.status()).files, 2);
 });
 
+test('retrieval exclusion update restores an interrupted policy file before changing exclusions', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-exclusion-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const index = new SemanticWorkspaceIndex(root, { model: 'mock', embed: async (texts) => texts.map(() => [1, 0]) });
+  await index.addExclusion('private/**');
+  const backup = `${index.excludeFile}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(index.excludeFile, backup);
+  await assert.rejects(index.listExclusions(), { code: 'RETRIEVAL_RULE_RECOVERY_REQUIRED' });
+  await index.addExclusion('secrets/**');
+  assert.deepEqual(await index.listExclusions(), ['private/**', 'secrets/**']);
+  await assert.rejects(fs.stat(backup), { code: 'ENOENT' });
+});
+
 test('automatic-search index limits cap fresh embedding work and report truncation', async (t) => {
   const root = await createTempDirectory('xyst-semantic-auto-cap-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

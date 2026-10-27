@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants, watch as watchFs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, hasAtomicWriteBackup, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { isPathInside } from '../platform/paths.mjs';
 import { isSensitivePath, redactSecrets } from '../platform/redaction.mjs';
 import { embeddingIdentity } from '../providers/embeddings.mjs';
@@ -330,7 +330,14 @@ export class SemanticWorkspaceIndex {
   async listExclusions() {
     try {
       const text = await readWorkspaceRuleFile(this.root, this.excludeFile, { maxBytes: 32 * 1024 });
-      if (text === null) return [];
+      if (text === null) {
+        if (await hasAtomicWriteBackup(this.excludeFile))
+          throw Object.assign(
+            new Error('Retrieval exclusions have an interrupted replacement backup; update exclusions to recover them safely'),
+            { code: 'RETRIEVAL_RULE_RECOVERY_REQUIRED' },
+          );
+        return [];
+      }
       const data = JSON.parse(text);
       if (
         data.version !== 1 ||
@@ -341,7 +348,16 @@ export class SemanticWorkspaceIndex {
         throw new Error('Retrieval exclusions file is invalid');
       return data.patterns;
     } catch (error) {
-      if (error.code === 'ENOENT') return [];
+      if (error.code === 'ENOENT') {
+        if (await hasAtomicWriteBackup(this.excludeFile))
+          throw Object.assign(
+            new Error('Retrieval exclusions have an interrupted replacement backup; update exclusions to recover them safely'),
+            {
+              code: 'RETRIEVAL_RULE_RECOVERY_REQUIRED',
+            },
+          );
+        return [];
+      }
       throw error;
     }
   }
@@ -349,6 +365,7 @@ export class SemanticWorkspaceIndex {
   async addExclusion(pattern) {
     validateExclusion(pattern);
     return this.#withLock(async () => {
+      await this.#restoreExclusions();
       const patterns = await this.listExclusions();
       if (patterns.includes(pattern)) return { added: false, patterns };
       if (patterns.length >= 100) throw new Error('At most 100 retrieval exclusion patterns are supported');
@@ -362,6 +379,7 @@ export class SemanticWorkspaceIndex {
   async removeExclusion(pattern) {
     validateExclusion(pattern);
     return this.#withLock(async () => {
+      await this.#restoreExclusions();
       const patterns = await this.listExclusions();
       const next = patterns.filter((item) => item !== pattern);
       if (next.length !== patterns.length) await atomicWriteJson(this.excludeFile, { version: 1, patterns: next }, { mode: 0o600 });
@@ -420,6 +438,24 @@ export class SemanticWorkspaceIndex {
     if (Buffer.byteLength(text) > MAX_INDEX_BYTES)
       throw Object.assign(new Error('Semantic index exceeds 32 MiB; reduce the indexed workspace'), { code: 'INDEX_LIMIT' });
     await atomicWriteJson(this.file, state, { mode: 0o600 });
+  }
+
+  async #restoreExclusions() {
+    await restoreAtomicWriteBackup(this.excludeFile, {
+      maxBytes: 32 * 1024,
+      decode: (serialized) => {
+        const data = JSON.parse(serialized);
+        if (
+          data?.version !== 1 ||
+          !Array.isArray(data.patterns) ||
+          data.patterns.length > 100 ||
+          data.patterns.some((item) => typeof item !== 'string')
+        )
+          throw new Error('Retrieval exclusion backup is invalid');
+        for (const pattern of data.patterns) validateExclusion(pattern);
+        return data;
+      },
+    });
   }
 
   async #withLock(operation, signal) {
