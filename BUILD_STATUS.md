@@ -7,6 +7,13 @@
 - Sent `SIGKILL` to the service's main process. systemd restarted it (`NRestarts=1`), and the packaged CLI still reported a healthy database. Uninstall left the unit `not-found/inactive`, removed the unit file, and retained a healthy empty test database. No mission task or model request ran.
 - This closes current-package service install/start/restart/stop/remove acceptance under WSL2. Bare-metal Linux startup/reboot and recovery of an active mission remain open. Detailed evidence: [verification history](docs/verification-history.md#current-linux-package-mission-service-install-restart-and-cleanup-2026-10-27).
 
+## Latest continuation · stale completion evidence recovery (2026-10-27)
+
+- Fixed an agent-loop edge where a model returned `web_fetch` and `task_complete` together: completion indexes were checked against the evidence snapshot from before the fetch. Xyst now identifies evidence completed after that snapshot and requires a fresh indexed verification turn; it never treats the unseen result as evidence.
+- Regression test verifies one live fetch, a rejected same-response completion, then a successful completion on refreshed evidence without repeating the fetch. Runtime suite: 155 passed, 2 host-dependent skips, 0 failed. Full runtime/CLI/desktop typecheck passed. Targeted regression passed 1/1.
+- Commit `d80b135` is pushed to PR #1. All eight push and PR Windows/Ubuntu verification and Windows/Linux package checks passed (runs `40438644263`, `40438644290`, `40438650238`, `40438650253`).
+- The real GitHub fetch in the isolated acceptance profile remains persisted as HTTP 200, but that older session remains unverified: Qwen3-0.6B answered with prose instead of a verifier call, and a completion-only Qwen3.5-9B resume was stopped after a long generation with no tool call. A separate clean Qwen3.5-9B coding task also produced no file before its bounded attempt was stopped. These are not counted as model acceptance. The regression proves the runtime recovery path with a deterministic provider; live model coding acceptance remains open.
+
 ## Task-type-aware local model selection (2026-10-27)
 
 - Local model task outcomes are now categorized as coding, research, document, spreadsheet, vision, workflow, or general. Automatic selection prefers matching category outcomes when any candidate has them, and otherwise falls back to existing local task history. Generic resume messages inherit the saved task's category; a new general question does not inherit an unrelated earlier category. Only the coarse category is persisted; prompts remain excluded. Agent retries and resource-aware mission assignment carry the category, and selection reasons identify the evidence used.
