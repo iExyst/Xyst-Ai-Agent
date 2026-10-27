@@ -38,10 +38,11 @@ export interface RemoteFallbackApprovalRequest { sessionId: string; model: strin
 export class ExternalActionApprovalError extends Error {
   constructor(readonly code: "EXTERNAL_ACTION_APPROVAL_REQUIRED" | "EXTERNAL_ACTION_DENIED", message: string) { super(`${code}: ${message}`); this.name = "ExternalActionApprovalError"; }
 }
-function isDefiniteNoEffect(error: unknown): boolean {
+function isDefiniteNoEffect(error: unknown, toolName?: string): boolean {
   if (error instanceof GitHubError && error.status !== undefined && error.status >= 400 && error.status < 500) return true;
   if (!(error instanceof Error)) return false;
-  return error.name === "ZodError" || error instanceof ExternalActionApprovalError || /ENOENT: no such file or directory|denies|disabled in Xyst settings|Invalid branch name|changed since it was read|already exists|was not found|more than once|Repeated tool-call loop detected|File path resolves to a filesystem root/i.test(error.message);
+  if (["file_patch", "file_delete", "file_move"].includes(toolName ?? "") && /ENOENT: no such file or directory/i.test(error.message)) return true;
+  return error.name === "ZodError" || error instanceof ExternalActionApprovalError || /denies|disabled in Xyst settings|Invalid branch name|changed since it was read|already exists|was not found|more than once|Repeated tool-call loop detected|File path resolves to a filesystem root/i.test(error.message);
 }
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -1044,7 +1045,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
             const message = this.deps.provider.redact(error instanceof Error ? error.message : String(error));
             const external = isExternalAction(name);
             const intent = this.deps.store.db.prepare("SELECT 1 FROM tool_calls WHERE id=?").get(callId);
-            const uncertain = external && Boolean(intent) && !isDefiniteNoEffect(error);
+            const uncertain = external && Boolean(intent) && !isDefiniteNoEffect(error, name);
             if (intent) this.deps.store.db.prepare("UPDATE tool_calls SET output_json=?,status=?,finished_at=? WHERE id=?").run(JSON.stringify({ error: message }), uncertain ? "uncertain" : "failed", new Date().toISOString(), callId);
             this.deps.events.emit("tool.failed", { id: callId, name, error: message }, sessionId);
             if (error instanceof ExternalActionApprovalError) throw error;
