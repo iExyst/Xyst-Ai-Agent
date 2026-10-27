@@ -1,5 +1,11 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
 
+## Live data and current API access rechecked (2026-10-27)
+
+- Fresh current-source Xyst agent calls used the real `web_fetch` tool against both GitHub REST (`https://api.github.com/repos/iExyst/Xyst-Ai-Agent`) and Open-Meteo current conditions (`https://api.open-meteo.com/v1/forecast?...`). Both returned HTTP 200 with full JSON and `task_complete` verified the exact-URL evidence. Retrieval timestamps: `2026-10-27T01:07:33.378Z` and `2026-10-27T01:08:09.150Z`. Open-Meteo returned an observation at `2026-10-26T21:00` America/New_York: 58.5 °F and 5.0 mph wind.
+- Xyst's current profile is `full`, runtime/database are ready, and the configured LM Studio endpoint `127.0.0.1:1235` responds with 51 models. Live reads work with public endpoints and need no API key. Scheduled missions support polling; source-configured signed webhooks/MCP subscriptions support event-driven updates. Brave web search still needs a stored Brave key, and private APIs need their own credentials. Details: [live-data verification](docs/verification-history.md#fresh-live-api-access-from-the-current-source-runtime-2026-10-27).
+- One exploratory model request invented an incorrect Open-Meteo hostname; Xyst failed that call instead of returning fabricated data. Supplying the exact official API URL succeeded. Live retrieval is available, but source discovery/search needs a configured search provider or a known endpoint.
+
 ## Latest continuation · installed profile sharing and full CI (2026-10-27)
 
 - Expanded the clean NSIS acceptance: the exact installed package's bundled CLI creates a saved session in an isolated profile, then the installed desktop reads the same session through its renderer snapshot. This verifies fresh Windows install state sharing end to end; it does not verify migration or restoration of a pre-existing profile. Details are in [verification history](docs/verification-history.md#clean-windows-install-shares-the-packaged-cli-profile-with-the-desktop-2026-10-27).
