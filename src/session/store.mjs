@@ -21,13 +21,22 @@ const MAX_SESSION_EXPORT_ARCHIVES = 1_000;
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class SessionStore {
-  constructor(workspaceRoot, { lockWaitMs = 2_000 } = {}) {
+  constructor(
+    workspaceRoot,
+    {
+      lockWaitMs = 2_000,
+      onPersistenceWarning = ({ session_id, code }) =>
+        process.emitWarning(`Session ${session_id} was committed but its directory durability could not be confirmed`, { code }),
+    } = {},
+  ) {
     if (!Number.isInteger(lockWaitMs) || lockWaitMs < 0 || lockWaitMs > 30_000)
       throw new TypeError('lockWaitMs must be between 0 and 30000');
+    if (typeof onPersistenceWarning !== 'function') throw new TypeError('onPersistenceWarning must be a function');
     this.workspaceRoot = workspaceRoot;
     this.directory = path.join(workspaceRoot, '.agent', 'sessions');
     this.lockDirectory = path.join(workspaceRoot, '.agent', 'session-locks');
     this.lockWaitMs = lockWaitMs;
+    this.onPersistenceWarning = onPersistenceWarning;
     this.newSessionIds = new Set();
   }
 
@@ -82,7 +91,20 @@ export class SessionStore {
       persistedSession.revision = nextRevision;
       persistedSession.updated_at = nextUpdatedAt;
       validateSession(persistedSession);
-      await atomicWriteJson(destination, persistedSession, { mode: 0o600 });
+      try {
+        await atomicWriteJson(destination, persistedSession, { mode: 0o600 });
+      } catch (error) {
+        if (!error.committed) throw error;
+        session.revision = nextRevision;
+        session.updated_at = nextUpdatedAt;
+        this.newSessionIds.delete(session.id);
+        try {
+          this.onPersistenceWarning({ session_id: session.id, code: error.code || 'SESSION_DURABILITY_UNCERTAIN' });
+        } catch {
+          /* A warning handler must not turn a committed write into an apparent rollback. */
+        }
+        return session;
+      }
       session.revision = nextRevision;
       session.updated_at = nextUpdatedAt;
       this.newSessionIds.delete(session.id);

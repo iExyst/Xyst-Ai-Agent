@@ -67,6 +67,47 @@ test('sessions save, load, list, fork, rename, archive and delete', async (t) =>
   assert.equal((await store.list()).length, 1);
 });
 
+test('session store advances its revision when rename committed but directory sync failed', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('The session store directory-sync durability boundary is exercised on Linux');
+    return;
+  }
+  const root = await createTempDirectory('xyst-session-committed-sync-warning-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const warnings = [];
+  const store = new SessionStore(root, { onPersistenceWarning: (warning) => warnings.push(warning) });
+  const session = store.create({ messages: [{ role: 'user', content: 'First revision.' }] });
+  await store.save(session);
+  assert.equal(session.revision, 1);
+
+  session.title = 'Committed despite directory sync failure';
+  const probe = await fs.open(path.join(root, 'probe'), 'w');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const sync = fileHandlePrototype.sync;
+  let syncCount = 0;
+  fileHandlePrototype.sync = async function () {
+    syncCount += 1;
+    if (syncCount === 2) throw Object.assign(new Error('simulated directory flush failure'), { code: 'EIO' });
+    return sync.call(this);
+  };
+  try {
+    await store.save(session);
+  } finally {
+    fileHandlePrototype.sync = sync;
+  }
+
+  assert.equal(syncCount, 2);
+  assert.equal(session.revision, 2);
+  assert.equal((await store.load(session.id)).title, 'Committed despite directory sync failure');
+  assert.deepEqual(warnings, [{ session_id: session.id, code: 'EIO' }]);
+
+  session.title = 'Retry with the committed revision';
+  await store.save(session);
+  assert.equal(session.revision, 3);
+  assert.equal((await store.load(session.id)).title, 'Retry with the committed revision');
+});
+
 test('session summaries expose pending assistant tool calls for crash recovery UI', async (t) => {
   const root = await createTempDirectory('xyst-session-pending-tool-summary-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
