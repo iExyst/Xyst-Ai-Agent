@@ -20,6 +20,18 @@ import { isReadOnlySandbox, requiresProcessIsolation, resolveSandboxMode } from 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_PROCESSES = 100;
 const MAX_PROCESS_RECORD_BYTES = 8 * 1024 * 1024;
+const PROCESS_STATUSES = [
+  'starting',
+  'running',
+  'stopping',
+  'exited',
+  'failed',
+  'orphaned',
+  'unmanaged',
+  'recoverable',
+  'identity_mismatch',
+  'timed_out',
+];
 
 /** Persistent metadata and bounded live output for explicitly approved argv-only jobs. */
 export class BackgroundProcessManager {
@@ -42,6 +54,7 @@ export class BackgroundProcessManager {
     if (this.initialized) return;
     const safeDirectory = await ensureSafeProcessDirectory(this.workspaceRoot, this.directory);
     this.directory = safeDirectory.path;
+    await restoreProcessRecordBackups(this.workspaceRoot, this.directory, safeDirectory.info);
     const names = (await fs.readdir(this.directory)).filter((entry) => entry.endsWith('.json'));
     if (names.length) {
       this.managerIdentity = await captureProcessIdentity(process.pid).catch(() => null);
@@ -52,22 +65,7 @@ export class BackgroundProcessManager {
       if (!ID_PATTERN.test(id)) continue;
       try {
         const record = await readSafeProcessRecord(this.workspaceRoot, this.directory, name);
-        if (
-          record?.id !== id ||
-          ![
-            'starting',
-            'running',
-            'stopping',
-            'exited',
-            'failed',
-            'orphaned',
-            'unmanaged',
-            'recoverable',
-            'identity_mismatch',
-            'timed_out',
-          ].includes(record.status)
-        )
-          continue;
+        if (!isProcessRecordForId(record, id)) continue;
         if (['starting', 'running', 'stopping'].includes(record.status)) {
           const ownerStatus = await managerIdentityStatus(record);
           if (ownerStatus === 'match' || (ownerStatus === 'unavailable' && isProcessAlive(record.manager_pid))) {
@@ -666,6 +664,121 @@ async function ensureSafeProcessDirectory(workspaceRoot, targetDirectory, { crea
 
 function isRelativeStatePath(relative) {
   return Boolean(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function isProcessRecordForId(record, id) {
+  return record?.id === id && PROCESS_STATUSES.includes(record.status);
+}
+
+async function restoreProcessRecordBackups(workspaceRoot, directory, expectedDirectoryInfo) {
+  const names = await fs.readdir(directory);
+  const primaryIds = new Set(
+    names
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => name.slice(0, -'.json'.length))
+      .filter((id) => ID_PATTERN.test(id)),
+  );
+  const backupsById = new Map();
+  for (const name of names) {
+    const marker = '.json.';
+    const markerIndex = name.lastIndexOf(marker);
+    if (markerIndex < 0 || !name.endsWith('.bak')) continue;
+    const id = name.slice(0, markerIndex);
+    const backupId = name.slice(markerIndex + marker.length, -'.bak'.length);
+    if (!ID_PATTERN.test(id) || !ID_PATTERN.test(backupId)) continue;
+    const candidates = backupsById.get(id) || [];
+    candidates.push(name);
+    backupsById.set(id, candidates);
+  }
+
+  for (const [id, candidates] of backupsById) {
+    const destination = path.join(directory, `${id}.json`);
+    if (primaryIds.has(id)) {
+      // Recovery uses a same-directory hard link so a competing manager
+      // cannot overwrite a primary record. If the process crashed before it
+      // removed that link's backup name, drop only the duplicate directory
+      // entry after proving both names reference the same single file.
+      await removeInterruptedRecoveryLink(directory, destination, candidates, expectedDirectoryInfo);
+      continue;
+    }
+    // Multiple candidates are intentionally left intact because their order
+    // cannot be trusted.
+    if (candidates.length !== 1) continue;
+    const backupName = candidates[0];
+    let record;
+    let backupInfo;
+    try {
+      backupInfo = await fs.lstat(path.join(directory, backupName));
+      assertSafeProcessRecord(backupInfo);
+      record = await readSafeProcessRecord(workspaceRoot, directory, backupName);
+      const checkedBackupInfo = await fs.lstat(path.join(directory, backupName));
+      if (checkedBackupInfo.dev !== backupInfo.dev || checkedBackupInfo.ino !== backupInfo.ino || checkedBackupInfo.nlink !== 1) continue;
+    } catch {
+      continue;
+    }
+    if (!isProcessRecordForId(record, id)) continue;
+
+    const backup = path.join(directory, backupName);
+    await assertProcessDirectoryIdentity(directory, expectedDirectoryInfo);
+    try {
+      await fs.lstat(destination);
+      continue;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    try {
+      await fs.link(backup, destination);
+      const [linkedInfo, remainingBackupInfo] = await Promise.all([fs.lstat(destination), fs.lstat(backup)]);
+      if (
+        linkedInfo.dev !== backupInfo.dev ||
+        linkedInfo.ino !== backupInfo.ino ||
+        remainingBackupInfo.dev !== backupInfo.dev ||
+        remainingBackupInfo.ino !== backupInfo.ino
+      ) {
+        const currentDestination = await fs.lstat(destination).catch(() => null);
+        if (
+          currentDestination?.isFile() &&
+          !currentDestination.isSymbolicLink() &&
+          currentDestination.dev === backupInfo.dev &&
+          currentDestination.ino === backupInfo.ino
+        )
+          await fs.rm(destination).catch(() => {});
+        continue;
+      }
+      await fs.rm(backup);
+      primaryIds.add(id);
+    } catch (error) {
+      if (error.code === 'EEXIST' || error.code === 'ENOENT') continue;
+      throw Object.assign(
+        new Error(`Could not safely restore the interrupted background process record for ${id}; its backup was preserved.`, {
+          cause: error,
+        }),
+        { code: 'PROCESS_BACKUP_RECOVERY_FAILED' },
+      );
+    }
+  }
+}
+
+async function removeInterruptedRecoveryLink(directory, destination, candidates, expectedDirectoryInfo) {
+  const primaryInfo = await fs.lstat(destination).catch(() => null);
+  if (!primaryInfo?.isFile() || primaryInfo.isSymbolicLink() || primaryInfo.nlink !== 2) return;
+  for (const name of candidates) {
+    const backup = path.join(directory, name);
+    const backupInfo = await fs.lstat(backup).catch(() => null);
+    if (
+      !backupInfo?.isFile() ||
+      backupInfo.isSymbolicLink() ||
+      backupInfo.nlink !== 2 ||
+      backupInfo.dev !== primaryInfo.dev ||
+      backupInfo.ino !== primaryInfo.ino
+    )
+      continue;
+    await assertProcessDirectoryIdentity(directory, expectedDirectoryInfo);
+    await fs.rm(backup).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    return;
+  }
 }
 
 function assertSafeProcessDirectory(info) {

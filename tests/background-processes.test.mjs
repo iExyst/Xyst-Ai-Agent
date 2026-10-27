@@ -52,6 +52,62 @@ test('background process manager skips linked and oversized persisted records', 
   assert.deepEqual(JSON.parse(await fs.readFile(linkedTarget, 'utf8')), { id: linkedId, status: 'exited' });
 });
 
+test('background process manager restores one validated atomic-replacement backup on startup', async (t) => {
+  const root = await createTempDirectory('xyst-process-backup-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directory = path.join(root, '.agent', 'processes');
+  await fs.mkdir(directory, { recursive: true });
+  const id = '55a81aaf-9d50-4a49-961d-4cf4a5c13611';
+  const backupId = '00000000-0000-4000-8000-000000000001';
+  const backup = `${id}.json.${backupId}.bak`;
+  const record = { id, status: 'exited', stdout: 'preserved process result' };
+  await fs.writeFile(path.join(directory, backup), JSON.stringify(record));
+
+  const manager = new BackgroundProcessManager(root, enabled);
+  const [restored] = await manager.list();
+  assert.equal(restored.id, id);
+  assert.equal(restored.status, 'exited');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, `${id}.json`), 'utf8')), record);
+  await assert.rejects(fs.lstat(path.join(directory, backup)), { code: 'ENOENT' });
+});
+
+test('background process manager cleans an interrupted same-file recovery link on startup', async (t) => {
+  const root = await createTempDirectory('xyst-process-backup-link-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directory = path.join(root, '.agent', 'processes');
+  await fs.mkdir(directory, { recursive: true });
+  const id = '55a81aaf-9d50-4a49-961d-4cf4a5c13611';
+  const backupId = '00000000-0000-4000-8000-000000000001';
+  const destination = path.join(directory, `${id}.json`);
+  const backup = `${destination}.${backupId}.bak`;
+  await fs.writeFile(destination, JSON.stringify({ id, status: 'exited' }));
+  await fs.link(destination, backup);
+
+  const manager = new BackgroundProcessManager(root, enabled);
+  const [restored] = await manager.list();
+  assert.equal(restored.id, id);
+  assert.equal(restored.status, 'exited');
+  await assert.rejects(fs.lstat(backup), { code: 'ENOENT' });
+  assert.equal((await fs.lstat(destination)).nlink, 1);
+});
+
+test('background process manager preserves multiple replacement backups for manual recovery', async (t) => {
+  const root = await createTempDirectory('xyst-process-backup-ambiguous-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directory = path.join(root, '.agent', 'processes');
+  await fs.mkdir(directory, { recursive: true });
+  const id = '55a81aaf-9d50-4a49-961d-4cf4a5c13611';
+  const first = `${id}.json.00000000-0000-4000-8000-000000000001.bak`;
+  const second = `${id}.json.00000000-0000-4000-8000-000000000002.bak`;
+  const record = JSON.stringify({ id, status: 'exited' });
+  await Promise.all([fs.writeFile(path.join(directory, first), record), fs.writeFile(path.join(directory, second), record)]);
+
+  const manager = new BackgroundProcessManager(root, enabled);
+  assert.deepEqual(await manager.list(), []);
+  assert.equal(await fs.readFile(path.join(directory, first), 'utf8'), record);
+  assert.equal(await fs.readFile(path.join(directory, second), 'utf8'), record);
+});
+
 test('background processes persist identifiers and bounded output and enforce session ownership', async (t) => {
   const root = await createTempDirectory('xyst-process-');
   const manager = new BackgroundProcessManager(root, enabled);

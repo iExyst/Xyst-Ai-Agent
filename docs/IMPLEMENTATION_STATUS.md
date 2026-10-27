@@ -5,6 +5,11 @@
 - `SessionStore.load()` now repairs the process-crash state where Windows has moved the previous session JSON to its atomic-write `.bak` but has not installed the replacement. It takes the per-session lock, accepts exactly one canonical UUID-named backup, and validates it through the existing no-follow, regular-file, single-link, size, schema, and session-ID checks before atomically restoring it.
 - Missing, ambiguous, or invalid recovery backups produce `SESSION_BACKUP_RECOVERY_REQUIRED`; recovery candidates remain untouched for manual recovery. Focused tests pass for one valid backup and for preserving ambiguous backups. Biome and whitespace checks pass. Hosted verification is pending; this does not recover backups for non-session JSON stores.
 
+## Background-process registry replacement-backup recovery — 2026-10-27
+
+- Startup now recognizes a missing process-record primary with one UUID-named atomic-write backup. It validates the backup with the existing regular-file, single-link, size-limited, no-follow reader and record ID/status checks, then creates a no-overwrite hard link for restoration. If startup finds the same-file link left by a crash before backup-name removal, it removes only that duplicate link. Multiple or invalid backups are preserved; inability to create the hard link fails recovery explicitly without deleting the backup.
+- Three focused Windows regressions pass: restoring one valid backup, cleanup of the interrupted same-file link state, and preserving ambiguous candidates. The restricted local process denied hard links (`EPERM`); the focused suite passed with the needed filesystem capability. Biome and whitespace checks pass. Hosted verification is pending.
+
 ## Hosted CI findings
 
 - Hosted CI run `40595818168` for commit `7f6cffac7fc7fc8172c0835040af94f72709e909` verified committed-session-write recovery. The security audit and both Windows/Ubuntu desktop package, lifecycle, and native checks passed. Both Ubuntu matrices passed 926/934 tests, including the directory-flush fault injection; their two failures are the hosted Bubblewrap loopback restriction and dependent signed-MCP isolation test. Windows passed 912/934 with 21 skips and one failure, only the known ConPTY startup failure; the Linux-specific fault injection correctly skips on Windows. Formatting and lint passed on all four matrices.
