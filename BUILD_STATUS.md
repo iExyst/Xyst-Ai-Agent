@@ -4,7 +4,7 @@
 
 - Read the current official [LM Studio server settings](https://lmstudio.ai/docs/developer/core/server/settings) and [MCP API guide](https://lmstudio.ai/docs/developer/core/mcp). In a read-only inspection of the installed LM Studio 0.4.26 Server Settings at `127.0.0.1:1235`, `Allow per-request MCPs` is on, `Require Authentication` is off, and `Allow calling servers from mcp.json` is off; the server reports 51 models. The official docs state configured `mcp.json` servers require authentication. This matches the prior configured-plugin HTTP 403 and explains why ephemeral MCP can work while configured plugin calls cannot.
 - No server settings, authentication state, API keys, or models were changed. The native configured-plugin gate remains open; Xyst's policy-managed MCP path and ephemeral LM Studio MCP support are implemented and separately verified. The [LM Studio support matrix](docs/lm-studio-support.md) now records the exact installed setting state and official prerequisite.
-- The full build remains active. Current PR CI is partially complete: Ubuntu verification and Linux packaging passed; Windows verification and packaging are still running on `912964a`. Preserve `.help recover` and `.xyst-live-acceptance/`.
+- All 8 hosted checks for PR head `6d14f03` passed: Windows/Ubuntu verification and Windows/Linux packaging across both push and pull-request workflows. Run IDs: `40425252360`, `40425252452`, `40425258691`, and `40425258516`. Preserve `.help recover` and `.xyst-live-acceptance/`.
 
 ## Latest continuation · live-data access and current PR checks (2026-10-27)
 
