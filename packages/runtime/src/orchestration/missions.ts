@@ -275,7 +275,9 @@ export class PersistentMissionRunner {
     if (mission.status === "archived") throw new Error("Archived missions cannot run");
     if (mission.status === "paused") throw new Error("Mission is paused; resume it before running");
     if (mission.status === "cancelled") throw new Error("Mission is cancelled; resume it before running");
-    if (mission.status === "reconciliation_required") throw new Error("Mission has uncertain external actions; inspect `mission show` and reconcile them before running");
+    if (mission.status === "reconciliation_required" || this.deps.store.db.prepare("SELECT 1 FROM mission_tasks WHERE mission_id=? AND state='reconciliation_required' LIMIT 1").get(missionId)) {
+      throw new Error("Mission has uncertain external actions; inspect `mission show` and reconcile them before running");
+    }
     const delegationEnabled = this.deps.config.resolve<boolean>("orchestration.delegation.enabled", { ...(mission.definition.projectId ? { project: mission.definition.projectId } : {}), mission: missionId })?.value !== false;
     const missionScopes = { ...(mission.definition.projectId ? { project: mission.definition.projectId } : {}), mission: missionId };
     const missionAccess = this.deps.access ?? new AccessController();
@@ -720,6 +722,9 @@ export class PersistentMissionRunner {
     const mission = this.repository.get(missionId);
     if (!mission) throw new Error(`Mission not found: ${missionId}`);
     if (mission.status === "archived") throw new Error("Archived missions cannot run");
+    if (mission.status === "reconciliation_required" || this.deps.store.db.prepare("SELECT 1 FROM mission_tasks WHERE mission_id=? AND state='reconciliation_required' LIMIT 1").get(missionId)) {
+      throw new Error("Mission has uncertain external actions; inspect `mission show` and reconcile them before restarting a task");
+    }
     if (this.active.has(missionId)) throw new Error("Cannot resume or retry a task while its mission runner is active");
     if (!mission.definition.tasks?.some((task) => task.id === taskId)) throw new Error(`Mission task not found: ${taskId}`);
     const lease = this.deps.store.db.prepare("SELECT expires_at FROM runner_leases WHERE mission_id=?").get(missionId) as { expires_at: string } | undefined;
@@ -742,6 +747,9 @@ export class PersistentMissionRunner {
   async resume(missionId: string, signal?: AbortSignal, approveExternalAction?: (request: ExternalActionApprovalRequest) => Promise<boolean>) {
     const current = this.repository.get(missionId); if (!current) throw new Error(`Mission not found: ${missionId}`);
     if (current.status === "archived") throw new Error("Archived missions cannot be resumed");
+    if (current.status === "reconciliation_required" || this.deps.store.db.prepare("SELECT 1 FROM mission_tasks WHERE mission_id=? AND state='reconciliation_required' LIMIT 1").get(missionId)) {
+      throw new Error("Mission has uncertain external actions; inspect `mission show` and reconcile them before resuming");
+    }
     const lease = this.deps.store.db.prepare("SELECT expires_at FROM runner_leases WHERE mission_id=?").get(missionId) as { expires_at: string } | undefined;
     if (lease && Date.parse(lease.expires_at) > Date.now()) throw new Error(`Mission runner is still stopping; retry after ${lease.expires_at}`);
     this.repository.setStatus(missionId, "active");

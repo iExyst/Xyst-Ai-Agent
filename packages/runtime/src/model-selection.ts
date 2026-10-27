@@ -39,19 +39,21 @@ export function estimateRequiredContextTokens(messages: Array<{ content?: unknow
   return Math.max(1, Math.ceil(characters / 3.5) + images * 1024 + Math.max(0, Math.floor(reserveTokens)));
 }
 
-function effectiveContextLength(model: LMStudioModel): number | undefined {
+function effectiveContextLength(model: LMStudioModel, allowLoading: boolean): number | undefined {
   const loadedContexts = model.loaded_instances.map((instance) => instance.config.context_length).filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
-  const value = loadedContexts.length ? Math.max(...loadedContexts) : model.max_context_length;
+  const loadedMaximum = loadedContexts.length ? Math.max(...loadedContexts) : undefined;
+  const value = allowLoading ? Math.max(loadedMaximum ?? 0, model.max_context_length ?? 0) : loadedMaximum ?? (model.loaded_instances.length ? model.max_context_length : undefined);
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-export function chooseAgentModel(models: LMStudioModel[], requirements: { vision?: boolean; requiredContextTokens?: number; requireDeclaredContext?: boolean; taskType?: ModelTaskType; performanceByModel?: Record<string, ModelPerformanceStats> } = {}): ModelChoice {
+export function chooseAgentModel(models: LMStudioModel[], requirements: { vision?: boolean; requiredContextTokens?: number; requireDeclaredContext?: boolean; allowLoading?: boolean; taskType?: ModelTaskType; performanceByModel?: Record<string, ModelPerformanceStats> } = {}): ModelChoice {
   const llms = models.filter((model) => model.type === "llm");
-  const candidates = requirements.vision ? llms.filter((model) => model.capabilities?.vision === true) : llms;
+  const available = requirements.allowLoading === false ? llms.filter((model) => model.loaded_instances.length > 0) : llms;
+  const candidates = requirements.vision ? available.filter((model) => model.capabilities?.vision === true) : available;
   if (requirements.vision && !candidates.length) throw new Error("This task includes an image, but no installed LLM declares vision support; load or select a vision-capable model first");
-  if (!candidates.length) throw new Error("LM Studio has no downloaded LLM models");
+  if (!candidates.length) throw new Error(requirements.allowLoading === false ? "No LLM is loaded in LM Studio and automatic model loading is off" : "LM Studio has no downloaded LLM models");
   const contextEligible = typeof requirements.requiredContextTokens === "number"
-    ? candidates.filter((model) => { const context = effectiveContextLength(model); return context === undefined ? requirements.requireDeclaredContext !== true : context >= requirements.requiredContextTokens!; })
+    ? candidates.filter((model) => { const context = effectiveContextLength(model, requirements.allowLoading !== false); return context === undefined ? requirements.requireDeclaredContext !== true : context >= requirements.requiredContextTokens!; })
     : candidates;
   const contextSatisfied = contextEligible.length > 0;
   if (!contextSatisfied && requirements.requireDeclaredContext) throw new Error(`No installed model declares enough context for the estimated ${requirements.requiredContextTokens} token requirement`);
@@ -93,12 +95,18 @@ export function chooseAgentModel(models: LMStudioModel[], requirements: { vision
     return a.key.localeCompare(b.key);
   });
   const model = pool[0]!;
+  const needsLargerInstance = requirements.allowLoading !== false && typeof requirements.requiredContextTokens === "number"
+    && model.loaded_instances.length > 0
+    && model.loaded_instances.every((instance) => {
+      const context = instance.config.context_length;
+      return (typeof context === "number" ? context : model.max_context_length ?? 0) < requirements.requiredContextTokens!;
+    });
   const reasons = [
     ...(requirements.vision ? ["declares vision support for the attached image"] : []),
     ...(model.capabilities?.trained_for_tool_use === true ? ["declares tool-use support"] : [toolCapable.length ? "selected model lacks a tool-use declaration; metadata is treated as a ranking hint" : "no installed model declares tool-use support"]),
-    model.loaded_instances.length ? "already loaded" : "available in the local inventory",
+    needsLargerInstance ? "installed; a larger-context instance must be loaded" : model.loaded_instances.length ? "already loaded" : "available in the local inventory",
     model.size_bytes <= memoryBudget ? `model file size ${model.size_bytes} bytes is within the approximate ${memoryBudget} byte memory budget` : `smallest suitable model exceeds the approximate ${memoryBudget} byte memory budget`,
-    ...(typeof requirements.requiredContextTokens === "number" ? [contextSatisfied ? `estimated task context ${requirements.requiredContextTokens} tokens; ${effectiveContextLength(model) === undefined ? "selected model context is undeclared" : `selected model supports ${effectiveContextLength(model)} tokens`}` : `no candidate declares enough context for the estimated ${requirements.requiredContextTokens} token requirement; selected the best available model (${effectiveContextLength(model) ?? "context unknown"} tokens)`] : [(model.max_context_length ?? 0) > 0 ? `declares up to ${model.max_context_length} context tokens` : "context length not declared"]),
+    ...(typeof requirements.requiredContextTokens === "number" ? [contextSatisfied ? `estimated task context ${requirements.requiredContextTokens} tokens; ${effectiveContextLength(model, requirements.allowLoading !== false) === undefined ? "selected model context is undeclared" : `selected model supports ${effectiveContextLength(model, requirements.allowLoading !== false)} tokens`}` : `no candidate declares enough context for the estimated ${requirements.requiredContextTokens} token requirement; selected the best available model (${effectiveContextLength(model, requirements.allowLoading !== false) ?? "context unknown"} tokens)`] : [(model.max_context_length ?? 0) > 0 ? `declares up to ${model.max_context_length} context tokens` : "context length not declared"]),
     ...(hasTaskSpecificEvidence && requirements.taskType ? performance[model.key]?.taskOutcomesByType?.[requirements.taskType] ? [`observed locally over ${performance[model.key]!.taskOutcomesByType![requirements.taskType]!.taskSamples} ${requirements.taskType} tasks: ${performance[model.key]!.taskOutcomesByType![requirements.taskType]!.taskSuccesses}/${performance[model.key]!.taskOutcomesByType![requirements.taskType]!.taskSamples} verified completions`] : [`${requirements.taskType} task completion reliability is unmeasured`] : performance[model.key] && performance[model.key]!.taskSamples >= 1 && performance[model.key]!.taskSuccessRate !== null ? [`observed locally over ${performance[model.key]!.taskSamples} tasks: ${performance[model.key]!.taskSuccesses}/${performance[model.key]!.taskSamples} verified completions`] : [`local task completion reliability is unmeasured`]),
     ...(performance[model.key] && performance[model.key]!.samples >= 3 ? [`measured locally over ${performance[model.key]!.samples} inference calls: ${Math.round(performance[model.key]!.successRate * 100)}% response success, ${performance[model.key]!.medianLatencyMs} ms median latency${performance[model.key]!.tokensPerSecond === null ? "" : `, ${performance[model.key]!.tokensPerSecond} tokens/s`}`] : [])
   ];

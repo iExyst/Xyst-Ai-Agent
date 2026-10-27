@@ -50,7 +50,7 @@ jobs:
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npm run package --workspace @xyst/desktop -- --win nsis --x64 --config.forceCodeSigning=true
+        run: npm run package --workspace @xyst/desktop -- --win nsis --x64 --config.win.signAndEditExecutable=true --config.forceCodeSigning=true
       - name: Build Linux AppImage
         if: matrix.platform == 'linux'
         run: npm run package --workspace @xyst/desktop -- --linux AppImage --x64

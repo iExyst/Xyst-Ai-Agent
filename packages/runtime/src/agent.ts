@@ -302,7 +302,7 @@ export class AgentRunner {
       access.assertCapability("network");
       inventory ??= await this.deps.provider.models(options.signal);
       try {
-        const requirements = { vision: visionRequired, requiredContextTokens, requireDeclaredContext: onlineDiscoveryEnabled, taskType: classifyModelTaskObjective(safeObjective), performanceByModel };
+        const requirements = { vision: visionRequired, requiredContextTokens, requireDeclaredContext: onlineDiscoveryEnabled, allowLoading: automaticLoading, taskType: classifyModelTaskObjective(safeObjective), performanceByModel };
         let choice = chooseAgentModel(inventory, requirements);
         let gpuResourceReason = "";
         if (typeof this.deps.provider.supportsLocalCliModelLifecycle === "function" && this.deps.provider.supportsLocalCliModelLifecycle() && typeof this.deps.provider.estimateLoad === "function") {
@@ -317,14 +317,16 @@ export class AgentRunner {
             if (availableGpuBytes !== undefined) {
               const toolModels = inventory.some((candidate) => candidate.type === "llm" && candidate.capabilities?.trained_for_tool_use === true);
               const eligible = inventory.filter((candidate) => candidate.type === "llm"
+                && (automaticLoading || candidate.loaded_instances.length > 0)
                 && (!visionRequired || candidate.capabilities?.vision === true)
                 && (!toolModels || candidate.capabilities?.trained_for_tool_use === true)
                 && (!(typeof candidate.max_context_length === "number") || candidate.max_context_length >= requiredContextTokens));
               const alternatives = [...eligible].sort((left, right) => Number(right.loaded_instances.length > 0) - Number(left.loaded_instances.length > 0) || left.size_bytes - right.size_bytes);
               const estimateCandidates = [choice.model, ...alternatives].filter((candidate, index, all) => all.findIndex((entry) => entry.key === candidate.key) === index).slice(0, 3);
               const estimates = new Map<string, number>();
+              const needsLoad = (candidate: LMStudioModel) => !candidate.loaded_instances.some((instance) => (instanceContextLength(instance, candidate.max_context_length) ?? 0) >= requiredContextTokens);
               for (const candidate of estimateCandidates) {
-                if (candidate.loaded_instances.length > 0) continue;
+                if (!needsLoad(candidate)) continue;
                 if (options.signal?.aborted) throw new Error("Task cancelled");
                 try {
                   const result = await this.deps.provider.estimateLoad(candidate.key, { context_length: modelLoadContextLength(candidate.max_context_length, requiredContextTokens) ?? requiredContextTokens }, options.signal);
@@ -332,7 +334,7 @@ export class AgentRunner {
                   if (parsed.gpuBytes !== undefined) estimates.set(candidate.key, parsed.gpuBytes);
                 } catch (error) { if (options.signal?.aborted) throw error; }
               }
-              const gpuFit = estimateCandidates.filter((candidate) => candidate.loaded_instances.length > 0 || (estimates.get(candidate.key) !== undefined && estimates.get(candidate.key)! <= availableGpuBytes));
+              const gpuFit = estimateCandidates.filter((candidate) => !needsLoad(candidate) || (estimates.get(candidate.key) !== undefined && estimates.get(candidate.key)! <= availableGpuBytes));
               if (gpuFit.length) {
                 choice = chooseAgentModel(gpuFit, requirements);
                 const estimated = estimates.get(choice.model.key);
@@ -353,7 +355,7 @@ export class AgentRunner {
         }
         model = choice.model.key; selectionReason = [choice.reason, gpuResourceReason].filter(Boolean).join("; ");
       } catch (selectionError) {
-      const eligibleForAcquisition = !savedModel && (!options.model || options.automaticModelAssignment) && this.deps.modelAcquisition;
+        const eligibleForAcquisition = automaticLoading && !savedModel && (!options.model || options.automaticModelAssignment) && this.deps.modelAcquisition;
         if (!eligibleForAcquisition || !onlineDiscoveryEnabled) throw selectionError;
         // Use only a generic capability query. The task objective and workspace content stay local.
         const acquisition = this.deps.modelAcquisition!;
@@ -385,7 +387,7 @@ export class AgentRunner {
             inventory = await this.deps.provider.models(options.signal);
             const acquiredCandidate = modelForIdentifier(inventory, acquired.modelKey);
             if (!acquiredCandidate || acquiredCandidate.type !== "llm") throw new Error(`Downloaded model ${acquired.modelKey} is not present as an LLM in the LM Studio inventory`);
-            const choice = chooseAgentModel([acquiredCandidate], { vision: visionRequired, requiredContextTokens, requireDeclaredContext: true, taskType: classifyModelTaskObjective(safeObjective), performanceByModel });
+            const choice = chooseAgentModel([acquiredCandidate], { vision: visionRequired, requiredContextTokens, requireDeclaredContext: true, allowLoading: automaticLoading, taskType: classifyModelTaskObjective(safeObjective), performanceByModel });
             model = choice.model.key; selectionReason = `downloaded, integrity checked, and capability verified from ${acquired.repository}@${acquired.revision}; ${choice.reason}`;
             break;
           } catch (error) {
@@ -901,7 +903,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
               inventory = await this.deps.provider.models(options.signal);
               const alternatives = inventory.filter((candidate) => candidate.key !== selected && candidate.type === "llm" && (!visionRequired || candidate.capabilities?.vision === true));
               if (!alternatives.length) throw error;
-              const choice = chooseAgentModel(alternatives, { vision: visionRequired, requiredContextTokens, taskType: classifyModelTaskObjective(safeObjective), performanceByModel: localMetricsEnabled ? readModelPerformance(this.deps.store) : {} });
+              const choice = chooseAgentModel(alternatives, { vision: visionRequired, requiredContextTokens, allowLoading: automaticLoading, taskType: classifyModelTaskObjective(safeObjective), performanceByModel: localMetricsEnabled ? readModelPerformance(this.deps.store) : {} });
               switchedModel = true;
               const prepared = await prepareModel(choice.model.key);
               selected = prepared.modelKey; inferenceModel = prepared.inferenceModel; contextPreparedForTokens = requiredContextTokens;

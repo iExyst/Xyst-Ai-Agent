@@ -399,6 +399,17 @@ test("automatic selection deprioritizes a model with observed zero task completi
   assert.match(choice.reason, /local task completion reliability is unmeasured/);
 });
 
+test("automatic selection distinguishes a loaded instance's context from a model that can be loaded larger", () => {
+  const inventory = [
+    { type: "llm" as const, publisher: "test", display_name: "Installed long", key: "installed-long", size_bytes: 1_000_000_000, max_context_length: 32768, loaded_instances: [{ id: "short-instance", config: { context_length: 4096 } }] },
+    { type: "llm" as const, publisher: "test", display_name: "Installed short", key: "installed-short", size_bytes: 500_000_000, max_context_length: 4096, loaded_instances: [] }
+  ];
+  const loadable = chooseAgentModel(inventory, { requiredContextTokens: 12000, requireDeclaredContext: true, allowLoading: true });
+  assert.equal(loadable.model.key, "installed-long");
+  assert.match(loadable.reason, /supports 32768 tokens/);
+  assert.throws(() => chooseAgentModel(inventory, { requiredContextTokens: 12000, requireDeclaredContext: true, allowLoading: false }), /No installed model declares enough context/);
+});
+
 test("automatic selection prioritizes a verified task success over an unmeasured tool-use declaration", () => {
   const models = [
     { type: "llm" as const, publisher: "test", key: "unmeasured-tool-tag", display_name: "Tagged but unmeasured", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
@@ -457,10 +468,11 @@ test("automatic model selection filters declared context limits using a bounded 
     { type: "llm" as const, publisher: "b", key: "large-context", display_name: "Large context", size_bytes: 3_000_000_000, loaded_instances: [], max_context_length: 32768, capabilities: { trained_for_tool_use: true } }
   ];
   const choice = chooseAgentModel(models, { requiredContextTokens: required });
-  assert.equal(choice.model.key, "large-context");
+  assert.equal(choice.model.key, "loaded-short", "the installed model can load a second instance at its declared 65536-token maximum");
   assert.match(choice.reason, /estimated task context 16144 tokens/);
-  assert.match(chooseAgentModel(models.slice(0, 1), { requiredContextTokens: required }).reason, /no candidate declares enough context/);
-  assert.throws(() => chooseAgentModel(models.slice(0, 1), { requiredContextTokens: required, requireDeclaredContext: true }), /No installed model declares enough context/);
+  assert.match(choice.reason, /supports 65536 tokens/);
+  assert.match(chooseAgentModel(models, { requiredContextTokens: required, allowLoading: false }).reason, /no candidate declares enough context/);
+  assert.throws(() => chooseAgentModel(models, { requiredContextTokens: required, requireDeclaredContext: true, allowLoading: false }), /No installed model declares enough context/);
 });
 
 test("Hugging Face context metadata is read from a pinned and bounded config file", async () => {
@@ -2249,6 +2261,11 @@ test("mission recovery quarantines uncertain external actions until each is expl
     store.db.prepare("INSERT INTO runner_leases(mission_id,owner_id,expires_at,heartbeat_at) VALUES(?,?,?,?)").run(mission.id, "dead-owner", new Date(Date.now() - 60_000).toISOString(), now);
     assert.equal(await runner.recover(), 1);
     assert.equal((store.db.prepare("SELECT status FROM tool_calls WHERE id=?").get(callId) as { status: string }).status, "uncertain");
+    assert.equal((store.db.prepare("SELECT state FROM mission_tasks WHERE run_id=? AND task_key='task'").get(runId) as { state: string }).state, "reconciliation_required");
+    await assert.rejects(() => runner.resume(mission.id), /reconcile them before resuming/);
+    await assert.rejects(() => runner.run(mission.id, { resume: true }), /reconcile them before running/);
+    await assert.rejects(() => runner.retryTask(mission.id, "task"), /reconcile them before restarting a task/);
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM mission_runs WHERE mission_id=?").get(mission.id) as { count: number }).count, 1);
     assert.equal((store.db.prepare("SELECT state FROM mission_tasks WHERE run_id=? AND task_key='task'").get(runId) as { state: string }).state, "reconciliation_required");
     const details = await runner.reconcileExternalAction(mission.id, runId, "task", callId, "completed"); assert.equal(details.remainingUncertain, 1);
     assert.equal((store.db.prepare("SELECT status FROM tool_calls WHERE id=?").get(callId) as { status: string }).status, "reconciled");
