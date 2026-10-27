@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src __CSP_SOURCE__ data:; style-src __CSP_SOURCE__; script-src 'nonce-__NONCE__' __CSP_SOURCE__; connect-src 'none';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="__STYLE_URI__">
+  <title>Xyst AI Assistant</title>
+</head>
+<body>
+  <header>
+    <div class="brand-heading"><img src="__ICON_URI__" alt=""><div><h1>Xyst AI Assistant</h1><p id="workspace-label">Workspace: connecting…</p><p id="status">Connecting to the local agent…</p></div></div>
+    <button id="new-session" type="button">New session</button>
+  </header>
+  <section class="session-bar"><label for="session-picker">Session</label><select id="session-picker"><option value="">New session</option></select><div class="session-actions"><button id="manage-goals" type="button" hidden>Goals</button><button id="rename-session" type="button" hidden>Rename</button><button id="archive-session" type="button" hidden>Archive</button><button id="delete-session" type="button" hidden>Delete</button><button id="export-session" type="button" hidden>Export</button><button id="import-session" type="button">Import</button></div></section>
+  <section class="worktree-controls" aria-label="Run workspace">
+    <label for="worktree-picker">Run in</label>
+    <select id="worktree-picker" aria-describedby="worktree-help"><option value="">Main workspace</option></select>
+    <button id="create-worktree" type="button">Create worktree</button>
+    <p id="worktree-help">New sessions use the main workspace unless you choose a managed worktree.</p>
+  </section>
+  <section class="controls">
+    <label>Mode<select id="mode"><option value="agent">Agent</option><option value="plan">Plan</option><option value="review">Review</option></select></label>
+    <label>Model<select id="model"><option value="">Configured default</option></select></label>
+  </section>
+  <details id="mcp-selection" class="mcp-selection" hidden>
+    <summary id="mcp-selection-summary">MCP servers · all configured</summary>
+    <p>Choose the MCP servers this conversation may use. The choice is saved with your next message.</p>
+    <div id="mcp-selection-options"></div>
+  </details>
+  <section id="attachments" aria-live="polite" hidden></section>
+  <main id="timeline" aria-live="polite" aria-label="Conversation"></main>
+  <section id="approval-region" aria-live="assertive"></section>
+  <form id="composer">
+    <label class="sr-only" for="prompt">Message</label>
+    <textarea id="prompt" rows="4" maxlength="100000" placeholder="Ask Xyst AI Assistant to inspect or change your workspace…"></textarea>
+    <details id="run-budget-controls" class="run-budget-controls" hidden>
+      <summary>Adjust budgets for this run</summary>
+      <p>Available while paused in Assisted autonomy. Clear a field to restore its value from when this run started.</p>
+      <div id="run-budget-fields" class="run-budget-fields"></div>
+      <div class="run-budget-actions"><button id="apply-run-budgets" type="button">Apply budget changes</button><span id="run-budget-status" role="status"></span></div>
+    </details>
+    <div class="composer-actions"><span class="hint">Editor context is attached only when you choose an editor selection or full-file command; review the attachment before sending.</span><button id="pause-run" type="button" hidden>Pause</button><button id="send-direction" type="button" hidden>Send direction</button><button id="cancel-run" type="button" hidden>Stop</button><button id="send" type="submit">Send</button></div>
+  </form>
+  <script nonce="__NONCE__" src="__SCRIPT_URI__"></script>
+</body>
+</html>

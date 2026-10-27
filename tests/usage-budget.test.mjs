@@ -1,0 +1,300 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createTempDirectory } from './helpers.mjs';
+import { UsageBudgetStore } from '../src/session/usage-budget.mjs';
+
+const execFileAsync = promisify(execFile);
+
+test('daily reservations enforce the shared cap across independent processes', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-processes-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const moduleUrl = new URL('../src/session/usage-budget.mjs', import.meta.url).href;
+  const worker = `
+    import { UsageBudgetStore } from ${JSON.stringify(moduleUrl)};
+    const store = new UsageBudgetStore(process.argv[1]);
+    try {
+      const id = await store.reserve({ inputTokens: 10, outputTokens: 0, limits: { max_daily_input_tokens: 30 } });
+      process.stdout.write(JSON.stringify({ reserved: true, id }));
+    } catch (error) {
+      if (error.code !== 'BUDGET_EXCEEDED') throw error;
+      process.stdout.write(JSON.stringify({ reserved: false }));
+    }
+  `;
+  const results = await Promise.all(
+    Array.from({ length: 8 }, async () => {
+      const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', worker, root], {
+        windowsHide: true,
+        timeout: 20_000,
+      });
+      return JSON.parse(stdout);
+    }),
+  );
+  assert.equal(results.filter((result) => result.reserved).length, 3);
+  assert.equal(results.filter((result) => !result.reserved).length, 5);
+  const snapshot = await new UsageBudgetStore(root).snapshot();
+  assert.equal(snapshot.reserved_daily.input_tokens, 30);
+  assert.equal(snapshot.active_reservations, 3);
+});
+
+test('daily reservations account for concurrent calls and settle actual usage', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const limits = { max_daily_input_tokens: 10 };
+  const sessionId = 'ed05ab01-e7d3-4ca2-9391-0fdbd9f7267d';
+  const reservations = await Promise.allSettled([
+    store.reserve({ inputTokens: 6, outputTokens: 0, limits, sessionId, model: 'local-coder' }),
+    store.reserve({ inputTokens: 6, outputTokens: 0, limits, sessionId, model: 'local-coder' }),
+  ]);
+  assert.equal(reservations.filter((entry) => entry.status === 'fulfilled').length, 1);
+  assert.equal(reservations.filter((entry) => entry.status === 'rejected' && entry.reason.code === 'BUDGET_EXCEEDED').length, 1);
+  const id = reservations.find((entry) => entry.status === 'fulfilled').value;
+  await store.settle(id, {
+    inputTokens: 4,
+    outputTokens: 0,
+    costUsd: 0,
+    inputTokenSource: 'provider_reported',
+    outputTokenSource: 'provider_reported',
+  });
+  const next = await store.reserve({ inputTokens: 6, outputTokens: 0, limits });
+  assert.ok(next);
+  const snapshot = await store.snapshot();
+  assert.equal(snapshot.daily.input_tokens, 4);
+  assert.equal(snapshot.reserved_daily.input_tokens, 6);
+  assert.equal(snapshot.reserved_monthly.input_tokens, 6);
+  assert.equal(snapshot.active_reservations, 1);
+  assert.equal(snapshot.attribution.daily.by_session[sessionId].input_tokens, 4);
+  assert.equal(snapshot.attribution.daily.by_model['local-coder'].input_tokens_by_source.provider_reported, 4);
+});
+
+test('settlement records provider overruns and blocks further shared usage under concurrent reservations', async (t) => {
+  const root = await createTempDirectory('xyst-usage-overrun-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const limits = {
+    max_daily_input_tokens: 10,
+    max_monthly_input_tokens: 10,
+    max_daily_cost: 0.2,
+    max_monthly_cost: 0.2,
+  };
+  const first = await store.reserve({ inputTokens: 4, outputTokens: 0, costUsd: 0.08, limits });
+  const second = await store.reserve({ inputTokens: 6, outputTokens: 0, costUsd: 0.12, limits });
+  await assert.rejects(store.settle(first, { inputTokens: 8, outputTokens: 0, costUsd: 0.16, inputTokenSource: 'provider_reported' }), {
+    code: 'BUDGET_EXCEEDED',
+  });
+  const snapshot = await store.snapshot();
+  assert.equal(snapshot.daily.input_tokens, 8, 'actual provider usage must be retained when over budget');
+  assert.equal(snapshot.daily.cost_usd, 0.16);
+  assert.equal(snapshot.reserved_daily.input_tokens, 6, 'the other in-flight request must remain reserved');
+  assert.equal(snapshot.active_reservations, 1, 'the settled overrun reservation must be released');
+  await assert.rejects(store.reserve({ inputTokens: 1, outputTokens: 0, costUsd: 0.01, limits }), { code: 'BUDGET_EXCEEDED' });
+  await store.settle(second, { inputTokens: 2, outputTokens: 0, costUsd: 0.04 });
+});
+
+test('settlement records actual cost above a shared cap and rejects subsequent reservations', async (t) => {
+  const root = await createTempDirectory('xyst-usage-cost-overrun-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const limits = { max_daily_cost: 0.2, max_monthly_cost: 0.2 };
+  const reservation = await store.reserve({ inputTokens: 20, outputTokens: 0, costUsd: 0.1, limits });
+  await assert.rejects(store.settle(reservation, { inputTokens: 5, outputTokens: 0, costUsd: 0.25 }), { code: 'BUDGET_EXCEEDED' });
+  const snapshot = await store.snapshot();
+  assert.equal(snapshot.daily.cost_usd, 0.25);
+  assert.equal(snapshot.active_reservations, 0);
+  await assert.rejects(store.reserve({ inputTokens: 1, outputTokens: 0, costUsd: 0.01, limits }), { code: 'BUDGET_EXCEEDED' });
+});
+
+test('settlement refuses malformed persisted reservation limits without recording usage', async (t) => {
+  const root = await createTempDirectory('xyst-usage-invalid-limits-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const now = Date.UTC(2026, 9, 22, 12);
+  const reservation = await store.reserve({
+    inputTokens: 10,
+    outputTokens: 2,
+    costUsd: 0.1,
+    limits: { max_daily_input_tokens: 100 },
+    now,
+  });
+  const ledger = JSON.parse(await fs.readFile(store.file, 'utf8'));
+  ledger.reservations[reservation].limits.max_daily_input_tokens = '100';
+  await fs.writeFile(store.file, JSON.stringify(ledger));
+
+  await assert.rejects(store.settle(reservation, { inputTokens: 7, outputTokens: 1, costUsd: 0.07, now }), {
+    code: 'BUDGET_LEDGER_INVALID',
+  });
+  const snapshot = await store.snapshot({ now });
+  assert.equal(snapshot.daily.input_tokens, 0);
+  assert.equal(snapshot.daily.cost_usd, 0);
+  assert.equal(snapshot.active_reservations, 1);
+});
+
+test('usage attribution accepts configured model identifiers up to the provider configuration limit', async (t) => {
+  const root = await createTempDirectory('xyst-usage-model-name-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const model = 'm'.repeat(200);
+  await store.recordUsage({ model, inputTokens: 1, outputTokens: 0, costUsd: null });
+  const snapshot = await store.snapshot();
+  assert.equal(snapshot.attribution.daily.by_model[model].input_tokens, 1);
+});
+
+test('usage reporting retains per-day, model, and session attribution with reported-versus-estimated token sources', async (t) => {
+  const root = await createTempDirectory('xyst-usage-attribution-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const sessionId = '9b1b061e-3f04-4a03-91df-59f79be2ac70';
+  const date = Date.UTC(2026, 9, 21, 16);
+  await store.recordUsage({
+    sessionId,
+    model: 'local-coder',
+    inputTokens: 100,
+    outputTokens: 20,
+    costUsd: 0.001,
+    inputTokenSource: 'provider_reported',
+    outputTokenSource: 'provider_reported',
+    now: date,
+  });
+  await store.recordUsage({
+    sessionId,
+    model: 'local-coder',
+    inputTokens: 25,
+    outputTokens: 7,
+    costUsd: null,
+    inputTokenSource: 'estimated',
+    outputTokenSource: 'estimated',
+    now: date,
+  });
+
+  const snapshot = await store.snapshot({ now: date });
+  assert.equal(snapshot.daily.input_tokens, 125);
+  assert.equal(snapshot.daily.output_tokens, 27);
+  assert.equal(snapshot.attribution.daily.input_tokens_by_source.provider_reported, 100);
+  assert.equal(snapshot.attribution.daily.input_tokens_by_source.estimated, 25);
+  assert.equal(snapshot.attribution.daily.output_tokens_by_source.provider_reported, 20);
+  assert.equal(snapshot.attribution.daily.output_tokens_by_source.estimated, 7);
+  assert.equal(snapshot.attribution.daily.estimated_cost_usd, 0.001);
+  assert.equal(snapshot.attribution.daily.unknown_cost_calls, 1);
+  assert.deepEqual(snapshot.attribution.daily.by_model['local-coder'], snapshot.attribution.daily.by_session[sessionId]);
+  assert.equal(snapshot.attribution.days[0].date, '2026-10-21');
+  assert.equal(snapshot.attribution.days[0].by_session[sessionId].input_tokens, 125);
+});
+
+test('cached input usage is aggregated for daily, monthly, and model/session reports', async (t) => {
+  const root = await createTempDirectory('xyst-usage-cache-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const sessionId = '9b1b061e-3f04-4a03-91df-59f79be2ac70';
+  const now = Date.UTC(2026, 9, 21, 16);
+  const reservation = await store.reserve({ inputTokens: 10, outputTokens: 3, limits: { max_daily_input_tokens: 100 }, now });
+  await store.settle(reservation, {
+    inputTokens: 8,
+    outputTokens: 2,
+    cachedInputTokens: 5,
+    sessionId,
+    model: 'local-coder',
+    inputTokenSource: 'provider_reported',
+    outputTokenSource: 'provider_reported',
+    now,
+  });
+  await store.recordUsage({
+    inputTokens: 4,
+    outputTokens: 1,
+    cachedInputTokens: 0,
+    sessionId,
+    model: 'local-coder',
+    now,
+  });
+  const snapshot = await store.snapshot({ now });
+  assert.equal(snapshot.daily.cached_input_tokens, 5);
+  assert.equal(snapshot.daily.cache_usage_calls, 2);
+  assert.equal(snapshot.daily.cache_hit_calls, 1);
+  assert.equal(snapshot.daily.cache_miss_calls, 1);
+  assert.equal(snapshot.monthly.cached_input_tokens, 5);
+  assert.equal(snapshot.monthly.cache_hit_calls, 1);
+  assert.equal(snapshot.monthly.cache_miss_calls, 1);
+  assert.equal(snapshot.attribution.daily.cached_input_tokens, 5);
+  assert.equal(snapshot.attribution.daily.cache_usage_calls, 2);
+  assert.equal(snapshot.attribution.daily.cache_hit_calls, 1);
+  assert.equal(snapshot.attribution.daily.cache_miss_calls, 1);
+  assert.equal(snapshot.attribution.daily.by_model['local-coder'].cached_input_tokens, 5);
+  assert.equal(snapshot.attribution.daily.by_session[sessionId].cache_usage_calls, 2);
+  await assert.rejects(store.recordUsage({ inputTokens: 2, outputTokens: 0, cachedInputTokens: 3, now }), /no greater than input tokens/);
+});
+
+test('usage snapshots upgrade existing aggregate-only ledgers without changing their totals', async (t) => {
+  const root = await createTempDirectory('xyst-usage-legacy-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directory = path.join(root, '.agent', 'usage');
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(
+    path.join(directory, 'budgets.json'),
+    JSON.stringify({
+      version: 1,
+      days: { '2026-10-21': { input_tokens: 40, output_tokens: 8, cost_usd: 0.02 } },
+      months: { '2026-10': { input_tokens: 40, output_tokens: 8, cost_usd: 0.02 } },
+      reservations: {},
+    }),
+  );
+  const snapshot = await new UsageBudgetStore(root).snapshot({ now: Date.UTC(2026, 9, 21) });
+  assert.equal(snapshot.daily.input_tokens, 40);
+  assert.equal(snapshot.daily.output_tokens, 8);
+  assert.equal(snapshot.daily.cost_usd, 0.02);
+  assert.equal(snapshot.daily.cached_input_tokens, 0);
+  assert.equal(snapshot.daily.cache_usage_calls, 0);
+  assert.deepEqual(snapshot.attribution.daily.by_model, {});
+  assert.deepEqual(snapshot.attribution.daily.by_session, {});
+  assert.equal(snapshot.attribution.days[0].date, '2026-10-21');
+  assert.equal(snapshot.attribution.days[0].input_tokens, 40);
+  assert.equal(snapshot.attribution.days[0].estimated_cost_usd, 0.02);
+  assert.equal(snapshot.attribution.days[0].cached_input_tokens, 0);
+  assert.equal(snapshot.attribution.days[0].attribution_available, false);
+});
+
+test('monthly caps span daily rollover and reject costs with unknown pricing', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const id = await store.reserve({
+    inputTokens: 8,
+    outputTokens: 0,
+    costUsd: 0.1,
+    limits: { max_monthly_input_tokens: 10, max_monthly_cost: 1 },
+    now: Date.UTC(2026, 0, 15, 23),
+  });
+  await store.settle(id, { inputTokens: 8, outputTokens: 0, costUsd: 0.1, now: Date.UTC(2026, 0, 15, 23) });
+  await assert.rejects(
+    store.reserve({
+      inputTokens: 3,
+      outputTokens: 0,
+      costUsd: 0.1,
+      limits: { max_monthly_input_tokens: 10 },
+      now: Date.UTC(2026, 0, 16, 0, 1),
+    }),
+    { code: 'BUDGET_EXCEEDED' },
+  );
+  await assert.rejects(
+    store.reserve({ inputTokens: 1, outputTokens: 0, costUsd: null, limits: { max_daily_cost: 1 } }),
+    /configured input and output prices/,
+  );
+});
+
+test('expired reservations are charged conservatively before a later reservation', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const now = Date.UTC(2026, 4, 2, 12);
+  await store.reserve({ inputTokens: 5, outputTokens: 2, costUsd: 0.25, limits: { max_daily_input_tokens: 10 }, now });
+  await assert.rejects(
+    store.reserve({ inputTokens: 6, outputTokens: 0, limits: { max_daily_input_tokens: 10 }, now: now + 16 * 60 * 1000 }),
+    { code: 'BUDGET_EXCEEDED' },
+  );
+  const snapshot = await store.snapshot({ now: now + 16 * 60 * 1000 });
+  assert.equal(snapshot.daily.input_tokens, 5);
+  assert.equal(snapshot.active_reservations, 0);
+  assert.equal(snapshot.reserved_daily.input_tokens, 0);
+});

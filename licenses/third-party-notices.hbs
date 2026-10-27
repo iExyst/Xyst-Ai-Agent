@@ -1,0 +1,19 @@
+THIRD-PARTY LICENSE NOTICES
+===========================
+
+Xyst AI Assistant Agent source is licensed under Apache-2.0; see the LICENSE file distributed with the application.
+The bundled Node.js runtime includes its own license in runtime/LICENSE.
+
+This file contains license texts and attribution for Rust dependencies included in the Windows and Linux desktop builds.
+The list is generated from Cargo.lock for the supported x86-64 and ARM64 Windows/Linux GNU targets.
+
+{{#each licenses}}
+------------------------------------------------------------------------------
+{{name}} (SPDX: {{id}})
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}} — https://crates.io/crates/{{crate.name}}/{{crate.version}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

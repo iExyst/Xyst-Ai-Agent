@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "dataset_version": "2026-10-24.2",
+  "cases": [
+  {
+    "id": "quality-fallback-prefers-coding-strength",
+    "category": "quality",
+    "config": { "routing": { "selection": "quality", "prefer_local": false }, "models": { "strong": { "coding_strength": 9, "speed_score": 4 }, "quick": { "coding_strength": 6, "speed_score": 9 } } },
+    "options": { "estimatedTokens": 100 },
+    "expected_model": "strong"
+  },
+  {
+    "id": "cost-fallback-prefers-priced-low-cost",
+    "category": "cost",
+    "config": { "routing": { "selection": "cost", "prefer_local": false }, "budgets": { "max_output_tokens": 1000 }, "models": { "unknown": {}, "low": { "input_cost_per_million": 0.1, "output_cost_per_million": 0.2 }, "high": { "input_cost_per_million": 5, "output_cost_per_million": 10 } } },
+    "options": { "estimatedTokens": 1000 },
+    "expected_model": "low"
+  },
+  {
+    "id": "speed-fallback-prefers-speed-score",
+    "category": "speed",
+    "config": { "routing": { "selection": "speed", "prefer_local": false }, "models": { "fast": { "speed_score": 10, "coding_strength": 4 }, "slow": { "speed_score": 3, "coding_strength": 9 } } },
+    "options": { "estimatedTokens": 100 },
+    "expected_model": "fast"
+  },
+  {
+    "id": "local-preference-precedes-quality-fallback",
+    "category": "privacy",
+    "config": { "routing": { "selection": "quality", "prefer_local": true }, "models": { "remote": { "local": false, "coding_strength": 10 }, "local": { "local": true, "coding_strength": 5 } } },
+    "options": { "estimatedTokens": 100 },
+    "expected_model": "local"
+  },
+  {
+    "id": "insufficient-context-default-is-skipped",
+    "category": "capability", "config": { "default_model": "small", "models": { "small": { "context_length": 100 }, "large": { "context_length": 10000 } } },
+    "options": { "estimatedTokens": 1000 },
+    "expected_model": "large"
+  },
+  {
+    "id": "tool-capability-requirement-filters-models",
+    "category": "capability", "config": { "default_model": "text-only", "models": { "text-only": { "supports_tools": false }, "tools": { "supports_tools": true } } },
+    "options": { "estimatedTokens": 100, "requireTools": true },
+    "expected_model": "tools"
+  },
+  {
+    "id": "explicit-override-is-honored",
+    "category": "override", "config": { "default_model": "default", "models": { "default": {}, "chosen": {} } },
+    "options": { "requestedModel": "chosen", "estimatedTokens": 100 },
+    "expected_model": "chosen"
+  },
+  {
+    "id": "unknown-price-sorts-after-priced-model",
+    "category": "cost", "config": { "routing": { "selection": "cost", "prefer_local": false }, "models": { "unpriced": {}, "priced": { "input_cost_per_million": 1, "output_cost_per_million": 1 } } },
+    "options": { "estimatedTokens": 100 },
+    "expected_model": "priced"
+  },
+  {
+    "id": "classifier-routes-substantial-coding-to-quality",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5, "local": true },
+        "strong": { "coding_strength": 10, "speed_score": 4, "local": true },
+        "fast": { "coding_strength": 4, "speed_score": 10, "local": true }
+      }
+    },
+    "options": { "taskPrompt": "Implement the feature, add tests, and verify behavior across multiple files." },
+    "expected_baseline_model": "general",
+    "expected_model": "strong"
+  },
+  {
+    "id": "classifier-routes-brief-question-to-speed",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5, "local": true },
+        "strong": { "coding_strength": 10, "speed_score": 4, "local": true },
+        "fast": { "coding_strength": 4, "speed_score": 10, "local": true }
+      }
+    },
+    "options": { "taskPrompt": "Quickly define this option in one sentence." },
+    "expected_baseline_model": "general",
+    "expected_model": "fast"
+  },
+  {
+    "id": "classifier-keeps-neutral-request-balanced",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5, "local": true },
+        "strong": { "coding_strength": 10, "speed_score": 4, "local": true },
+        "fast": { "coding_strength": 4, "speed_score": 10, "local": true }
+      }
+    },
+    "options": { "taskPrompt": "Tell me about this setting." },
+    "expected_baseline_model": "general",
+    "expected_model": "general"
+  },
+  {
+    "id": "classifier-default-routes-full-project-implementation-to-quality",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "Architect and build the whole project from scratch, add cross-platform integration tests, and review all of the code." },
+    "expected_baseline_model": "general",
+    "expected_model": "strong"
+  },
+  {
+    "id": "classifier-default-routes-production-debugging-to-quality",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "Diagnose and patch this production bug, then test the fix and verify the result." },
+    "expected_baseline_model": "general",
+    "expected_model": "strong"
+  },
+  {
+    "id": "classifier-default-routes-quick-conversion-to-speed",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "Quickly convert 12 miles to kilometers." },
+    "expected_baseline_model": "general",
+    "expected_model": "fast"
+  },
+  {
+    "id": "classifier-default-routes-short-definition-to-speed",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "Briefly define this setting in one sentence." },
+    "expected_baseline_model": "general",
+    "expected_model": "fast"
+  },
+  {
+    "id": "classifier-default-prefers-quality-for-mixed-implementation-and-speed-language",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "Quickly implement a secure feature across all platforms, add tests, and verify it end to end." },
+    "expected_baseline_model": "general",
+    "expected_model": "strong"
+  },
+  {
+    "id": "classifier-default-keeps-neutral-model-inquiry-balanced",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "List the configured model names and endpoints." },
+    "expected_baseline_model": "general",
+    "expected_model": "general"
+  },
+  {
+    "id": "classifier-can-be-disabled-for-coding-request",
+    "category": "override",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false, "classifier": { "enabled": false } },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 }
+      }
+    },
+    "options": { "taskPrompt": "Implement and test this security fix." },
+    "expected_model": "general"
+  },
+  {
+    "id": "configured-speed-strategy-takes-precedence-over-prompt-classifier",
+    "category": "override",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false, "selection": "speed" },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5 },
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "Implement and test this security feature." },
+    "expected_model": "fast"
+  },
+  {
+    "id": "strict-fallback-chain-takes-precedence-over-prompt-classifier",
+    "category": "override",
+    "config": {
+      "routing": { "prefer_local": false, "fallback_chain": ["fast", "strong"] },
+      "models": {
+        "strong": { "coding_strength": 10, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "speed_score": 10 }
+      }
+    },
+    "options": { "taskPrompt": "Implement and test this security feature." },
+    "expected_model": "fast"
+  },
+  {
+    "id": "classifier-routes-xyst-agent-problem-to-quality",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "tool_calling_quality": 5, "speed_score": 9 },
+        "strong": { "coding_strength": 9, "tool_calling_quality": 9, "speed_score": 4 },
+        "fast": { "coding_strength": 4, "tool_calling_quality": 4, "speed_score": 10 }
+      }
+    },
+    "options": {
+      "taskType": "agent",
+      "requireTools": true,
+      "taskPrompt": "There seems to be a problem with Xyst programming and working with the agent."
+    },
+    "expected_baseline_model": "strong",
+    "expected_model": "strong"
+  },
+  {
+    "id": "quality-routing-prefers-code-specialist-when-scores-are-unknown",
+    "category": "task-classifier",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": true },
+      "models": {
+        "general": { "model": "qwen3-4b-2507-instruct", "local": true, "supports_tools": true },
+        "coder": { "model": "qwen3-coder-30b-a3b-instruct", "local": true, "supports_tools": true }
+      }
+    },
+    "options": {
+      "taskType": "agent",
+      "requireTools": true,
+      "taskPrompt": "There seems to be a problem with Xyst programming and working with the agent."
+    },
+    "expected_baseline_model": "general",
+    "expected_model": "coder"
+  }
+  ]
+}

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#070b1b">
+    <meta name="xyst-token" content="__XYST_TOKEN__">
+    <title>Xyst AI Assistant</title>
+    <link rel="icon" type="image/png" href="/app/brand-icon.png">
+    <link rel="stylesheet" href="/app/styles.css">
+    <script src="/app/startup-watchdog.mjs"></script>
+    <script type="module" src="/app/app.mjs"></script>
+  </head>
+  <body>
+    <div id="app-frame" class="app-frame">
+      <aside class="sidebar" aria-label="Workspace and sessions">
+        <div class="brand-row">
+          <img class="brand-mark" src="/app/brand-icon.png" alt="Xyst AI Assistant">
+          <div class="brand-copy"><strong>Xyst AI Assistant</strong><span>LOCAL CODING PARTNER</span></div>
+          <span id="connection-indicator" class="connection-dot" title="Connecting" aria-label="Connecting"></span>
+        </div>
+        <button id="new-session" class="new-session-button" type="button"><span aria-hidden="true">＋</span> New conversation <kbd>⌘ K</kbd></button>
+        <form id="search-form" class="search-form" role="search">
+          <label class="visually-hidden" for="workspace-search">Search the workspace</label>
+          <span aria-hidden="true" class="search-glyph">⌕</span>
+          <input id="workspace-search" type="search" placeholder="Search workspace" autocomplete="off">
+          <kbd>/</kbd>
+          <label class="semantic-toggle"><input id="semantic-search-toggle" type="checkbox"> Semantic</label>
+        </form>
+        <input id="import-session-file" class="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose a Xyst AI Assistant session export">
+        <div class="section-heading"><span>RECENT</span><div class="session-list-actions"><button id="import-session" type="button" title="Import a session export">Import</button><button id="refresh-sessions" type="button" title="Refresh sessions" aria-label="Refresh sessions">↻</button></div></div>
+        <nav id="session-list" class="session-list" aria-label="Recent conversations"></nav>
+        <div id="sidebar-search-results" class="sidebar-search-results" hidden></div>
+        <footer class="sidebar-footer">
+          <div class="workspace-avatar" aria-hidden="true"><img src="/app/brand-icon.png" alt=""></div>
+          <div class="workspace-copy"><strong>Current workspace</strong><span id="workspace-status">Local · connecting</span></div>
+          <span class="local-lock" title="Loopback service" aria-label="Loopback service">⌑</span>
+        </footer>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div class="breadcrumb"><span class="breadcrumb-muted">Xyst AI Assistant</span><span class="breadcrumb-separator">/</span><strong id="conversation-title">New conversation</strong></div>
+          <div class="topbar-actions">
+            <button id="toggle-sidebar" class="icon-button" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-controls="session-list" aria-expanded="true">☰</button>
+            <div id="session-actions" class="session-actions" hidden aria-label="Conversation actions">
+              <button id="recap-session" class="text-button" type="button">Recap</button>
+              <button id="rename-session" class="text-button" type="button">Rename</button>
+              <button id="export-session" class="text-button" type="button">Export</button>
+              <button id="fork-session" class="text-button" type="button">Fork</button>
+              <button id="archive-session" class="text-button" type="button">Archive</button>
+              <button id="delete-session" class="text-button danger-text" type="button">Delete</button>
+            </div>
+            <label class="model-picker-label" for="model-picker">MODEL</label>
+            <select id="model-picker" aria-label="Model" disabled><option>Loading models…</option></select>
+            <button id="discover-models-button" class="icon-button model-discover-button" type="button" title="Find local models, including LM Studio" aria-label="Find local models">⌕</button>
+            <details id="run-inspector" class="run-inspector">
+              <summary>Run details</summary>
+              <div id="run-inspector-content" class="run-inspector-content"><p class="muted-copy">Routing and budget details appear when available.</p></div>
+            </details>
+          </div>
+        </header>
+
+        <nav id="primary-tabs" class="primary-tabs" role="tablist" aria-label="Assistant modes">
+          <button class="primary-tab" id="tab-agent" role="tab" type="button" aria-selected="true" aria-controls="mode-workspace" data-mode="agent"><span class="tab-glyph" aria-hidden="true">✳</span>Agent</button>
+          <button class="primary-tab" id="tab-plan" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="plan"><span class="tab-glyph" aria-hidden="true">⌁</span>Plan</button>
+          <button class="primary-tab" id="tab-review" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="review"><span class="tab-glyph" aria-hidden="true">◈</span>Review</button>
+          <span class="tab-spacer"></span>
+          <button class="primary-tab settings-tab" id="settings-button" role="tab" type="button" aria-selected="false" aria-controls="settings-view"><span class="tab-glyph" aria-hidden="true">⚙</span>Settings</button>
+        </nav>
+
+        <div id="status-banner" class="status-banner" role="status" hidden></div>
+        <div id="mode-workspace" role="tabpanel" aria-labelledby="tab-agent" class="mode-workspace">
+        <section id="timeline" class="timeline" aria-label="Conversation" aria-live="polite">
+          <div id="welcome" class="welcome-state">
+            <div class="welcome-orbit" aria-hidden="true"><img src="/app/brand-icon.png" alt=""></div>
+            <p class="eyebrow">YOUR LOCAL CODING PARTNER</p>
+            <h1>What are we<br><span>working on?</span></h1>
+            <p class="welcome-description">Ask a question, explore the codebase, or plan your next change. Xyst AI Assistant will keep its work in this workspace.</p>
+            <div class="suggestion-row">
+              <button class="suggestion-card" type="button" data-prompt="Explain how this project is structured."><span>01</span><strong>Understand a codebase</strong><small>Map the important pieces</small><b aria-hidden="true">↗</b></button>
+              <button class="suggestion-card" type="button" data-prompt="Review this project for correctness and security issues."><span>02</span><strong>Review a change</strong><small>Find issues before they ship</small><b aria-hidden="true">↗</b></button>
+              <button class="suggestion-card" type="button" data-prompt="Make a plan for the next meaningful improvement in this project."><span>03</span><strong>Plan the next step</strong><small>Turn an idea into a clear plan</small><b aria-hidden="true">↗</b></button>
+            </div>
+          </div>
+        </section>
+
+        <section id="approval-region" class="approval-region" aria-label="Pending approvals"></section>
+        <section class="composer-wrap" aria-label="Message composer">
+          <form id="prompt-form" class="composer">
+            <label class="visually-hidden" for="prompt-input">Message Xyst AI Assistant</label>
+            <textarea id="prompt-input" rows="1" maxlength="100000" placeholder="Describe what you want to work on…" required></textarea>
+            <div id="attached-images" class="attached-images" hidden aria-label="Attached images"></div>
+            <details id="mcp-selection" class="mcp-run-selection" hidden>
+              <summary id="mcp-selection-summary">MCP tools · all configured servers</summary>
+              <p class="muted-copy">Choose which configured MCP servers this conversation can use. The choice is saved when you send your next message.</p>
+              <div id="mcp-selection-options" class="mcp-selection-options"></div>
+            </details>
+            <details id="run-budget-controls" class="run-budget-controls" hidden>
+              <summary>Adjust budgets for this run</summary>
+              <p class="muted-copy">Available while paused in Assisted autonomy. Clear a field to restore its value from when this run started.</p>
+              <div id="run-budget-fields" class="run-budget-fields"></div>
+              <div class="run-budget-actions"><button id="apply-run-budgets" class="text-button" type="button">Apply budget changes</button><span id="run-budget-status" role="status"></span></div>
+            </details>
+            <div class="composer-footer">
+              <div class="composer-hints"><span id="active-mode-label" class="active-mode-label">Agent mode</span><span class="composer-divider">·</span><span class="keyboard-hint"><kbd>Enter</kbd> to send</span><select id="run-mode" aria-label="Run mode" class="visually-hidden"><option value="agent">Agent</option><option value="plan">Plan · read only</option><option value="review">Review · read only</option></select></div>
+              <div class="composer-controls">
+                <input id="image-files" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="Choose images to attach">
+                <button id="attach-images" class="text-button" type="button" title="Attach images">Image</button>
+                <button id="pause-run" class="text-button" type="button" hidden>Pause run</button>
+                <button id="change-run-model" class="text-button" type="button" hidden>Use selected model</button>
+                <button id="send-direction" class="text-button" type="button" hidden>Send direction</button>
+                <button id="stop-run" class="stop-button" type="button" hidden>Stop run</button>
+                <button id="send-button" class="send-button" type="submit" aria-label="Send message"><span>Send</span><span aria-hidden="true">↑</span></button>
+              </div>
+            </div>
+          </form>
+          <p class="composer-caption">Your workspace content is treated as untrusted input. Review every proposed change.</p>
+        </section>
+        </div>
+
+        <section id="settings-view" class="settings-view" role="tabpanel" aria-labelledby="settings-button" hidden>
+          <div class="settings-page-heading">
+            <div><p class="eyebrow">PERSONALIZE YOUR ASSISTANT</p><h1>Settings</h1><p>Choose a model, connect a local server, and tune how Xyst works.</p></div>
+            <button id="advanced-settings-button" class="secondary-button" type="button">All runtime settings <span aria-hidden="true">↗</span></button>
+          </div>
+          <section class="settings-page-card model-connection-card" aria-labelledby="model-connection-title">
+            <div class="settings-card-heading"><div><span class="settings-card-icon" aria-hidden="true">◉</span><div><h2 id="model-connection-title">Local model server</h2><p>Connect LM Studio, Ollama, or another OpenAI-compatible server running on this computer.</p></div></div><button id="settings-discover-models" class="secondary-button" type="button">Find local models</button></div>
+            <p class="local-model-help">For LM Studio, start the local server in LM Studio. Xyst checks <code>http://127.0.0.1:1234/v1</code> and imports the model ID you choose. A model marked “not loaded” can be loaded here; loading uses LM Studio memory and does not download model files. Discovery sends no prompts or workspace files.</p>
+            <div id="local-model-results" class="local-model-results" aria-live="polite"><p class="muted-copy">Use “Find local models” to check for running local servers.</p></div>
+          </section>
+          <section class="settings-page-card" aria-labelledby="configured-models-title">
+            <div class="settings-card-heading"><div><span class="settings-card-icon model-icon" aria-hidden="true">◈</span><div><h2 id="configured-models-title">Model profiles</h2><p>Profiles saved in your Xyst runtime settings.</p></div></div></div>
+            <div id="configured-models-list" class="configured-models-list"><p class="muted-copy">Loading configured models…</p></div>
+          </section>
+          <section class="settings-page-card tools-shortcuts-card" aria-label="Workspace tools">
+            <div class="settings-card-heading"><div><span class="settings-card-icon" aria-hidden="true">⌘</span><div><h2>Workspace tools</h2><p>Open the tools you use to manage projects and conversations.</p></div></div></div>
+            <div class="settings-tool-links"><button id="memory-button" type="button">Memory</button><button id="goals-button" type="button">Goals</button><button id="skills-button" type="button">Skills</button><button id="mcp-button" type="button">MCP servers</button><button id="extensions-button" type="button">Packages</button><button id="processes-button" type="button">Processes</button><button id="workspace-button" type="button">Workspace</button></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading"><div><p class="eyebrow">CONNECTION</p><h2 id="settings-title">Runtime settings</h2></div><button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button></div>
+      <div id="settings-content" class="settings-content"><p class="muted-copy">Loading current settings…</p></div>
+    </dialog>
+    <dialog id="recap-dialog" class="settings-dialog recap-dialog" aria-labelledby="recap-title">
+      <div class="dialog-heading"><div><p class="eyebrow">SESSION SUMMARY</p><h2 id="recap-title">Conversation recap</h2></div><button id="close-recap" class="icon-button" type="button" aria-label="Close recap">×</button></div>
+      <pre id="recap-content" class="recap-content"></pre>
+    </dialog>
+    <dialog id="process-dialog" class="settings-dialog process-dialog" aria-labelledby="process-title">
+      <div class="dialog-heading"><div><p class="eyebrow">BACKGROUND JOBS</p><h2 id="process-title">Processes</h2></div><div class="dialog-actions"><button id="refresh-processes" class="text-button" type="button">Refresh</button><button id="close-processes" class="icon-button" type="button" aria-label="Close processes">×</button></div></div>
+      <div id="process-content" class="settings-content process-content"><p class="muted-copy">Loading background processes…</p></div>
+    </dialog>
+    <dialog id="workspace-dialog" class="settings-dialog workspace-dialog" aria-labelledby="workspace-title">
+      <div class="dialog-heading"><div><p class="eyebrow">FILES & SOURCE CONTROL</p><h2 id="workspace-title">Workspace</h2></div><div class="dialog-actions"><button id="refresh-workspace" class="text-button" type="button">Refresh</button><button id="close-workspace" class="icon-button" type="button" aria-label="Close workspace">×</button></div></div>
+      <div id="workspace-content" class="settings-content workspace-content"><p class="muted-copy">Loading workspace…</p></div>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

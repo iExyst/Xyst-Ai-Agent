@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Xyst AI Assistant",
+  "version": "0.1.2",
+  "identifier": "dev.xyst.ai-assistant",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; connect-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "deb", "appimage"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "shortDescription": "Local-first computer automation agent",
+    "longDescription": "A cross-platform local agent with a shared runtime for the desktop app, CLI, and IDE extension.",
+    "category": "DeveloperTool",
+    "resources": {
+      "../../../LICENSE": "xyst/LICENSE",
+      "../../../package.json": "xyst/package.json",
+      "../../../licenses/THIRD-PARTY-NOTICES.md": "xyst/licenses/THIRD-PARTY-NOTICES.md",
+      "../../../src/": "xyst/src/",
+      "../../../gui/app.mjs": "xyst/gui/app.mjs",
+      "../../../gui/session-status.mjs": "xyst/gui/session-status.mjs",
+      "../../../gui/web-search-settings.mjs": "xyst/gui/web-search-settings.mjs",
+      "../../../gui/model-pricing.mjs": "xyst/gui/model-pricing.mjs",
+      "../../../gui/timeline.mjs": "xyst/gui/timeline.mjs",
+      "../../../gui/run-inspector.mjs": "xyst/gui/run-inspector.mjs",
+      "../../../gui/review-plan.mjs": "xyst/gui/review-plan.mjs",
+      "../../../gui/workspace-panel.mjs": "xyst/gui/workspace-panel.mjs",
+      "../../../gui/onboarding.mjs": "xyst/gui/onboarding.mjs",
+      "../../../gui/startup.mjs": "xyst/gui/startup.mjs",
+      "../../../gui/startup-watchdog.mjs": "xyst/gui/startup-watchdog.mjs",
+      "../../../gui/index.html": "xyst/gui/index.html",
+      "../../../gui/assets/brand-icon.png": "xyst/gui/assets/brand-icon.png",
+      "../../../gui/styles.css": "xyst/gui/styles.css",
+      "../../../dist/desktop-runtime/": "xyst/runtime/"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libglib2.0-bin", "libsecret-tools"]
+      }
+    }
+  }
+}

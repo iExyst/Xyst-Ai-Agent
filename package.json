@@ -1,0 +1,58 @@
+{
+  "name": "xyst-ai-assistant",
+  "version": "0.1.2",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Cross-platform local-first coding agent for Windows and Linux",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "speak": "node src/tts/tts-cli.mjs",
+    "test": "node --test",
+    "check": "node scripts/check.mjs",
+    "check:linux": "dbus-run-session -- bash scripts/check-linux-integration.sh",
+    "lint": "biome check --error-on-warnings src scripts tests gui vscode",
+    "format": "biome format --write src scripts tests gui vscode",
+    "format:check": "biome format src scripts tests gui vscode",
+    "eval:routing": "node scripts/evaluate-routing.mjs",
+    "eval:agent": "node scripts/evaluate-agent.mjs",
+    "eval:injection-signals": "node scripts/evaluate-injection-signals.mjs",
+    "eval:compare": "node scripts/compare-evaluations.mjs",
+    "bench:retrieval": "node scripts/benchmark-semantic-index.mjs",
+    "smoke:live-model": "node scripts/smoke-live-model.mjs",
+    "smoke:live-review": "node scripts/smoke-live-review.mjs",
+    "smoke:live-delegation": "node scripts/smoke-live-delegation.mjs",
+    "smoke:live-resume": "node scripts/smoke-live-resume.mjs",
+    "smoke:live-overflow": "node scripts/smoke-live-overflow.mjs",
+    "smoke:cli-shells": "node scripts/smoke-cli-shells.mjs",
+    "build:vscode": "node scripts/build-vscode.mjs",
+    "check:vscode": "node scripts/check-vscode-package.mjs",
+    "smoke:browser": "node scripts/smoke-browser.mjs",
+    "check:rust-licenses": "node scripts/check-rust-licenses.mjs",
+    "licenses:desktop": "node scripts/build-third-party-notices.mjs",
+    "check:licenses:desktop": "node scripts/build-third-party-notices.mjs --check",
+    "prepare:desktop-runtime": "node scripts/build-desktop-runtime.mjs",
+    "build:desktop": "pnpm check:licenses:desktop && node scripts/build-desktop-runtime.mjs && node scripts/build-desktop-icon.mjs && cargo build --manifest-path gui/desktop/src-tauri/Cargo.toml --locked && node scripts/package-sandbox-helper.mjs",
+    "build:desktop:windows-installer": "pnpm check:licenses:desktop && node scripts/build-desktop-runtime.mjs && node scripts/build-desktop-icon.mjs && node scripts/package-sandbox-helper.mjs && pnpm exec tauri build --config gui/desktop/src-tauri/tauri.conf.json --bundles nsis --ci",
+    "build:desktop:linux": "pnpm check:licenses:desktop && node scripts/build-desktop-runtime.mjs && node scripts/build-desktop-icon.mjs && pnpm exec tauri build --config gui/desktop/src-tauri/tauri.conf.json --bundles deb,appimage --ci",
+    "smoke:desktop:linux-package": "node scripts/smoke-linux-package.mjs",
+    "smoke:desktop:linux-appimage": "node scripts/smoke-linux-appimage.mjs",
+    "smoke:desktop:windows-installer": "node scripts/smoke-windows-installer.mjs",
+    "check:desktop": "pnpm check:licenses:desktop && node scripts/build-desktop-runtime.mjs && cargo fmt --manifest-path gui/desktop/src-tauri/Cargo.toml -- --check && cargo check --manifest-path gui/desktop/src-tauri/Cargo.toml --locked",
+    "build:release": "node scripts/build-release.mjs",
+    "sign:app-updates": "node scripts/sign-application-update-feed.mjs",
+    "sign:extension-feed": "node scripts/sign-extension-feed.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@tauri-apps/cli": "2.12.1"
+  },
+  "dependencies": {
+    "ink": "7.1.1",
+    "react": "19.2.0"
+  }
+}

@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan repository history for secrets
+        run: docker run --rm --volume "${{ github.workspace }}:/repo" ghcr.io/gitleaks/gitleaks:v8.30.0 git --redact --verbose /repo
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Audit locked Rust dependencies
+        shell: bash
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          # GLib is locally patched and release-tested; all other unsound advisories remain fatal.
+          cargo audit --deny unsound --ignore RUSTSEC-2024-0429 --file gui/desktop/src-tauri/Cargo.lock
+      - name: Generate Rust third-party license inventory
+        shell: bash
+        run: |
+          cargo install cargo-license --locked --version 0.7.0
+          cargo license --manifest-path gui/desktop/src-tauri/Cargo.toml --json > "$RUNNER_TEMP/rust-license-inventory.json"
+      - name: Enforce Rust SPDX allowlist
+        run: node scripts/check-rust-licenses.mjs "$RUNNER_TEMP/rust-license-inventory.json"
+      - name: Retain Rust third-party license inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-license-inventory
+          path: ${{ runner.temp }}/rust-license-inventory.json
+          if-no-files-found: error
+          retention-days: 30
+
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+        node-version: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'Windows'
+        with:
+          components: clippy, rustfmt
+      - name: Check Windows ConPTY helper formatting and lints
+        if: runner.os == 'Windows'
+        run: |
+          cargo fmt --manifest-path tests/windows-conpty/Cargo.toml -- --check
+          cargo clippy --manifest-path tests/windows-conpty/Cargo.toml --locked -- -D warnings
+      - name: Build Windows ConPTY terminal test helper
+        if: runner.os == 'Windows'
+        run: cargo build --manifest-path tests/windows-conpty/Cargo.toml --locked
+      - name: Install Chrome for browser-level UI and accessibility smoke
+        uses: browser-actions/setup-chrome@v1
+        id: chrome
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - name: Install locked JavaScript development tools
+        run: pnpm install --frozen-lockfile
+      - name: Check JavaScript formatting and lint rules
+        run: pnpm lint
+      - name: Verify JavaScript formatting
+        run: pnpm format:check
+      - name: Install Linux isolation and Secret Service test tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap python3 imagemagick dbus-x11 gnome-keyring libsecret-tools libglib2.0-bin
+      - name: Run Linux checks with required OS integration tests
+        if: runner.os == 'Linux'
+        run: pnpm check:linux
+      - name: Run Windows checks
+        if: runner.os == 'Windows'
+        run: node scripts/check.mjs
+        env:
+          XYST_REQUIRE_WINDOWS_CONPTY_TEST: 'true'
+          XYST_REQUIRE_BWRAP_TEST: 'false'
+          XYST_REQUIRE_PIDFD_TEST: 'false'
+          XYST_REQUIRE_LINK_TESTS: 'false'
+          XYST_REQUIRE_WMI_TEST: 'true'
+      - name: Run end-to-end CLI tool workflow through available shells
+        run: pnpm smoke:cli-shells
+      - run: node scripts/check-vscode-package.mjs
+      - run: pnpm smoke:browser
+        env:
+          XYST_BROWSER_EXECUTABLE: ${{ steps.chrome.outputs.chrome-path }}
+      - run: node scripts/evaluate-routing.mjs
+      - run: node scripts/evaluate-agent.mjs
+      - run: node scripts/evaluate-injection-signals.mjs
+      - name: Validate example configuration
+        run: node --input-type=module -e "import fs from 'node:fs/promises'; import { parseToml } from './src/config/toml.mjs'; parseToml(await fs.readFile('config.example.toml', 'utf8'))"
+      - name: Build release source archive
+        run: node scripts/build-release.mjs
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install pinned Cargo license notice generator
+        run: cargo install --locked --features cli cargo-about --version 0.9.2
+      - name: Verify packaged third-party license notices
+        run: pnpm check:licenses:desktop
+      - name: Install Tauri Linux prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y at-spi2-core build-essential curl dbus-x11 file libayatana-appindicator3-dev libgtk-3-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev patchelf python3-pyatspi xdotool xvfb
+      - name: Verify the patched GLib iterator in an optimized build
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path gui/desktop/src-tauri/vendor/glib-0.18.6-xyst/Cargo.toml --release --lib test_variant_iter_array
+      - name: Build Windows NSIS installer
+        if: runner.os == 'Windows'
+        run: pnpm build:desktop:windows-installer
+      - name: Build Linux Debian and AppImage packages
+        if: runner.os == 'Linux'
+        run: pnpm build:desktop:linux
+      - name: Install, verify, and uninstall Windows package
+        if: runner.os == 'Windows'
+        run: pnpm smoke:desktop:windows-installer
+      - name: Install, upgrade, rollback, and smoke test Linux Debian package
+        if: runner.os == 'Linux'
+        run: pnpm smoke:desktop:linux-package
+        env:
+          XYST_LINUX_INSTALL_SMOKE: 'true'
+          XYST_LINUX_UPGRADE_SMOKE: 'true'
+      - name: Smoke test Linux AppImage under Xvfb
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1800x1200x24' pnpm smoke:desktop:linux-appimage
+      - name: Upload Windows NSIS installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyst-windows-nsis
+          path: gui/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+      - name: Upload Linux Debian package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyst-linux-deb
+          path: gui/desktop/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+      - name: Upload Linux AppImage
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyst-linux-appimage
+          path: gui/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+      - name: Review native desktop code
+        run: cargo clippy --manifest-path gui/desktop/src-tauri/Cargo.toml --locked -- -D warnings
+      - name: Review Windows sandbox helper code
+        run: cargo clippy --manifest-path gui/desktop/src-tauri/Cargo.toml --locked --bin xyst-sandbox-helper --features sandbox-helper -- -D warnings
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path gui/desktop/src-tauri/Cargo.toml -- --check
+      - name: Smoke test packaged Windows AppContainer helper
+        if: runner.os == 'Windows'
+        run: node --test tests/sandbox-integration.test.mjs
+        env:
+          XYST_REQUIRE_WINDOWS_SANDBOX_TEST: 'true'
+      - name: Test native desktop host on this platform
+        run: cargo test --manifest-path gui/desktop/src-tauri/Cargo.toml --bin xyst-desktop
+      - name: Test Windows workspace symbolic-link preflight
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path gui/desktop/src-tauri/Cargo.toml --bin xyst-desktop symbolic_links -- --ignored

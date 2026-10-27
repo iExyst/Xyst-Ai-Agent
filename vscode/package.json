@@ -1,0 +1,59 @@
+{
+  "name": "xyst-ai-assistant",
+  "displayName": "Xyst AI Assistant",
+  "description": "VS Code client for the shared Xyst AI Assistant coding agent runtime.",
+  "version": "0.1.2",
+  "publisher": "xyst-ai-assistant",
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:xyst.startChat",
+    "onCommand:xyst.selectWorkspace",
+    "onCommand:xyst.attachSelection",
+    "onCommand:xyst.attachActiveFile",
+    "onCommand:xyst.startReview",
+    "onCommand:xyst.startPlan",
+    "onCommand:xyst.cancelRun",
+    "onCommand:xyst.openSettings"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "xyst.startChat", "title": "Xyst AI Assistant: Open Agent Chat" },
+      { "command": "xyst.selectWorkspace", "title": "Xyst AI Assistant: Switch Project Workspace" },
+      { "command": "xyst.attachSelection", "title": "Xyst AI Assistant: Attach Active Editor Selection" },
+      { "command": "xyst.attachActiveFile", "title": "Xyst AI Assistant: Attach Active File Content" },
+      { "command": "xyst.startReview", "title": "Xyst AI Assistant: Start Review" },
+      { "command": "xyst.startPlan", "title": "Xyst AI Assistant: Start Plan" },
+      { "command": "xyst.cancelRun", "title": "Xyst AI Assistant: Cancel Run" },
+      { "command": "xyst.openSettings", "title": "Xyst AI Assistant: Open Settings" }
+    ],
+    "configuration": {
+      "title": "Xyst AI Assistant",
+      "properties": {
+        "xyst.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the Xyst AI Assistant repository's src/cli.mjs entry point."
+        },
+        "xyst.nodePath": {
+          "type": "string",
+          "default": "node",
+          "description": "Node.js executable used to launch the local Xyst AI Assistant API service."
+        },
+        "xyst.maxAttachedSelectionCharacters": {
+          "type": "integer",
+          "default": 20000,
+          "minimum": 1000,
+          "maximum": 100000,
+          "description": "Maximum number of editor-selection or active-file characters attached to one prompt."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node ../scripts/build-vscode.mjs",
+    "package:check": "node ../scripts/check-vscode-package.mjs"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "version": "24.22.0",
+  "release_url": "https://nodejs.org/dist/v24.22.0/",
+  "artifacts": {
+    "win32-x64": {
+      "archive": "node-v24.22.0-win-x64.zip",
+      "sha256": "f9683a19877e12a9b167305c8db71040d812876359de21f0d2e97c3f321f80c3",
+      "binary": "node.exe"
+    },
+    "win32-arm64": {
+      "archive": "node-v24.22.0-win-arm64.zip",
+      "sha256": "3a5c209a5bc59e65b3bc0fa13ed5e166a26bd3d55332847f498b76b037408d61",
+      "binary": "node.exe"
+    },
+    "linux-x64": {
+      "archive": "node-v24.22.0-linux-x64.tar.xz",
+      "sha256": "cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008",
+      "binary": "bin/node"
+    },
+    "linux-arm64": {
+      "archive": "node-v24.22.0-linux-arm64.tar.xz",
+      "sha256": "fef00bb4d36e1c50104a9775a10359beee98f162b4104dd12472c75065c6a143",
+      "binary": "bin/node"
+    }
+  }
+}

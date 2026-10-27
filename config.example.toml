@@ -1,0 +1,280 @@
+# Copy this file to ~/.config/xyst-ai-assistant/config.toml. Local providers
+# such as LM Studio need no API key unless server authentication is enabled.
+
+default_model = "local-default"
+workspace = "."
+
+[models.local-default]
+provider = "openai-compatible"
+base_url = "http://127.0.0.1:1234/v1"
+model = "your-local-model"
+context_length = 32768
+# Retry transient rate-limit/server failures at most once by default; set 0 to disable (maximum 2).
+# retry_attempts = 1
+# Optional sampling temperature (0–2). Lower values are more deterministic.
+# temperature = 0
+local = true
+supports_tools = true
+supports_vision = false
+# Keep cache controls off unless this exact endpoint/model supports them.
+# When enabled, cache hit/miss counts use provider-reported cached token counts;
+# prompts and cache keys are never added to telemetry.
+# prompt_cache_enabled = true
+# prompt_cache_key = "xyst-main" # optional non-sensitive bucketing identifier
+# prompt_cache_retention = "24h" # optional; otherwise the provider default applies
+input_cost_per_million = 0
+# Optional price for cached prompt tokens reported by the provider. If omitted,
+# cached tokens use the regular input price for cost accounting.
+# cached_input_cost_per_million = 0
+output_cost_per_million = 0
+# Set these after checking provider pricing; rates older than 90 days are marked stale in Runtime settings.
+# pricing_updated_at = "YYYY-MM-DD"
+# pricing_source = "Provider pricing page"
+# Record when capability values below were checked; reviews older than 180 days are marked stale.
+# capabilities_updated_at = "YYYY-MM-DD"
+# capabilities_source = "Provider model documentation"
+
+[models.remote-example]
+provider = "openai-compatible"
+base_url = "https://api.openai.com/v1"
+model = "your-configured-model"
+api_key_env = "OPENAI_API_KEY"
+context_length = 128000
+local = false
+supports_tools = true
+# Optional: enable only after confirming this endpoint/model supports these fields.
+# prompt_cache_enabled = true
+# prompt_cache_key = "xyst-main"
+# prompt_cache_retention = "24h"
+input_cost_per_million = 0
+output_cost_per_million = 0
+
+[routing]
+prefer_local = true
+minimum_context_tokens = 4096
+selection = "balanced"
+# Optional strict priority list after default_model. Only these configured profiles
+# will be considered when this list is set; capable profiles are probed through
+# /v1/models and unavailable profiles are skipped before the request starts.
+# fallback_chain = ["local-strong", "remote-example"]
+# health_check_timeout_ms = 2500
+
+# Local prompt-aware routing is enabled by default for unpinned balanced agent runs.
+# It never sends prompt text to another model; set false to keep the configured route.
+[routing.classifier]
+enabled = true
+
+[budgets]
+max_turns = 8
+max_input_tokens = 100000
+max_output_tokens = 16000
+max_tool_output_bytes = 100000
+# Withhold this many output tokens from tool-capable model calls for a final
+# response. If the working allowance is exhausted, stop before another call
+# and preserve completed work with a partial-result message.
+# final_response_reserve_tokens = 512
+# Reserve input tokens for a concise provider-generated partial-result summary
+# when an Assisted tool run hits a budget or turn limit. Set to 0 to disable.
+# recovery_summary_input_tokens = 1024
+# Optional per-conversation hard ceilings, carried across resumed turns.
+# Session cost is USD and requires accurate prices on the selected model profile.
+# max_session_input_tokens = 200000
+# max_session_output_tokens = 40000
+# max_session_cost = 2.00
+# Optional shared ceilings across all sessions and processes, tracked under .agent/usage.
+# Cost limits require input_cost_per_million and output_cost_per_million on the model profile.
+# max_daily_input_tokens = 500000
+# max_daily_output_tokens = 100000
+# max_monthly_input_tokens = 10000000
+# max_monthly_output_tokens = 2000000
+# max_daily_cost = 5.00
+# max_monthly_cost = 100.00
+
+[compaction]
+# Automatic history summarization is opt-in. It archives full old messages before
+# replacing active history with a redacted summary.
+enabled = false
+trigger_ratio = 0.8
+# Compact once per run when an enforced input-token or estimated-cost ceiling
+# reaches this fraction. Context-triggered compaction can run again as needed.
+budget_trigger_ratio = 0.8
+keep_recent_turns = 2
+
+[retrieval]
+max_files = 3000
+max_file_bytes = 500000
+max_results = 25
+# Automatic retrieval sends bounded, redacted project excerpts to the configured
+# embedding endpoint and includes them as untrusted context in each new run.
+auto_context = false
+auto_context_max_results = 4
+auto_context_max_chars = 8000
+
+[memory]
+# Optional cross-project memory stored in the user data directory. Disabled by default.
+global_enabled = false
+max_context_chars = 8000
+
+[retrieval.semantic]
+# Semantic indexing is opt-in. Source text is sent to this embedding endpoint,
+# after credential-like values are redacted. The index stores vectors and source
+# metadata, not source text. Non-local URLs require allow_remote = true and HTTPS.
+enabled = false
+base_url = "http://127.0.0.1:1234/v1"
+model = "your-local-embedding-model"
+allow_remote = false
+timeout_ms = 60000
+
+[tools]
+shell_enabled = true
+filesystem_scope = "machine"
+autonomy = "unrestricted"
+recursive_listing = true
+
+[web_search]
+enabled = true
+provider = "automatic" # Keyless recent news + reference search; set to "brave" for broader web coverage.
+# Brave only: this key is optional. Without an available key, live lookups use automatic keyless search.
+# Provision a key with `node src/cli.mjs secrets set brave.search --from-env BRAVE_SEARCH_API_KEY`.
+# api_key_secret = "brave.search" # Optional when provider = "brave".
+max_results = 5
+timeout_ms = 10000
+
+[mcp]
+# MCP child servers are executable programs. Enable only user-configured servers
+# that you trust; project .xyst.toml files cannot define or enable them.
+enabled = false
+timeout_ms = 15000
+
+[mcp.servers.example]
+enabled = false
+command = "node"
+args = ["./mcp-server.mjs"]
+# cwd = "."
+
+# Alternatively, refer to an explicitly activated signed MCP package. Do not
+# set command or cwd for this server; Xyst AI Assistant launches its signed entry_point.
+# Activate it with `node src/cli.mjs extensions enable mcp <package-id> <version>`.
+# [mcp.servers.signed_example]
+# enabled = false
+# package_id = "example-server"
+# args = ["--stdio"]
+
+[mcp.servers.example.env]
+# Values are references, never literal credentials. Use env:NAME or
+# secret:vault.key; referenced values are passed only to this child process.
+SERVICE_TOKEN = "env:EXTERNAL_SERVICE_TOKEN"
+
+# Streamable HTTP alternative. Remote URLs require HTTPS; loopback HTTP is
+# allowed for local development. Redirects are rejected. A 404/405 from the
+# Streamable HTTP handshake triggers a compatibility attempt using legacy SSE.
+# [mcp.servers.remote]
+# enabled = false
+# transport = "streamable_http"
+# url = "https://mcp.example.test/rpc"
+# [mcp.servers.remote.headers]
+# Authorization = "secret:service.token"
+# Use transport = "sse" only when connecting to a legacy HTTP+SSE server.
+# [mcp.servers.legacy]
+# enabled = false
+# transport = "sse"
+# url = "https://mcp.example.test/sse"
+
+[skills]
+enabled = false
+# User-owned directories only. Project .xyst.toml cannot add skill roots.
+# Each root contains one directory per skill, with a SKILL.md manifest.
+directories = []
+
+[subagents]
+enabled = false
+max_concurrent = 2
+max_turns = 4
+timeout_ms = 300000
+
+[approvals]
+# Used only when tools.autonomy = "assisted".
+# Denials take precedence over every allow rule and session grant.
+deny_tools = []
+auto_approve_tools = []
+deny_write_paths = []
+auto_approve_write_paths = []
+deny_process_commands = []
+auto_approve_process_commands = []
+# Example: auto_approve_write_paths = ["generated/**"]
+# Example: deny_write_paths = [".github/workflows/**"]
+# Example: auto_approve_process_commands = ["npm test", "git status *"]
+
+[sandbox]
+# `none`: processes use the current account's OS permissions.
+# `workspace-write`: isolate processes and allow writes only in the selected workspace.
+# `workspace-read`: isolate processes and mount the selected workspace read-only.
+# `read-only`: expose local inspection tools and hide process-capable tools.
+mode = "none"
+# Optional per-process-tool overrides: run_process, run_shell_script, start_background_process.
+# Overrides can tighten this policy; `read-only` hides that tool.
+# [sandbox.tools]
+# run_process = "workspace-read"
+
+[api]
+# Add an exact desktop/IDE origin only when a browser client needs CORS access.
+allowed_origins = []
+max_concurrent_runs = 2
+approval_timeout_ms = 300000
+
+[ui]
+shortcuts_enabled = true
+[ui.shortcuts]
+toggle_sidebar = "Ctrl+B"
+new_session = "Ctrl+K"
+focus_search = "/"
+
+[observability]
+# Opt in to local structured lifecycle events. Records exclude prompts, paths,
+# command text, tool arguments/results, and raw provider errors.
+enabled = false
+# Also write the same allowlisted records as JSON Lines to the service's stderr.
+console_enabled = false
+max_file_bytes = 10485760
+# Optional OTLP/HTTP JSON traces. Both this flag and observability.enabled must
+# be true. Remote endpoints require HTTPS; auth headers use references only.
+# [observability.otlp]
+# enabled = true
+# traces_endpoint = "https://collector.example.test/v1/traces"
+# timeout_ms = 5000
+# max_batch_spans = 64
+# [observability.otlp.headers]
+# Authorization = "secret:telemetry.collector"
+
+[architect]
+# Review mode runs while the local control API is open. It never edits source.
+# Keep remote review disabled unless you want repository code sent to a provider.
+enabled = false
+interval_hours = 24
+run_on_start = true
+allow_remote = false
+
+# Optional extension trust and signed revocation feed. Configure only after
+# verifying the public key fingerprint through a separate trusted channel.
+# [extensions]
+# revocation_url = "https://updates.example.com/xyst/revocations.json"
+# revocation_key_id = "xyst-revocations-2026"
+# revocation_max_age_hours = 72
+# update_feed_url = "https://updates.example.com/xyst/packages.json"
+# update_key_id = "xyst-revocations-2026"
+# update_max_age_hours = 72
+# revoked_key_ids = []
+# revoked_packages = []
+# install_directory = "C:/Users/me/AppData/Roaming/Xyst AI Assistant/extensions"
+# [extensions.trusted_keys]
+# xyst-revocations-2026 = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+
+[app_updates]
+# disabled: no checks; manual: check only from Runtime settings; notify: check at app startup.
+# A check only shows signed release metadata. Download and installation are always your choice.
+mode = "disabled"
+channel = "stable"
+# Configure these only after verifying the Ed25519 key fingerprint out of band.
+# feed_url = "https://updates.example.com/xyst/releases.json"
+# key_id = "xyst-release-2026"
+# public_key = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"

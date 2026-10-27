@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Xyst AI Assistant desktop window; application control stays on the authenticated loopback API.","local":true,"windows":["main"],"permissions":["core:default"]}}
