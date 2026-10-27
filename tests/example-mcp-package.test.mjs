@@ -72,6 +72,7 @@ test('example MCP package builds, verifies, stays inert until activation, and ru
   assert.equal(manager.serverCatalog[0].connection_state, 'connected');
   assert.equal(manager.serverCatalog[0].server_info.version, '1.2.3');
   const callResult = await manager.call('mcp__example__echo', { text: 'signed and active' });
+  assert.equal(callResult.resultType, 'complete');
   assert.deepEqual(callResult.content, [{ type: 'text', text: 'echo: signed and active' }]);
 });
 

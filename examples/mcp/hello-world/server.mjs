@@ -76,7 +76,7 @@ input.on('line', (line) => {
         fail(request.id, -32602, 'Expected echo with a non-empty text argument of at most 256 characters');
         break;
       }
-      respond(request.id, { content: [{ type: 'text', text: `echo: ${text}` }] });
+      respond(request.id, { resultType: 'complete', content: [{ type: 'text', text: `echo: ${text}` }] });
       break;
     }
     case 'ping':
