@@ -1,9 +1,15 @@
 # Xyst verification history
+## Current-source live preflight and Qwen3-0.6B coding recheck (2026-10-27)
+
+- A current-source CLI run against an intentionally unreachable LM Studio endpoint (`127.0.0.1:1234`) exited with the expected connection error and persisted its session as `failed` (`9c198095-645f-4e0b-943c-fadf1787a461`), confirming the preflight cleanup fix against the live CLI/provider path.
+- An isolated Qwen3-0.6B coding run (`b242b786-3eb5-4b1c-9108-31392893fd8e`) created `src/add.mjs` and `src/add.test.mjs`, but the test was fake CommonJS in an `.mjs` file and did not import the implementation. Real `node --test src/add.test.mjs` through `run_process` exited 1 with a syntax error. The completion verifier rejected attempts to claim success; a guided resume also failed to patch the test before the turn limit. This is not a coding acceptance.
+- The LM Studio response, Xyst SQLite profile, and failed workspace are preserved under `.xyst-live-acceptance/live-coding-qwen06-20261027/`. The separate Qwen3.5-9B no-output attempt is under `.xyst-live-acceptance/live-coding-qwen35-20261027/`.
+
 
 ## Agent preflight failure session cleanup (2026-10-27)
 
 - LM Studio endpoint troubleshooting revealed that failures during model discovery could leave a newly created agent session marked `active`. An outer `AgentRunner.run` cleanup now marks preflight failures `failed`, or pre-aborted work `cancelled`, while preserving the existing in-loop failure/cancellation path.
-- The regression test covers both failure and cancellation. Targeted test passed; full runtime suite passed (157 passed, 2 host-dependent skips, 0 failures); runtime, CLI, and desktop typecheck passed. Hosted checks on the resulting commit are pending.
+- The regression test covers both failure and cancellation. Targeted test passed; full runtime suite passed (157 passed, 2 host-dependent skips, 0 failures); runtime, CLI, and desktop typecheck passed. All four hosted Windows/Ubuntu verification and package workflows passed on `ec4b6c1`: `40446822991`, `40446822870`, `40446828747`, and `40446828516`.
 
 
 ## Bounded Qwen3.5-9B coding attempt and hosted checks (2026-10-27)

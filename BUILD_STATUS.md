@@ -3,8 +3,8 @@
 ## Agent preflight failure session cleanup (2026-10-27)
 
 - Live LM Studio endpoint troubleshooting showed that failures before the agent's main inference loop could leave a newly created session marked `active`. Added an outer `AgentRunner.run` cleanup path: preflight exceptions mark it `failed`; an already-aborted run marks it `cancelled` and returns a cancelled result. Existing in-loop terminal handling is preserved without duplicate status changes.
-- Regression verifies both an LM Studio model-discovery failure and a pre-aborted run. Targeted test passed; the full runtime suite passed (157 passed, 2 environment-dependent skips, 0 failed); runtime, CLI, and desktop typecheck passed. Hosted checks for this source change are pending.
-- A separate live Qwen3.5-9B coding acceptance remains unverified: no assistant/tool message arrived in over ten minutes, so the isolated attempt was cancelled without files. See the bounded live attempt section below.
+- Regression verifies both an LM Studio model-discovery failure and a pre-aborted run. Targeted test passed; the full runtime suite passed (157 passed, 2 environment-dependent skips, 0 failed); runtime, CLI, and desktop typecheck passed. All four hosted Windows/Ubuntu verification and package workflows passed on `ec4b6c1`: `40446822991`, `40446822870`, `40446828747`, and `40446828516`.
+- Live preflight verification on current source used an isolated profile pointed at the deliberately unreachable default port 1234. Xyst returned the connection error and persisted the session as `failed` (`9c198095-645f-4e0b-943c-fadf1787a461`). The 9B and 0.6B coding attempts remain unverified; their isolated DBs and files are preserved under `.xyst-live-acceptance/live-coding-qwen35-20261027/` and `.xyst-live-acceptance/live-coding-qwen06-20261027/`.
 
 
 ## Live Responses MCP and tool-list guard (2026-10-27)
