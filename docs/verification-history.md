@@ -1,5 +1,11 @@
 # Xyst verification history
 
+## Linux AppImage renderer smoke runs in hosted package CI (2026-10-27)
+
+- The Linux package workflow now ensures `xvfb-run` is available, launches the exact freshly built AppImage with `--appimage-extract-and-run` in a disposable XDG/Xyst profile, and verifies the `Xyst Control Room` title, at least 10 controls, and `RUNTIME READY`. It captures a renderer screenshot and terminates the complete app process group before deleting the profile.
+- Both Ubuntu package jobs passed the new smoke on commit `fa79c92`: push run `40429833499` and pull-request run `40429840575`. All eight duplicated Windows/Ubuntu verification and Windows/Linux packaging checks passed. The Windows clean-install profile-sharing smoke also passed in both package jobs.
+- This adds repeatable hosted Ubuntu GUI package acceptance; it does not establish behavior on a bare-metal Linux desktop, which remains separately unverified.
+
 ## Clean Windows install shares the packaged CLI profile with the desktop (2026-10-27)
 
 - Extended the Windows installer smoke to create a saved session through the installed package's bundled Node and CLI in an isolated `%APPDATA%` profile, then query `window.xyst.snapshot()` in the clean-installed desktop and assert the same session ID is present. The existing 25-control renderer readiness check and screenshot still run.
