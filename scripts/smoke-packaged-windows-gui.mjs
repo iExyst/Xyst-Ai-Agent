@@ -91,7 +91,10 @@ function runInstalledCli(args) {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Installed CLI ${args[0]} ${args[1]} failed (${result.status}): ${(result.stderr || result.stdout).slice(-4000)}`);
-  try { return JSON.parse(result.stdout.trim()); }
+  try {
+    const response = JSON.parse(result.stdout.trim());
+    return response?.type === "result" && Object.hasOwn(response, "data") ? response.data : response;
+  }
   catch (error) { throw new Error(`Installed CLI returned invalid JSON for ${args[0]} ${args[1]}: ${result.stdout.slice(-4000)}`, { cause: error }); }
 }
 
