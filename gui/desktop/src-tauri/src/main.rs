@@ -455,6 +455,7 @@ fn main() {
             let state_path = bounds_path(app.handle());
             if let Some(path) = &state_path {
                 restore_window_bounds(&window, path);
+                save_window_bounds(&window, path);
             }
             if let Some(path) = state_path {
                 let tracked_window = window.clone();
@@ -483,12 +484,20 @@ fn main() {
 
     match result {
         Ok(app) => {
-            app.run(|handle, event| {
-                if matches!(event, RunEvent::Exit) {
+            app.run(|handle, event| match event {
+                RunEvent::ExitRequested { .. } => {
+                    if let (Some(window), Some(path)) =
+                        (handle.get_webview_window("main"), bounds_path(handle))
+                    {
+                        save_window_bounds(&window, &path);
+                    }
+                }
+                RunEvent::Exit => {
                     if let Some(service) = handle.try_state::<DesktopService>() {
                         service.request_shutdown();
                     }
                 }
+                _ => {}
             });
         }
         Err(error) => {
