@@ -2,6 +2,8 @@
 
 > Execution order and release priorities are defined in [BUILD_PLAN.md](BUILD_PLAN.md). Use that plan to decide what to do next; this roadmap remains the detailed feature inventory.
 
+- **Modern MCP control-flow response safety — 2026-10-27:** stdio and Streamable HTTP now inspect 2026-07-28 `resultType` responses. `complete` and the specification's absent-as-complete form pass through; `input_required` and task results fail with explicit unsupported-feature errors, while unknown types fail as invalid responses. Focused regressions pass on both transports. This closes the unsafe interpretation gap for those control-flow results; full capability, content-block, and method-result schema validation remains open.
+
 ## Purpose and scope
 
 This document turns the supplied product roadmap into an ordered, ticket-ready implementation plan. The product supports Windows and Linux only. It has one shared agent core used by the CLI, desktop app, and VS Code extension; local OpenAI-compatible model servers and remote providers; routing; retrieval and project memory; sandboxing and approvals; persistent sessions; extension support; observability; evaluation; and release packaging.

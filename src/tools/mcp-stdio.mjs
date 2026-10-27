@@ -13,6 +13,7 @@ import { buildBubblewrapArgs, bubblewrapLauncherEnvironment, findBubblewrap, val
 import { waitForBubblewrapStart } from '../platform/bubblewrap-status.mjs';
 import { redactSecrets } from '../platform/redaction.mjs';
 import { isReadOnlySandbox, requiresProcessIsolation, resolveSandboxMode } from '../platform/sandbox-modes.mjs';
+import { validateMcpResultType } from './mcp-protocol.mjs';
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -538,7 +539,7 @@ class McpStdioSession {
         this.pending.delete(id);
         reject(mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT'));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, method, protocolVersion: this.protocolVersion });
       const message = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
       try {
         this.child.stdin.write(message, (error) => {
@@ -603,7 +604,19 @@ class McpStdioSession {
         );
       else if (!Object.hasOwn(message, 'result'))
         pending.reject(mcpError(`MCP server '${this.name}' returned no result`, 'MCP_INVALID_RESPONSE'));
-      else pending.resolve(message.result);
+      else {
+        try {
+          pending.resolve(
+            validateMcpResultType(message.result, {
+              protocolVersion: pending.protocolVersion,
+              serverName: this.name,
+              method: pending.method,
+            }),
+          );
+        } catch (error) {
+          pending.reject(error);
+        }
+      }
     }
   }
 

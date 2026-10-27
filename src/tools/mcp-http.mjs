@@ -1,4 +1,5 @@
 import { resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, deepFreeze } from './schemas.mjs';
+import { validateMcpResultType } from './mcp-protocol.mjs';
 
 const VERSION = '2026-07-28';
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -289,7 +290,7 @@ export class StreamableHttpMcpSession {
       if (!Object.hasOwn(message, 'result')) throw mcpError('MCP server returned no result', 'MCP_INVALID_RESPONSE');
       if (method === 'initialize' && protocolVersion !== VERSION)
         this.sessionId = validateSessionId(response.headers.get('mcp-session-id'));
-      return message.result;
+      return validateMcpResultType(message.result, { protocolVersion, serverName: this.name, method });
     } catch (error) {
       if (error.code) throw error;
       if (signal?.aborted) throw mcpError(`MCP call '${method}' was cancelled`, 'MCP_CANCELLED');
