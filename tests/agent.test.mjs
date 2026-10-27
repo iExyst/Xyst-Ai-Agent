@@ -134,6 +134,8 @@ test('agent resumes an interrupted session with a safe result for an unresolved 
       },
     ],
   });
+  await sessionStore.save(session);
+  const loadedInterruptedSession = await sessionStore.load(session.id);
   const requests = [];
   const runtime = new AgentRuntime({
     config: config(),
@@ -146,7 +148,7 @@ test('agent resumes an interrupted session with a safe result for an unresolved 
   });
   t.after(() => runtime.close());
 
-  const result = await runtime.run({ prompt: 'Continue after the interruption.', session });
+  const result = await runtime.run({ prompt: 'Continue after the interruption.', session: loadedInterruptedSession });
 
   assert.equal(result.status, 'complete');
   const assistantIndex = requests[0].messages.findIndex(
@@ -156,6 +158,7 @@ test('agent resumes an interrupted session with a safe result for an unresolved 
   assert.equal(toolResult.role, 'tool');
   assert.equal(toolResult.tool_call_id, 'interrupted-write');
   assert.match(toolResult.content, /outcome is unknown/);
+  assert.ok(result.session.messages.some((message) => message.role === 'tool' && message.tool_call_id === 'interrupted-write'));
   assert.equal(
     await fs.stat(path.join(root, 'marker.txt')).then(
       () => true,
