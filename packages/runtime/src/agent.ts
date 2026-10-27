@@ -612,7 +612,11 @@ export class AgentRunner {
       }
       prioritizeEvidenceRequirements();
     };
-    refreshEvidenceRequirements(requiredCompletionCriteria);
+    // Infer file contents from user-written objectives only. The generated
+    // descriptions of RequiredToolEvidence also contain words such as
+    // "exactly match" and paths, which can otherwise be misread as the file's
+    // expected contents (for example, "match \"marker\"").
+    refreshEvidenceRequirements(baseCompletionCriteria);
     // A direct answer to a read-only question about an attached image has no
     // tool result to cite. Treat the model's non-empty answer as completion
     // only when there are no requested tool calls, URLs, file outputs, or

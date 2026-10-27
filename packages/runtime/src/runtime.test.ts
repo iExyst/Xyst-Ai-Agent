@@ -1290,6 +1290,36 @@ test("inferred exact file criteria reject incorrect content and accept an exact-
   } finally { store.close(); }
 }));
 
+test("explicit file-read evidence does not become a false inferred file-content criterion", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "explicit-file-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model"); let turn = 0;
+  const expectedPath = join(root, "mission-proof.txt"); const expectedText = "XYST-MISSION-VERIFIED-041";
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "create-proof-marker", type: "function", function: { name: "file_create", arguments: JSON.stringify({ path: "mission-proof.txt", content: expectedText }) } }] } }] };
+      if (turn === 2) return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "read-proof-marker", type: "function", function: { name: "file_read", arguments: JSON.stringify({ path: "mission-proof.txt" }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", tool_calls: [{ id: "complete-proof-marker", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1, 1, 1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Create mission-proof.txt with marker XYST-MISSION-VERIFIED-041, then read it back.", {
+        workspace: root,
+        maxTurns: 4,
+        requiredToolEvidence: [{ tool: "file_read", path: expectedPath, textEquals: expectedText, normalizeNewlines: true }]
+      });
+    assert.equal(result.status, "completed", JSON.stringify(store.db.prepare("SELECT name,status,input_json,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId)));
+    assert.equal(turn, 3);
+    assert.equal(await readFileAsync(expectedPath, "utf8"), expectedText);
+    const completions = store.db.prepare("SELECT status,output_json FROM tool_calls WHERE session_id=? AND name='task_complete'").all(result.sessionId) as Array<{ status: string; output_json: string | null }>;
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0]?.status, "completed");
+    assert.equal(JSON.parse(completions[0]!.output_json!).verified, true);
+  } finally { store.close(); }
+}));
+
 test("declared outputs require exact readback and the refreshed evidence list identifies its path", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "expected-output-readback.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");
