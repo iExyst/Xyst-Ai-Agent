@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { isSensitivePath, redactSecrets, redactStructuredSecrets } from '../platform/redaction.mjs';
 import { captureProcessIdentity, verifyProcessIdentity } from '../platform/process-identity.mjs';
 import { inspectWorktreeLocks, listWorktrees, recoverWorktreeLock } from '../platform/worktrees.mjs';
@@ -10,6 +10,7 @@ import { runProcess, safeProcessEnvironment } from '../platform/process.mjs';
 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const MAX_SUBAGENT_TASKS = 500;
+const MAX_TASK_STORE_BYTES = 16 * 1024 * 1024;
 const RETRYABLE_TASK_STATUSES = new Set(['stopped', 'failed', 'cancelled', 'timed_out']);
 let currentProcessIdentityPromise = null;
 
@@ -39,7 +40,7 @@ export class SubagentTaskStore {
 
   async list({ limit = 100 } = {}) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new TypeError('limit must be between 1 and 500');
-    return (await this.#read()).tasks
+    return (await this.#readLocked()).tasks
       .slice(-limit)
       .reverse()
       .map((task) => structuredClone(task));
@@ -47,7 +48,7 @@ export class SubagentTaskStore {
 
   async read(id) {
     if (!ID_PATTERN.test(id || '')) throw new TypeError('Invalid subagent task ID');
-    return (await this.#read()).tasks.find((task) => task.id === id) || null;
+    return (await this.#readLocked()).tasks.find((task) => task.id === id) || null;
   }
 
   registerActiveCancellation(id, cancel) {
@@ -157,7 +158,7 @@ export class SubagentTaskStore {
 
   /** Find unfinished tasks whose owning OS process is verifiably gone, without mutating state. */
   async inspectInterrupted({ verifyIdentity = verifyProcessIdentity } = {}) {
-    const tasks = (await this.#read()).tasks;
+    const tasks = (await this.#readLocked()).tasks;
     const result = [];
     for (const task of tasks) {
       if (!['starting', 'running'].includes(task.status)) continue;
@@ -216,7 +217,7 @@ export class SubagentTaskStore {
   async inspectOrphanedWorktrees({ workspaceRoot = this.stateRoot, signal } = {}) {
     const [worktrees, tasks, locks] = await Promise.all([
       listWorktrees(workspaceRoot, { signal }),
-      this.#read().then((state) => state.tasks),
+      this.#readLocked().then((state) => state.tasks),
       inspectWorktreeLocks(workspaceRoot),
     ]);
     const linkedWorktrees = new Set(tasks.map((task) => task.worktree_id).filter(Boolean));
@@ -371,16 +372,25 @@ export class SubagentTaskStore {
 
   async #read() {
     try {
-      const state = JSON.parse(await fs.readFile(this.file, 'utf8'));
-      if (state.version !== 1 || !Array.isArray(state.tasks)) throw new Error('Subagent task store is invalid');
-      return state;
+      return decodeTaskStore(await fs.readFile(this.file, 'utf8'));
     } catch (error) {
-      if (error.code === 'ENOENT') return { version: 1, tasks: [] };
+      if (error.code === 'ENOENT') {
+        return (
+          (await restoreAtomicWriteBackup(this.file, { maxBytes: MAX_TASK_STORE_BYTES, decode: decodeTaskStore })) ?? {
+            version: 1,
+            tasks: [],
+          }
+        );
+      }
       throw error;
     }
   }
 
-  async #mutate(change) {
+  async #readLocked() {
+    return this.#mutate((state) => structuredClone(state), { persist: false });
+  }
+
+  async #mutate(change, { persist = true } = {}) {
     await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
     const deadline = Date.now() + this.lockWaitMs;
     let handle;
@@ -409,8 +419,9 @@ export class SubagentTaskStore {
       );
       await handle.sync();
       const state = await this.#read();
-      change(state);
-      await atomicWriteJson(this.file, state, { mode: 0o600 });
+      const result = change(state);
+      if (persist) await atomicWriteJson(this.file, state, { mode: 0o600 });
+      return result;
     } finally {
       const openedInfo = await handle.stat().catch(() => null);
       await handle.close().catch(() => {});
@@ -450,6 +461,13 @@ export class SubagentTaskStore {
     await fs.rm(lockPath);
     return true;
   }
+}
+
+function decodeTaskStore(serialized) {
+  const state = JSON.parse(serialized);
+  if (state.version !== 1 || !Array.isArray(state.tasks) || state.tasks.length > MAX_SUBAGENT_TASKS)
+    throw new Error('Subagent task store is invalid');
+  return state;
 }
 
 function sanitizePatch(patch) {

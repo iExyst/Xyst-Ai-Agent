@@ -62,6 +62,33 @@ test('subagent task store persists bounded task records and enforces cross-proce
   );
 });
 
+test('subagent task history restores one validated replacement backup instead of reporting an empty history', async (t) => {
+  const root = await createTempDirectory('xyst-subagent-backup-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SubagentTaskStore(root);
+  const task = await store.create({ parentSessionId: randomUUID(), task: 'Preserve this task history.' });
+  const backup = `${store.file}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(store.file, backup);
+
+  assert.equal((await store.read(task.id)).task, 'Preserve this task history.');
+  await assert.rejects(fs.lstat(backup), { code: 'ENOENT' });
+});
+
+test('subagent task history preserves ambiguous replacement backups', async (t) => {
+  const root = await createTempDirectory('xyst-subagent-backup-ambiguous-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SubagentTaskStore(root);
+  await store.create({ parentSessionId: randomUUID(), task: 'Do not discard this task history.' });
+  const first = `${store.file}.00000000-0000-4000-8000-000000000001.bak`;
+  const second = `${store.file}.00000000-0000-4000-8000-000000000002.bak`;
+  await fs.rename(store.file, first);
+  await fs.copyFile(first, second);
+
+  await assert.rejects(store.list(), { code: 'ATOMIC_WRITE_RECOVERY_REQUIRED' });
+  assert.equal(await fs.readFile(first, 'utf8'), await fs.readFile(second, 'utf8'));
+  await assert.rejects(fs.lstat(store.file), { code: 'ENOENT' });
+});
+
 test('subagent task store records explicit retry lineage and prevents overlapping attempts', async (t) => {
   const root = await createTempDirectory('xyst-subagent-retry-store-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
