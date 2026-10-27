@@ -16,6 +16,8 @@ import { isReadOnlySandbox, isReadOnlyTool, requiresProcessIsolation, resolveSan
 
 const DEFAULT_OUTPUT_LIMIT = 100_000;
 const DEFAULT_FILE_LIMIT = 1_000_000;
+const MAX_TOOL_RESULT_BYTES = 1_000_000;
+const MAX_TOOL_FILE_READ_BYTES = 32 * 1024 * 1024;
 
 export function createBuiltinTools({
   workspaceRoot,
@@ -183,7 +185,10 @@ async function readFile(root, args, config) {
     const [openedPath, currentStat] = await Promise.all([fs.realpath(filePath), fs.stat(filePath)]);
     if (!sameResolvedPath(openedPath, filePath) || stat.dev !== currentStat.dev || stat.ino !== currentStat.ino)
       throw new Error('File changed while opening; retry the read');
-    const maxReadBytes = isUnrestricted(config) ? Number.MAX_SAFE_INTEGER : config.tools?.max_file_bytes || DEFAULT_FILE_LIMIT;
+    const maxReadBytes = Math.min(
+      isUnrestricted(config) ? MAX_TOOL_FILE_READ_BYTES : (config.tools?.max_file_bytes ?? DEFAULT_FILE_LIMIT),
+      MAX_TOOL_FILE_READ_BYTES,
+    );
     if (stat.size > maxReadBytes) throw new Error('File is too large to read through this tool');
     const start = Math.max(1, args.start_line || 1);
     const requestedEnd = args.end_line || Number.MAX_SAFE_INTEGER;
@@ -433,7 +438,8 @@ function isShellEnabled(config) {
   return isUnrestricted(config) || config.tools?.shell_enabled === true;
 }
 function toolOutputLimit(config) {
-  return isUnrestricted(config) ? Number.MAX_SAFE_INTEGER : config.budgets?.max_tool_output_bytes || DEFAULT_OUTPUT_LIMIT;
+  const configured = isUnrestricted(config) ? MAX_TOOL_RESULT_BYTES : (config.budgets?.max_tool_output_bytes ?? DEFAULT_OUTPUT_LIMIT);
+  return Math.min(configured, MAX_TOOL_RESULT_BYTES);
 }
 
 async function atomicWrite(filePath, content, options) {

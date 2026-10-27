@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-27
 
+## Bounded tool result transport — 2026-10-27
+
+- Built-in tool responses now have a hard 1 MB runtime ceiling, including unrestricted mode, and file reads are capped at 32 MiB. This prevents a single large tool response from bypassing the runtime's memory and context boundary; larger files must be read in bounded line chunks.
+- Focused output-cap and unrestricted file-read regressions pass (3/3). Biome and whitespace checks pass. Exact-source hosted CI is pending.
+
 ## Signed update and revocation cache recovery — 2026-10-27
 
 - Application update, package update, and revocation refresh restore one bounded JSON backup under the feed-cache lock before sequence comparison. A missing cache primary can no longer be mistaken for a first run after an interrupted replacement, allowing a lower signed sequence to bypass rollback protection.
@@ -1266,7 +1271,7 @@
 
 ## Unrestricted file-size policy — 2026-10-20
 
-- Unrestricted file reads, writes, and edits bypass configured per-file and per-write byte ceilings, matching its machine-wide filesystem and no-app-policy behavior. Assisted mode retains those limits. Finite model context and runtime tool-result transport caps still apply; large content should be handled in chunks or by shell tools.
+- Unrestricted file reads, writes, and edits bypass configured per-file and per-write byte ceilings, matching its machine-wide filesystem and no-app-policy behavior. Since 2026-10-27, reads still have a hard 32 MiB transport ceiling and all built-in tool results have a hard 1 MB output ceiling; larger content must be processed in bounded chunks or with shell tools.
 - Regression coverage uses configured one-byte limits to confirm unrestricted reads, writes, and edits exceed those limits.
 
 ## Unrestricted automation output and listing limits — 2026-10-21

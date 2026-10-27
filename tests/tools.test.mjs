@@ -544,3 +544,19 @@ test('unrestricted autonomy exposes all machine paths and returns unredacted fil
   await tools.call('edit_file', { path: path.join(root, 'large-write.txt'), old_string: 'unrestricted', new_string: 'expanded' });
   assert.equal(await fs.readFile(path.join(root, 'large-write.txt'), 'utf8'), 'expanded-write');
 });
+
+test('unrestricted tool output remains bounded by the runtime transport limit', async (t) => {
+  const root = await createTempDirectory('xyst-unrestricted-output-cap-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const tools = createBuiltinTools({
+    workspaceRoot: root,
+    config: { tools: { autonomy: 'unrestricted' }, budgets: { max_tool_output_bytes: 64 } },
+  });
+  const output = await tools.call('run_process', {
+    command: process.execPath,
+    args: ['-e', "process.stdout.write('x'.repeat(1_200_000))"],
+    timeout_seconds: 30,
+  });
+  assert.ok(Buffer.byteLength(output) <= 1_000_000);
+  assert.match(output, /tool output truncated at 1000000 bytes/);
+});
