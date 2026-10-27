@@ -610,7 +610,7 @@ test("agent resume budgets context from the compacted history and keeps compacte
   const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
   try {
     const result = await agent.run("Continue the work after compaction.", { sessionId, model: "compact-resume-model", workspace: root, maxTurns: 5 });
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "completed", JSON.stringify(store.db.prepare("SELECT name,status,input_json,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId)));
     assert.equal(generation, 3);
     assert.deepEqual(completionArgs?.evidence_tool_call_indexes, [1, 2]);
     assert.ok(capturedMessages.some((message) => JSON.stringify(message).includes("Required completion criteria (runtime-defined")));
@@ -1216,6 +1216,15 @@ test("mission completion enforces required tool name, exit code, and output asse
   assert.throws(() => assertRequiredToolEvidence("file_read", { code: 0, stdout: "EXPECTED\n" }, requirement), /must come from run_process/);
   assert.throws(() => assertRequiredToolEvidence("run_process", { code: 1, stdout: "EXPECTED\n" }, requirement), /required 0/);
   assert.throws(() => assertRequiredToolEvidence("run_process", { code: 0, stdout: "OTHER\n" }, requirement), /stdout did not exactly match/);
+});
+
+test("node:test completion requires --test execution and a registered test case", () => {
+  const runner = { tool: "run_process", exitCode: 0, nodeTestRunner: true };
+  assert.doesNotThrow(() => assertRequiredToolEvidence("run_process", { code: 0 }, runner, { executable: process.execPath, args: ["--test", "src/even.test.cjs"] }));
+  assert.throws(() => assertRequiredToolEvidence("run_process", { code: 0 }, runner, { executable: process.execPath, args: ["src/even.test.cjs"] }), /node --test/);
+  const suite = { tool: "file_read", nodeTestSuite: true };
+  assert.throws(() => assertRequiredToolEvidence("file_read", { text: 'const { test } = require("node:test"); assert.equal(2, 2);' }, suite), /actual registered node:test/);
+  assert.doesNotThrow(() => assertRequiredToolEvidence("file_read", { text: 'const { test } = require("node:test"); test("passes", () => assert.equal(2, 2));' }, suite));
 });
 
 test("mission completion evidence must reference each declared file output path", async () => withTemp(async (root) => {

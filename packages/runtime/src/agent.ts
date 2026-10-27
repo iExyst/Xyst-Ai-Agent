@@ -144,10 +144,24 @@ export interface AgentOptions {
   approveRemoteFallback?: (request: RemoteFallbackApprovalRequest) => Promise<boolean>;
 }
 export interface RequiredToolEvidence { tool: string; exitCode?: number; stdoutEquals?: string; stdoutIncludes?: string; normalizeNewlines?: boolean }
-export function assertRequiredToolEvidence(toolName: string, output: unknown, requirement: RequiredToolEvidence): void {
+function containsRegisteredNodeTest(source: string): boolean {
+  const uncommented = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|\s)\/\/.*$/gm, "$1");
+  const importsNodeTest = /\brequire\s*\(\s*["']node:test["']\s*\)|\bfrom\s*["']node:test["']/.test(uncommented);
+  if (!importsNodeTest) return false;
+  const code = uncommented.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/gs, " ");
+  return /\b(?:test|it)\s*\(/.test(code);
+}
+export interface RequiredToolEvidence { tool: string; exitCode?: number; stdoutEquals?: string; stdoutIncludes?: string; normalizeNewlines?: boolean; nodeTestRunner?: boolean; nodeTestSuite?: boolean }
+export function assertRequiredToolEvidence(toolName: string, output: unknown, requirement: RequiredToolEvidence, input?: unknown): void {
   if (toolName !== requirement.tool) throw new Error(`Completion evidence must come from ${requirement.tool}, not ${toolName}`);
   const result = asRecord(output);
   if (requirement.exitCode !== undefined && result.code !== requirement.exitCode) throw new Error(`Completion evidence exited with code ${String(result.code)}; required ${requirement.exitCode}`);
+  if (requirement.nodeTestRunner) {
+    const args = asRecord(input);
+    const executable = typeof args.executable === "string" ? basename(args.executable).toLowerCase() : "";
+    if (!/^node(?:\.exe)?$/.test(executable) || !Array.isArray(args.args) || !args.args.includes("--test")) throw new Error("Completion evidence must run node --test through run_process");
+  }
+  if (requirement.nodeTestSuite && (typeof result.text !== "string" || !containsRegisteredNodeTest(result.text))) throw new Error("Completion evidence must be a file_read containing an actual registered node:test test case");
   const normalizeNewlines = (value: string) => requirement.normalizeNewlines ? value.replace(/\r\n?/g, "\n") : value;
   if (requirement.stdoutEquals !== undefined && (typeof result.stdout !== "string" || normalizeNewlines(result.stdout) !== normalizeNewlines(requirement.stdoutEquals))) throw new Error("Completion evidence stdout did not exactly match the required value");
   if (requirement.stdoutIncludes !== undefined && (typeof result.stdout !== "string" || !normalizeNewlines(result.stdout).includes(normalizeNewlines(requirement.stdoutIncludes)))) throw new Error("Completion evidence stdout did not include the required value");
@@ -193,7 +207,7 @@ export class AgentRunner {
     const requiredToolEvidence = [...(options.requiredToolEvidence ?? [])];
     const requiredCompletionCriteria = [
       ...baseCompletionCriteria,
-      ...requiredToolEvidence.map((requirement) => `Required tool evidence: ${requirement.tool}${requirement.exitCode === undefined ? "" : ` exitCode=${requirement.exitCode}`}${requirement.stdoutEquals === undefined ? "" : ` stdout must exactly match the configured value${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}${requirement.stdoutIncludes === undefined ? "" : ` stdout must include ${JSON.stringify(this.deps.provider.redact(requirement.stdoutIncludes))}${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}`)
+      ...requiredToolEvidence.map((requirement) => `Required tool evidence: ${requirement.tool}${requirement.exitCode === undefined ? "" : ` exitCode=${requirement.exitCode}`}${requirement.nodeTestRunner ? " using node --test" : ""}${requirement.nodeTestSuite ? " registering a node:test case" : ""}${requirement.stdoutEquals === undefined ? "" : ` stdout must exactly match the configured value${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}${requirement.stdoutIncludes === undefined ? "" : ` stdout must include ${JSON.stringify(this.deps.provider.redact(requirement.stdoutIncludes))}${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}`)
     ].slice(0, 50);
     const initialParts = Array.isArray(options.initialMessage?.content) ? options.initialMessage.content as Array<Record<string, unknown>> : [];
     let visionRequired = initialParts.some((part) => part.type === "image_url" || part.type === "image");
@@ -572,18 +586,30 @@ export class AgentRunner {
     const normalizedOutputPath = (path: string) => { const normalized = resolve(workspace, path); return process.platform === "win32" ? normalized.toLowerCase() : normalized; };
     const addCompletionCriterion = (criterion: string) => { if (!requiredCompletionCriteria.includes(criterion) && requiredCompletionCriteria.length < 50) requiredCompletionCriteria.push(criterion); };
     const prioritizeEvidenceRequirements = () => {
-      const originalRequirements = requiredCompletionCriteria.slice(0, baseCompletionCriteria.length + requiredToolEvidence.length);
+      const originalRequirements = requiredCompletionCriteria.slice(0, baseCompletionCriteria.length);
+      const requiredToolCriteria = requiredToolEvidence.map((requirement) => `Required tool evidence: ${requirement.tool}${requirement.exitCode === undefined ? "" : ` exitCode=${requirement.exitCode}`}${requirement.nodeTestRunner ? " using node --test" : ""}${requirement.nodeTestSuite ? " registering a real node:test case" : ""}${requirement.stdoutEquals === undefined ? "" : ` stdout must exactly match the configured value${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}${requirement.stdoutIncludes === undefined ? "" : ` stdout must include ${JSON.stringify(this.deps.provider.redact(requirement.stdoutIncludes))}${requirement.normalizeNewlines ? " after normalizing line endings" : ""}`}`);
       const evidenceRequirements = [...inferredToolEvidence.values(), ...requestedUrlCriteria.values(), ...inferredOutputPaths];
-      const prioritized = [...new Set([...originalRequirements, ...evidenceRequirements])].slice(0, 50);
+      const prioritized = [...new Set([...originalRequirements, ...requiredToolCriteria, ...evidenceRequirements])].slice(0, 50);
       const remaining = requiredCompletionCriteria.filter((criterion) => !prioritized.includes(criterion) && !inferredOutputPaths.some((path) => normalizedOutputPath(criterion) === normalizedOutputPath(path)));
       requiredCompletionCriteria.splice(0, requiredCompletionCriteria.length, ...prioritized, ...remaining.slice(0, 50 - prioritized.length));
     };
     const refreshEvidenceRequirements = (criteria: string[]) => {
       for (const [tool, criterion] of inferExplicitToolEvidence(criteria, Object.keys(tools))) { inferredToolEvidence.set(tool, criterion); addCompletionCriterion(criterion); }
-      if (Object.hasOwn(tools, "run_process") && requestsTestExecution(criteria) && !requiredToolEvidence.some((requirement) => requirement.tool === "run_process" && requirement.exitCode === 0)) {
-        const requirement: RequiredToolEvidence = { tool: "run_process", exitCode: 0 };
-        requiredToolEvidence.push(requirement);
-        addCompletionCriterion("Required tool evidence: run_process exitCode=0");
+      const explicitNodeTest = requestsTestExecution(criteria) && criteria.some((criterion) => /\bnode\s+--test\b/i.test(criterion) && /\bnode:test\b/i.test(criterion));
+      if (Object.hasOwn(tools, "run_process") && requestsTestExecution(criteria)) {
+        let processRequirement = requiredToolEvidence.find((requirement) => requirement.tool === "run_process" && requirement.exitCode === 0);
+        if (!processRequirement) {
+          processRequirement = { tool: "run_process", exitCode: 0 };
+          requiredToolEvidence.push(processRequirement);
+          addCompletionCriterion("Required tool evidence: run_process exitCode=0");
+        }
+        if (explicitNodeTest) {
+          processRequirement.nodeTestRunner = true;
+          if (!requiredToolEvidence.some((requirement) => requirement.nodeTestSuite)) {
+            requiredToolEvidence.push({ tool: "file_read", nodeTestSuite: true });
+            addCompletionCriterion("Required tool evidence: file_read registering a real node:test case");
+          }
+        }
       }
       const directUrlFetchRequested = criteria.some((criterion) => /\b(?:fetch|retrieve|request|query)\b/i.test(criterion) && inferRequestedUrls([criterion]).length > 0);
       const directUrlFetchProhibited = criteria.some((criterion) => /\b(?:do\s+not|don't|dont|never|avoid)\s+(?:fetch|retrieve|request|query)\b/i.test(criterion) || /\b(?:do\s+not|don't|dont|never|avoid)\s+(?:use|call|invoke)\s+(?:the\s+)?(?:web_fetch|`web_fetch`)\b/i.test(criterion));
@@ -638,7 +664,7 @@ export class AgentRunner {
             if (requiredTool) {
               const match = candidateRows.find(({ evidence }) => {
                 if (evidence.name !== requiredTool.tool) return false;
-                try { assertRequiredToolEvidence(evidence.name, parseOutput(evidence.output_json), requiredTool); return true; } catch { return false; }
+                try { assertRequiredToolEvidence(evidence.name, parseOutput(evidence.output_json), requiredTool, parseOutput(evidence.input_json)); return true; } catch { return false; }
               });
               if (!match) throw new Error(`The selected evidence indexes must include a successful ${requiredTool.tool} result for criterion: ${criterion}`);
               return match.index;
@@ -711,7 +737,9 @@ export class AgentRunner {
           }
           const toolEvidenceRequirement = requiredToolEvidence.find((_requirement, requirementIndex) => criterion.startsWith(`Required tool evidence: ${_requirement.tool}`) && criterion === requiredCompletionCriteria[baseCompletionCriteria.length + requirementIndex]);
           if (toolEvidenceRequirement) {
-            try { assertRequiredToolEvidence(evidence.name, evidenceRecord, toolEvidenceRequirement); }
+            let evidenceInput: unknown;
+            try { evidenceInput = JSON.parse(evidence.input_json) as unknown; } catch { evidenceInput = null; }
+            try { assertRequiredToolEvidence(evidence.name, evidenceRecord, toolEvidenceRequirement, evidenceInput); }
             catch (error) { throw new Error(`Completion evidence ${evidenceId}: ${error instanceof Error ? error.message : String(error)}`); }
           }
           const inferredTool = [...inferredToolEvidence].find(([, requiredCriterion]) => requiredCriterion === criterion)?.[0];

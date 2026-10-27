@@ -1,4 +1,10 @@
 # Xyst resume checkpoint · 2026-10-27 (refreshed)
+## Latest continuation · Node test completion verification (2026-10-27)
+
+- Tightened completion evidence for tasks that explicitly request `node:test` with `node --test`: success now requires both a successful `node --test` process and a `file_read` showing an imported `node:test` API plus an actual registered `test()`/`it()` call. This prevents Node's zero-test success case from being counted as a verified test run.
+- Regression unit checks cover valid and invalid runner arguments and registered versus top-level-only assertions. Runtime build passed; runtime suite passed 160 tests with 2 host-dependent skips and 0 failures; `git diff --check` passed. The previous Ministral coding attempt is not accepted as end-to-end model coding evidence because audit showed it had no registered test case.
+- This verifier change is not yet in the published package artifacts. It needs an exact-head Windows/Ubuntu CI and package build before the candidate hashes can be refreshed.
+
 ## Latest continuation · live data access and c58bb5d packages (2026-10-27)
 
 - Confirmed and restated the live-data contract requested by the user: the current runtime exposes `web_fetch` for bounded public HTTP(S) JSON/REST and pages, records source URL/status/content type/UTC retrieval time/truncation, and enforces network access policy. Current-source and packaged Windows/Linux runs have completed real GitHub REST and Open-Meteo calls with verified persisted evidence. GitHub and Hugging Face integrations are also available; missions can poll on schedules, while configured signed GitHub webhooks and supported MCP subscriptions provide event-driven updates. This is not an always-on universal stream. Brave Search requires a stored API key; private services require their own credentials/authenticated integration.
