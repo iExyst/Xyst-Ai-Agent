@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 import vm from 'node:vm';
 
 export const TOOL_SCHEMA_VERSION = 1;
+export const MCP_JSON_SCHEMA_DIALECT = 'https://json-schema.org/draft/2020-12/schema';
 export const MCP_SCHEMA_REF = Symbol('mcpSchemaRef');
 export const MCP_SCHEMA_DYNAMIC_REF = Symbol('mcpSchemaDynamicRef');
 

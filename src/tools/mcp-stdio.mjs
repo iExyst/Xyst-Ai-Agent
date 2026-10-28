@@ -10,6 +10,7 @@ import { safeProcessEnvironment, terminateProcessTree } from '../platform/proces
 import {
   deepFreeze,
   MCP_SCHEMA_DYNAMIC_REF,
+  MCP_JSON_SCHEMA_DIALECT,
   MCP_SCHEMA_REF,
   resolveToolTimeoutMs,
   TOOL_SCHEMA_VERSION,
@@ -1163,6 +1164,8 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   for (const key of ['$schema', '$comment', '$anchor', '$dynamicAnchor', 'format', 'contentEncoding', 'contentMediaType'])
     if (schema[key] !== undefined) {
       if (typeof schema[key] !== 'string') throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
+      if (key === '$schema' && schema[key] !== MCP_JSON_SCHEMA_DIALECT)
+        throw mcpError('MCP tool input schema uses an unsupported JSON Schema dialect', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
   if (schema.$anchor !== undefined && !/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(schema.$anchor))

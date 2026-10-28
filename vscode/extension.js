@@ -946,7 +946,7 @@ function activate(context, injectedVscode, dependencies = {}) {
       postToPanel({ type: 'runStarted', prompt: message.prompt.trim(), sessionId: activeSessionId });
       selectedModel = model || selectedModel;
       updateStatus('running');
-      for await (const event of client.events(activeRunId, { signal: runController.signal })) {
+      for await (const event of client.followRunEvents(activeRunId, { signal: runController.signal })) {
         const data = event.data;
         if (data.session_id) {
           activeSessionId = data.session_id;

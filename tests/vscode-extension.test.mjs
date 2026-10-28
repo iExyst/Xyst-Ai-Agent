@@ -715,7 +715,7 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
       nextRunEvent();
       return { budgets: { ...currentBudgets } };
     },
-    events: async function* (id) {
+    followRunEvents: async function* (id) {
       assert.equal(id, runId);
       yield { type: 'compaction_started', data: { session_id: sessionId, trigger_reason: 'context' } };
       yield {

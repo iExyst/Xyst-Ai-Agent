@@ -2718,8 +2718,13 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 ## MCP JSON Schema identifiers and dynamic anchors — 2026-10-28
 
-- Both transports preserve an absolute root `$id`, resolve static local-fragment references to `$dynamicAnchor` declarations, and resolve same-document `$dynamicRef` targets within the supported single-resource scope. Focused regressions cover recursive dynamic-anchor trees over stdio and Streamable HTTP. Nested `$id` scopes and external references remain rejected.
+- Both transports preserve an absolute root `$id`, resolve static local-fragment references to `$dynamicAnchor` declarations, and resolve same-document `$dynamicRef` targets within the supported single-resource scope. Focused regressions cover recursive dynamic-anchor trees over stdio and Streamable HTTP, including HTTP header extraction through a dynamic reference. Unsupported `$schema` dialects fail closed instead of receiving 2020-12 validation accidentally. Nested `$id` scopes and external references remain rejected.
 - The focused stdio and Streamable HTTP tests accept a schema using both features and validate referenced values; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+
+## VS Code active-run event recovery — 2026-10-28
+
+- The extension now follows active runs with the shared API client's replaying event stream. Transient disconnects resume after the last received sequence, avoiding a stale running status or missed approval events when VS Code temporarily loses the local API connection.
+- The focused extension integration check passes; the API client's reconnect cursor/replay cases remain the underlying retry coverage.
 
 ## MCP JSON Schema enum conformance — 2026-10-28
 

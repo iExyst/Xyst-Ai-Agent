@@ -30,6 +30,7 @@ function fixtureServerCode({
   dynamicToolNotifications = false,
   invalidStructuredOutput = false,
   emptyEnum = false,
+  unsupportedSchemaDialect = false,
 } = {}) {
   return `
 const readline = require('node:readline');
@@ -43,6 +44,7 @@ const sendMethodResult = (request, result) => {
     else if (${outputSchema ? 'true' : 'false'})
       result.tools[0].outputSchema = { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false };
     if (${dynamicToolNotifications ? 'true' : 'false'} && dynamicToolChanged) result.tools[0].description = 'Updated fixture tool description.';
+    if (${unsupportedSchemaDialect ? 'true' : 'false'}) result.tools[0].inputSchema.$schema = 'http://json-schema.org/draft-07/schema#';
   }
   if (request.method === 'tools/list' && result.tools?.[0]?.inputSchema) {
     result.tools[0].inputSchema.properties.unevaluated_object = {
@@ -725,6 +727,10 @@ test('MCP startup isolates one failed server and retains healthy server tools', 
     ...config.mcp.servers.fixture,
     args: ['-e', fixtureServerCode({ emptyEnum: true })],
   };
+  config.mcp.servers.invalid_dialect = {
+    ...config.mcp.servers.fixture,
+    args: ['-e', fixtureServerCode({ unsupportedSchemaDialect: true })],
+  };
   const manager = new StdioMcpManager({ config, workspaceRoot: root });
   t.after(async () => {
     await manager.close();
@@ -738,6 +744,9 @@ test('MCP startup isolates one failed server and retains healthy server tools', 
   const invalidSchema = manager.serverCatalog.find((server) => server.name === 'invalid_schema');
   assert.equal(invalidSchema.connection_state, 'error');
   assert.equal(invalidSchema.error_code, 'MCP_INVALID_SCHEMA');
+  const invalidDialect = manager.serverCatalog.find((server) => server.name === 'invalid_dialect');
+  assert.equal(invalidDialect.connection_state, 'error');
+  assert.equal(invalidDialect.error_code, 'MCP_INVALID_SCHEMA');
 });
 
 test('MCP startup handles a child that exits before accepting its first request', async (t) => {
@@ -1039,6 +1048,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   let callResultType = null;
   let scalarOutputSchema = false;
   let emptyEnum = false;
+  let unsupportedSchemaDialect = false;
   let callStructuredContent = { text: 'hello' };
   const fetchImpl = async (url, options) => {
     assert.equal(url, 'http://127.0.0.1:8765/mcp');
@@ -1064,7 +1074,9 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                         additionalProperties: false,
                       },
                   inputSchema: {
-                    $schema: 'https://json-schema.org/draft/2020-12/schema',
+                    $schema: unsupportedSchemaDialect
+                      ? 'http://json-schema.org/draft-07/schema#'
+                      : 'https://json-schema.org/draft/2020-12/schema',
                     $id: 'https://schemas.example.test/echo',
                     type: 'object',
                     properties: {
@@ -1548,6 +1560,9 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   callStructuredContent = 42;
   await assert.rejects(session.callTool('echo', { text: 'hello' }, scalarDefinition._mcp), { code: 'MCP_INVALID_RESULT' });
   emptyEnum = true;
+  await assert.rejects(session.listTools(), { code: 'MCP_INVALID_SCHEMA' });
+  emptyEnum = false;
+  unsupportedSchemaDialect = true;
   await assert.rejects(session.listTools(), { code: 'MCP_INVALID_SCHEMA' });
 });
 

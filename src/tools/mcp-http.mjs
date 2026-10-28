@@ -2,6 +2,7 @@ import {
   resolveToolTimeoutMs,
   TOOL_SCHEMA_VERSION,
   MCP_SCHEMA_DYNAMIC_REF,
+  MCP_JSON_SCHEMA_DIALECT,
   MCP_SCHEMA_REF,
   deepFreeze,
   validateMcpToolOutput,
@@ -1407,6 +1408,8 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
   for (const k of ['$schema', '$comment', '$anchor', '$dynamicAnchor', 'format', 'contentEncoding', 'contentMediaType'])
     if (schema[k] !== undefined) {
       if (typeof schema[k] !== 'string') throw mcpError(`MCP schema ${k} invalid`, 'MCP_INVALID_SCHEMA');
+      if (k === '$schema' && schema[k] !== MCP_JSON_SCHEMA_DIALECT)
+        throw mcpError('MCP schema uses an unsupported JSON Schema dialect', 'MCP_INVALID_SCHEMA');
       out[k] = schema[k];
     }
   if (schema.$anchor !== undefined && !/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(schema.$anchor))
