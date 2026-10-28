@@ -785,7 +785,7 @@ test("process killed after migration DDL leaves an intact database that can retr
   const sessions = new SessionStore(initial);
   const sessionId = sessions.create("Preserve across killed migration");
   sessions.addMessage(sessionId, "user", "Keep this message through process termination");
-  initial.db.exec("DROP TABLE session_compactions; DELETE FROM schema_migrations WHERE version=15");
+  initial.db.exec("DROP TABLE session_compactions; DELETE FROM schema_migrations WHERE version>=15");
   initial.close();
 
   const readyPath = join(root, "migration-ddl-applied.marker");
@@ -843,14 +843,15 @@ test("process killed after migration DDL leaves an intact database that can retr
 
     const recovered = new XystStore(path);
     try {
-      assert.equal((recovered.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 15);
+      assert.equal((recovered.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 16);
       assert.notEqual(recovered.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_compactions'").get(), undefined);
       assert.equal((new SessionStore(recovered).messages(sessionId) as Array<{ content: string }>)[0]?.content, "Keep this message through process termination");
       assert.equal((recovered.db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
     } finally { recovered.close(); }
   } finally {
     if (child.exitCode === null && child.signalCode === null) { child.kill(); await childClosed.catch(() => undefined); }
-  }));
+  }
+}));
 
 test("migration 16 classifies historical external actions and quarantines interrupted calls", async () => withTemp(async (root) => {
   const path = join(root, "github-write-recovery.sqlite");

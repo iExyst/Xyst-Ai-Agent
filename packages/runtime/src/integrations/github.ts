@@ -126,7 +126,6 @@ export class GitHubProvider {
     for (let page = 0; page < Math.max(1, Math.min(maxPages, 10)) && next; page++) {
       let response: Response;
       try { response = await fetch(next, { headers: this.headers(token), redirect: "error", ...(signal ? { signal } : {}) }); } catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
-      try { response = await fetch(next, { headers: this.headers(token), ...(signal ? { signal } : {}) }); } catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
       if (!response.ok) throw await this.error(response);
       const body = await response.json() as T[]; output.push(...body);
       const link = response.headers.get("link"); const candidate = link?.split(",").map((part) => part.trim()).find((part) => {
