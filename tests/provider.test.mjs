@@ -564,7 +564,7 @@ test('provider rejects null and non-object JSON response roots with a stable err
 });
 
 test('non-streaming provider responses reject malformed finish reasons', async () => {
-  for (const finish_reason of [1, [], {}]) {
+  for (const finish_reason of [1, [], {}, '', '   ']) {
     const provider = new OpenAICompatibleProvider({
       baseUrl: 'http://localhost/v1',
       model: 'x',
@@ -1256,6 +1256,7 @@ test('provider rejects malformed streamed choices and tool-call fragments before
     { choices: [{ delta: { tool_calls: [{ index: '0', function: { name: 'read_file' } }] } }] },
     { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: {} } }] } }] },
     { choices: [{ delta: {}, finish_reason: 7 }] },
+    { choices: [{ delta: {}, finish_reason: '' }] },
   ];
   for (const event of events) {
     const body = `data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`;

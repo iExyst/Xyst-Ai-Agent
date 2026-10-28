@@ -99,7 +99,7 @@ export class OpenAICompatibleProvider {
       throw new ProviderError('Provider returned an invalid assistant response', { code: 'INVALID_RESPONSE' });
     const choice = data.choices?.[0];
     if (!choice?.message) throw new ProviderError('Provider returned no assistant message', { code: 'INVALID_RESPONSE' });
-    if (choice.finish_reason !== undefined && choice.finish_reason !== null && typeof choice.finish_reason !== 'string')
+    if (!isValidFinishReason(choice.finish_reason))
       throw new ProviderError('Provider returned an invalid finish reason', { code: 'INVALID_RESPONSE' });
     return normalizeResponse(choice.message, data.usage, choice.finish_reason);
   }
@@ -385,6 +385,10 @@ function assertStreamFinished(state) {
   if (!state.finishReason) throw new ProviderError('Provider stream ended before a finish event', { code: 'INVALID_STREAM' });
 }
 
+function isValidFinishReason(value) {
+  return value === undefined || value === null || (typeof value === 'string' && value.trim().length > 0);
+}
+
 function normalizeToolCallIds(toolCalls) {
   const seen = new Set();
   return toolCalls.map((call, index) => {
@@ -469,7 +473,7 @@ function validateStreamEvent(event, state) {
       )
         throw new ProviderError('Provider returned invalid tool call fields in its stream', { code: 'INVALID_STREAM' });
     }
-    if (choice.finish_reason !== undefined && choice.finish_reason !== null && typeof choice.finish_reason !== 'string')
+    if (!isValidFinishReason(choice.finish_reason))
       throw new ProviderError('Provider returned an invalid finish reason in its stream', { code: 'INVALID_STREAM' });
   }
   state.sawEvent = true;

@@ -2601,6 +2601,6 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Workspace traversal now uses incremental directory enumeration and caps a scan at 50,000 entries, avoiding an unbounded `readdir` array for a single large directory. It validates directory identity/version before and after enumeration and returns a truncated result when the cap is reached. The full semantic-index suite passes 18/18, including outside-reparse-point race coverage; native-ext4 overflow soak remains open.
 
-## Non-streaming provider finish-reason validation — 2026-10-28
+## Provider finish-reason validation — 2026-10-28
 
-- OpenAI-compatible non-stream responses now reject malformed non-string `finish_reason` values, matching the streamed-response contract. The focused regression and changed-file checks pass.
+- OpenAI-compatible streamed and non-streamed responses now reject non-string and blank `finish_reason` values. Focused malformed-payload regressions and changed-file checks pass.
