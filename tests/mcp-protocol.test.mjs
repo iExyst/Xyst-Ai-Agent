@@ -59,11 +59,40 @@ test('MCP modern resource and prompt results require result types while legacy r
     assert.throws(() => validateMcpResultType({}, { protocolVersion: '2026-07-28', serverName: 'fixture', method }), {
       code: 'MCP_INVALID_RESPONSE',
     });
-    const result = { resultType: 'complete' };
+    const result = {
+      ...(method === 'tools/call' ? { content: [] } : {}),
+      ...(method === 'resources/read' ? { contents: [] } : {}),
+      ...(method === 'prompts/get' ? { messages: [] } : {}),
+      resultType: 'complete',
+    };
     assert.equal(validateMcpResultType(result, { protocolVersion: '2026-07-28', method }), result);
-    const legacy = {};
+    const { resultType: _resultType, ...legacy } = result;
     assert.equal(validateMcpResultType(legacy, { protocolVersion: '2025-11-25', method }), legacy);
   }
+});
+
+test('MCP resource reads and prompt messages validate returned content shapes', () => {
+  const options = { protocolVersion: '2026-07-28', serverName: 'fixture' };
+  assert.equal(
+    validateMcpResultType(
+      { resultType: 'complete', contents: [{ uri: 'file:///workspace/a.txt', text: 'contents' }] },
+      { ...options, method: 'resources/read' },
+    ).contents[0].text,
+    'contents',
+  );
+  assert.equal(
+    validateMcpResultType(
+      { resultType: 'complete', messages: [{ role: 'assistant', content: { type: 'text', text: 'answer' } }] },
+      { ...options, method: 'prompts/get' },
+    ).messages[0].role,
+    'assistant',
+  );
+  for (const [method, result] of [
+    ['resources/read', { resultType: 'complete', contents: [{ uri: 'file:///workspace/a.txt', blob: 42 }] }],
+    ['prompts/get', { resultType: 'complete', messages: [{ role: 'system', content: { type: 'text', text: 'ignored' } }] }],
+    ['prompts/get', { resultType: 'complete', messages: [{ role: 'user', content: { type: 'text', text: 1 } }] }],
+  ])
+    assert.throws(() => validateMcpResultType(result, { ...options, method }), { code: 'MCP_INVALID_RESPONSE' });
 });
 
 test('MCP result type validation rejects unsupported control flow and unknown modern results', () => {

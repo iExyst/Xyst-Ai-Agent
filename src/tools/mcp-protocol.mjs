@@ -26,6 +26,8 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
   )
     throw mcpError(`MCP server '${serverName}' omitted the required result type during ${method}`, 'MCP_INVALID_RESPONSE');
   if (method === 'tools/call') validateToolCallResult(result, { protocolVersion, serverName });
+  if (method === 'resources/read') validateResourceReadResult(result, serverName);
+  if (method === 'prompts/get') validatePromptResult(result, serverName);
   if (protocolVersion !== MODERN_PROTOCOL_VERSION || !result || typeof result !== 'object' || Array.isArray(result)) return result;
   if (!Object.hasOwn(result, 'resultType') || result.resultType === 'complete') return result;
   rejectUnsupportedResultType(result.resultType, { serverName, method });
@@ -59,21 +61,40 @@ function validateToolCallResult(result, { protocolVersion, serverName }) {
     throw mcpError(`MCP server '${serverName}' returned an invalid content block`, 'MCP_INVALID_RESPONSE');
 }
 
+function validateResourceReadResult(result, serverName) {
+  if (!isRecord(result) || !Array.isArray(result.contents) || !result.contents.every(isResourceContents))
+    throw mcpError(`MCP server '${serverName}' returned invalid resource contents`, 'MCP_INVALID_RESPONSE');
+}
+
+function validatePromptResult(result, serverName) {
+  if (
+    !isRecord(result) ||
+    !Array.isArray(result.messages) ||
+    !result.messages.every(
+      (message) => isRecord(message) && ['user', 'assistant'].includes(message.role) && isContentBlock(message.content),
+    )
+  )
+    throw mcpError(`MCP server '${serverName}' returned invalid prompt messages`, 'MCP_INVALID_RESPONSE');
+}
+
 function isContentBlock(value) {
   if (!isRecord(value)) return false;
   if (value.type === 'text') return typeof value.text === 'string';
   if (value.type === 'image' || value.type === 'audio') return typeof value.data === 'string' && typeof value.mimeType === 'string';
   if (value.type === 'resource_link') return typeof value.uri === 'string' && typeof value.name === 'string';
   if (value.type === 'resource') {
-    const resource = value.resource;
-    return (
-      isRecord(resource) &&
-      typeof resource.uri === 'string' &&
-      (typeof resource.text === 'string' || typeof resource.blob === 'string') &&
-      (resource.mimeType === undefined || typeof resource.mimeType === 'string')
-    );
+    return isResourceContents(value.resource);
   }
   return false;
+}
+
+function isResourceContents(value) {
+  return (
+    isRecord(value) &&
+    typeof value.uri === 'string' &&
+    (typeof value.text === 'string' || typeof value.blob === 'string') &&
+    (value.mimeType === undefined || typeof value.mimeType === 'string')
+  );
 }
 
 function isRecord(value) {
