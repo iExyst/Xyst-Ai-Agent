@@ -990,7 +990,7 @@ function resolveLocalSchemaReference(rootSchema, reference) {
       if (!schema || typeof schema !== 'object' || Array.isArray(schema) || visited.has(schema)) continue;
       visited.add(schema);
       if (++count > 512 || depth > 32) throw mcpError('MCP tool schema anchor search exceeds its limit', 'MCP_INVALID_SCHEMA');
-      if (schema.$anchor === anchor) {
+      if (schema.$anchor === anchor || schema.$dynamicAnchor === anchor) {
         if (target) throw mcpError('MCP tool input schema contains duplicate $anchor values', 'MCP_INVALID_SCHEMA');
         target = schema;
       }
@@ -1047,8 +1047,10 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   cache.set(schema, result);
   const allowed = new Set([
     '$schema',
+    '$id',
     '$comment',
     '$anchor',
+    '$dynamicAnchor',
     '$defs',
     'definitions',
     '$ref',
@@ -1123,6 +1125,17 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     const target = resolveLocalSchemaReference(rootSchema, schema.$ref);
     result[MCP_SCHEMA_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
   }
+  if (schema.$id !== undefined) {
+    let identifier;
+    try {
+      identifier = new URL(schema.$id);
+    } catch {
+      throw mcpError('MCP tool input schema has an invalid root $id', 'MCP_INVALID_SCHEMA');
+    }
+    if (depth !== 0 || typeof schema.$id !== 'string' || identifier.hash)
+      throw mcpError('MCP tool input schema only supports an absolute root $id without a fragment', 'MCP_INVALID_SCHEMA');
+    result.$id = schema.$id;
+  }
   const type = schema.type;
   const hasType = Object.hasOwn(schema, 'type');
   if (!hasType && depth === 0) throw mcpError('MCP tool input schema must declare a root type', 'MCP_INVALID_SCHEMA');
@@ -1134,13 +1147,15 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   )
     throw mcpError('MCP tool input schema uses an unsupported type', 'MCP_INVALID_SCHEMA');
   Object.assign(result, hasType ? { type } : {});
-  for (const key of ['$schema', '$comment', '$anchor', 'format', 'contentEncoding', 'contentMediaType'])
+  for (const key of ['$schema', '$comment', '$anchor', '$dynamicAnchor', 'format', 'contentEncoding', 'contentMediaType'])
     if (schema[key] !== undefined) {
       if (typeof schema[key] !== 'string') throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
   if (schema.$anchor !== undefined && !/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(schema.$anchor))
     throw mcpError('MCP tool input schema has an invalid $anchor', 'MCP_INVALID_SCHEMA');
+  if (schema.$dynamicAnchor !== undefined && !/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(schema.$dynamicAnchor))
+    throw mcpError('MCP tool input schema has an invalid $dynamicAnchor', 'MCP_INVALID_SCHEMA');
   if (schema.contentSchema !== undefined)
     result.contentSchema = normalizeSchema(schema.contentSchema, depth + 1, budget, rootSchema, refStack, cache);
   if (schema.examples !== undefined && !Array.isArray(schema.examples))

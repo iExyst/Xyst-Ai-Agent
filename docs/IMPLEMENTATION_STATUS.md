@@ -2716,6 +2716,11 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - Stdio and Streamable HTTP now preserve same-document recursive `$ref` links so schemas can validate nested data such as tree-shaped objects. Reference evaluation has a 128-step runtime limit; external references remain rejected.
 - Both transports cover valid nested trees and invalid child values; the stdio case also verifies that excessive recursive depth is rejected. `node --test tests/mcp.test.mjs` passed 37 tests with one expected Linux Bubblewrap capability skip; the additional depth regression passes locally. Changed-file Biome and whitespace checks pass. Exact-source hosted Windows/Linux CI is pending.
 
+## MCP JSON Schema identifiers and dynamic anchors — 2026-10-28
+
+- Both transports preserve an absolute root `$id` and resolve static local-fragment references to `$dynamicAnchor` declarations. Nested `$id` scopes, `$dynamicRef`, and external references remain rejected because dynamic resource-scope resolution is not implemented.
+- The focused stdio and Streamable HTTP tests accept a schema using both features and validate referenced values; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+
 ## MCP JSON Schema enum conformance — 2026-10-28
 
 - MCP tool discovery now rejects empty `enum` arrays on stdio and Streamable HTTP, as JSON Schema requires. Focused transport regressions and changed-file Biome/whitespace checks pass; the running hosted CI revision predates this change.

@@ -74,6 +74,9 @@ const sendMethodResult = (request, result) => {
       unevaluatedItems: false,
     };
     result.tools[0].inputSchema.$defs = { ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 }, TreeNode: { type: 'object', properties: { value: { type: 'integer' }, children: { type: 'array', items: { $ref: '#/$defs/TreeNode' } } }, required: ['value'], additionalProperties: false } };
+    result.tools[0].inputSchema.$id = 'https://schemas.example.test/echo';
+    result.tools[0].inputSchema.$defs.DynamicText = { $dynamicAnchor: 'DynamicText', type: 'string', minLength: 2 };
+    result.tools[0].inputSchema.properties.dynamic_anchor_text = { $ref: '#DynamicText' };
     result.tools[0].inputSchema.properties.recursive_tree = { $ref: '#/$defs/TreeNode' };
     result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
     result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
@@ -269,6 +272,7 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.deepEqual(manager.definitions[1].parameters.properties.count.enum, [1, 2]);
   const definition = manager.definitions[0];
   assert.equal(definition.parameters.$schema, 'https://json-schema.org/draft/2020-12/schema');
+  assert.equal(definition.parameters.$id, 'https://schemas.example.test/echo');
   assert.deepEqual(definition.parameters.properties.format_metadata, {
     type: 'string',
     format: 'email',
@@ -371,6 +375,8 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_tight: 'longer' }), /characters/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'ok' }).ref_anchor, 'ok');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'x' }), /characters/);
+  assert.equal(validateArguments(definition.parameters, { text: 'hello', dynamic_anchor_text: 'ok' }).dynamic_anchor_text, 'ok');
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', dynamic_anchor_text: 'x' }), /characters/);
   assert.deepEqual(
     validateArguments(definition.parameters, { text: 'hello', legacy_dependencies: { card: 1, billing: 2, member: 1, id: 'x' } })
       .legacy_dependencies,
@@ -1040,9 +1046,11 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                       },
                   inputSchema: {
                     $schema: 'https://json-schema.org/draft/2020-12/schema',
+                    $id: 'https://schemas.example.test/echo',
                     type: 'object',
                     properties: {
                       text: { type: 'string' },
+                      dynamic_anchor_text: { $ref: '#DynamicText' },
                       format_metadata: {
                         type: 'string',
                         format: 'email',
@@ -1136,6 +1144,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
       };
       result.tools[0].inputSchema.$defs = {
         ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 },
+        DynamicText: { $dynamicAnchor: 'DynamicText', type: 'string', minLength: 2 },
         TreeNode: {
           type: 'object',
           properties: { value: { type: 'integer' }, children: { type: 'array', items: { $ref: '#/$defs/TreeNode' } } },
@@ -1201,6 +1210,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   assert.equal((await session.listPrompts()).length, 1);
   assert.equal(definitions[0].execution.sandbox, 'unsupported');
   assert.equal(definitions[0].parameters.$schema, 'https://json-schema.org/draft/2020-12/schema');
+  assert.equal(definitions[0].parameters.$id, 'https://schemas.example.test/echo');
   assert.equal(definitions[0].parameters.properties.format_metadata.format, 'email');
   assert.equal(definitions[0].parameters.properties.format_metadata.contentEncoding, 'utf-8');
   assert.equal(definitions[0].parameters.properties.format_metadata.contentMediaType, 'text/plain');
@@ -1347,6 +1357,14 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_tight: 'longer' }), /characters/);
   assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_anchor: 'ok' }).ref_anchor, 'ok');
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_anchor: 'x' }), /characters/);
+  assert.equal(
+    validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', dynamic_anchor_text: 'ok' }).dynamic_anchor_text,
+    'ok',
+  );
+  assert.throws(
+    () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', dynamic_anchor_text: 'x' }),
+    /characters/,
+  );
   assert.equal(
     validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', legacy_ref_text: 'ok' }).legacy_ref_text,
     'ok',
