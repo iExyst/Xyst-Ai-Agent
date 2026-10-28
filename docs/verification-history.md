@@ -1790,3 +1790,14 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 - Memory edits now update content and remove that memory's cached semantic embeddings in a single SQLite transaction, so interruption cannot leave an old vector attached to new text.
 - The focused memory regression passes 1/1 and verifies edited content is absent from semantic retrieval until re-indexed, deleting the final memory cascades to its embedding, and semantic search no longer returns the deleted entry. Full `npm test` passed (runtime 183 passed / 2 host-specific skips, CLI 26/26, release checks 5/5), `npm run typecheck` passed, and `git diff --check` passed. Hosted checks have not yet run for this change.
 - This closes deterministic edit/delete propagation for the tested profile. Broader retrieval quality and larger-profile deletion behavior remain open; E8 stays partial.
+
+## Third isolated Qwen3.5 9B coding acceptance · 2026-10-28
+
+- Used `qwen/qwen3.5-9b` with a fresh temporary APPDATA profile and separate temporary working directory. Session `1c7a0db7-c066-49c1-bd68-726e51b12643` created `fib.mjs` and `fib.test.mjs`, executed the exact `node --test fib.test.mjs` command with exit code 0 (24/24), read both exact files, and persisted `task_complete verified=true` citing the command and file-read evidence.
+- An independent rerun in the same disposable workspace also passed 24/24. SHA-256: `fib.mjs` `6cd50fb66f0666599a5f6ef057c82c8faf1d9d33a95ef15a3a815e22fa35c69c`; `fib.test.mjs` `e87eb998306b707c04046eaf1ed331b8369faa481d6a522cae5a774c7da03397`.
+- This is a third bounded coding-loop success, not evidence of broad or sustained model reliability. The generated files remained outside the PC repository.
+
+## Version-one SQLite profile upgrade · 2026-10-28
+
+- Built a clean legacy v1 SQLite profile with the original session/message/tool, mission, agent, job, artifact, usage, and settings schema plus a saved user message. Opening it with the current runtime applied migrations 2 through 15, preserved the exact historical message, and returned `PRAGMA integrity_check = ok`.
+- Focused migration regression passed 1/1. Full `npm test` passed (runtime 185 passed / 2 host-specific skips, CLI 26/26, release checks 5/5), workspace `npm run typecheck` passed, and `git diff --check` passed. This verifies a clean version-one upgrade path only; other starting versions, large production-sized databases, and crash interruption remain open under E7.

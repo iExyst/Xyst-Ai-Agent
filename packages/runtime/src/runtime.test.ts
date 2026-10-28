@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { Cron } from "croner";
+import Database from "better-sqlite3";
 import { ConfigStore, inspectDatabaseIntegrity, XystStore, SessionStore, MemoryStore, JobStore } from "./storage.js";
 import { createText, patchText, readText, searchFiles } from "./tools/files.js";
 import { normalizeUserPath, runProcess } from "./platform.js";
@@ -604,6 +605,36 @@ test("SQLite migrations persist sessions and resolve config from most specific s
   assert.equal((reopened.db.prepare("SELECT effect FROM tool_calls WHERE id=?").get(legacyCallId) as { effect: string }).effect, "external");
   assert.equal((reopened.db.prepare("SELECT effect FROM tool_calls WHERE id=?").get(legacyCloneCallId) as { effect: string }).effect, "external");
   reopened.close();
+}));
+
+test("version-one database upgrades through every migration without losing saved sessions", async () => withTemp(async (root) => {
+  const path = join(root, "version-one.sqlite"); const legacy = new Database(path);
+  legacy.pragma("foreign_keys = ON");
+  legacy.exec(`CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE tool_calls (id TEXT PRIMARY KEY, session_id TEXT, name TEXT NOT NULL, input_json TEXT NOT NULL, output_json TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, finished_at TEXT);
+    CREATE TABLE missions (id TEXT PRIMARY KEY, definition_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE agents (id TEXT PRIMARY KEY, mission_id TEXT, definition_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE jobs (id TEXT PRIMARY KEY, session_id TEXT, mission_id TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, details_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE artifacts (id TEXT PRIMARY KEY, session_id TEXT, job_id TEXT, name TEXT NOT NULL, path TEXT NOT NULL, mime_type TEXT, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE usage (id TEXT PRIMARY KEY, session_id TEXT, provider TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER, duration_ms INTEGER, details_json TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE settings (scope TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, value_json TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope, scope_id, key));
+    CREATE INDEX messages_session_created ON messages(session_id, created_at);
+    CREATE INDEX tool_calls_session_created ON tool_calls(session_id, created_at);
+    INSERT INTO schema_migrations(version, applied_at) VALUES (1, '2024-01-01T00:00:00.000Z');`);
+  legacy.prepare("INSERT INTO sessions(id,title,status,created_at,updated_at) VALUES(?,?,'active',?,?)").run("legacy-session", "Saved before migrations", "2024-01-01T00:00:00.000Z", "2024-01-01T00:00:00.000Z");
+  legacy.prepare("INSERT INTO messages(id,session_id,role,content,created_at) VALUES(?,?,'user',?,?)").run("legacy-message", "legacy-session", "Keep this historic request", "2024-01-01T00:01:00.000Z");
+  legacy.close();
+
+  const upgraded = new XystStore(path);
+  try {
+    const version = upgraded.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number };
+    assert.equal(version.version, 15);
+    const savedMessages = new SessionStore(upgraded).messages("legacy-session") as Array<{ content: unknown }>;
+    assert.deepEqual(savedMessages.map((message) => message.content), ["Keep this historic request"]);
+    assert.equal((upgraded.db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
+  } finally { upgraded.close(); }
 }));
 
 test("job inspection aggregates persisted trigger, mission-run, and model-download records", async () => withTemp(async (root) => {
