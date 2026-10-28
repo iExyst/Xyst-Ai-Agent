@@ -443,6 +443,10 @@ function validateValue(schema, value, location) {
     if (matchingBranches !== 1) throw new Error(`${location} must match exactly one schema`);
   }
   if (schema.not && schemaMatches(schema.not, value, location)) throw new Error(`${location} must not match the excluded schema`);
+  if (schema.if) {
+    const branch = schemaMatches(schema.if, value, location) ? schema.then : schema.else;
+    if (branch !== undefined) validateValue(branch, value, location);
+  }
   if (schema.type === undefined) return;
   if (schema.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${location} must be an object`);

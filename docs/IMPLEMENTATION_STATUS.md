@@ -2638,5 +2638,5 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 ## MCP schema composition validation — 2026-10-28
 
-- MCP stdio and Streamable HTTP tool schemas accept bounded `allOf`, `anyOf`, `oneOf`, and `not` composition, including type-free composition wrappers. A per-schema validation budget and branch/depth caps bound server-provided schemas. Type-specific constraints still require an explicit type, avoiding silent acceptance of constraints the validator cannot apply.
+- MCP stdio and Streamable HTTP tool schemas accept bounded `allOf`, `anyOf`, `oneOf`, `not`, and `if`/`then`/`else` composition, including type-free composition wrappers. A per-schema validation budget and branch/depth caps bound server-provided schemas. Type-specific constraints still require an explicit type, avoiding silent acceptance of constraints the validator cannot apply.
 - The focused stdio and Streamable HTTP regressions pass (2/2); changed-file Biome checks and `git diff --check` pass. Additional JSON Schema composition and validation keywords remain open.

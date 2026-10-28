@@ -1045,6 +1045,9 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
     'anyOf',
     'oneOf',
     'not',
+    'if',
+    'then',
+    'else',
   ]);
   if (Object.keys(schema).some((key) => !allowed.has(key)))
     throw mcpError('MCP schema uses unsupported JSON Schema keyword', 'MCP_INVALID_SCHEMA');
@@ -1094,6 +1097,7 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
       out[k] = schema[k].map((item) => normalizeSchema(item, depth + 1, budget));
     }
   if (schema.not !== undefined) out.not = normalizeSchema(schema.not, depth + 1, budget);
+  for (const k of ['if', 'then', 'else']) if (schema[k] !== undefined) out[k] = normalizeSchema(schema[k], depth + 1, budget);
   for (const k of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'])
     if (schema[k] !== undefined) {
       if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[k]))
