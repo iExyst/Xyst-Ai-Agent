@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## MCP discovery negotiation parity — 2026-10-28
+
+- The shared MCP response validator now rejects malformed or oversized advertised protocol-version lists on both transports. Streamable HTTP falls back to legacy initialization when discovery validly advertises legacy versions but not `2026-07-28`, matching stdio negotiation. Focused stdio, HTTP, and protocol checks pass (5/5 selected tests); changed-file Biome checks pass. Exact-source hosted confirmation is pending.
+- The Windows Node 22 lane in run [40697685598](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40697685598) failed only the semantic-index reparse-race test's assumption that a renamed in-workspace directory cannot be indexed during the race. The test now permits that original in-workspace file while still requiring that outside canary contents never reach embedding or persistence; the focused regression passes locally. Windows Node 24 and desktop package jobs remain in progress. Both Ubuntu Node lanes fail at the known hosted Bubblewrap loopback restriction; Linux desktop lifecycle work remains in progress.
+
 ## Active-run recovery in the browser and VS Code — 2026-10-28
 
 - The browser reload path restores an in-progress session, approval cards, and run controls. Its browser smoke covers reload, approval, pause/resume, model changes, and budget changes; the API snapshot regression and package smoke pass.

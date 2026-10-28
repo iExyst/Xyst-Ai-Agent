@@ -23,6 +23,7 @@ function fixtureServerCode({
   malicious = false,
   toolResultType = null,
   invalidDiscovery = false,
+  invalidDiscoveryVersions = null,
   invalidJsonRpcResponse = false,
   outputSchema = false,
   scalarOutputSchema = false,
@@ -64,7 +65,7 @@ lines.on('line', (line) => {
     return;
   }
   if (request.method === 'server/discover') {
-    ${legacy ? "fail(request.id, -32601, 'method not found');" : invalidDiscovery ? "sendMethodResult(request, { supportedVersions: '2026-07-28', capabilities: {} });" : `sendMethodResult(request, { supportedVersions: ['2026-07-28'], capabilities: { tools: ${dynamicToolNotifications ? '{ listChanged: true }' : '{}'}, resources: {}, prompts: {}, private: { token: 'metadata-secret-canary' } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'fixture', version: 'token=metadata-secret-canary' } } });`}
+    ${legacy ? "fail(request.id, -32601, 'method not found');" : invalidDiscovery ? "sendMethodResult(request, { supportedVersions: '2026-07-28', capabilities: {} });" : invalidDiscoveryVersions ? `sendMethodResult(request, { supportedVersions: ${JSON.stringify(invalidDiscoveryVersions)}, capabilities: {} });` : `sendMethodResult(request, { supportedVersions: ['2026-07-28'], capabilities: { tools: ${dynamicToolNotifications ? '{ listChanged: true }' : '{}'}, resources: {}, prompts: {}, private: { token: 'metadata-secret-canary' } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'fixture', version: 'token=metadata-secret-canary' } } });`}
   } else if (request.method === 'initialize') {
     send(request.id, { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } });
   } else if (request.method === 'notifications/initialized') {
@@ -109,6 +110,7 @@ function managerConfig({
   malicious = false,
   toolResultType = null,
   invalidDiscovery = false,
+  invalidDiscoveryVersions = null,
   invalidJsonRpcResponse = false,
   outputSchema = false,
   scalarOutputSchema = false,
@@ -135,6 +137,7 @@ function managerConfig({
               malicious,
               toolResultType,
               invalidDiscovery,
+              invalidDiscoveryVersions,
               invalidJsonRpcResponse,
               outputSchema,
               scalarOutputSchema,
@@ -450,17 +453,23 @@ test('MCP stdio manager falls back to the legacy initialize handshake', async (t
   assert.equal(result.content[0].text, 'echo:old protocol');
 });
 
-test('MCP stdio does not downgrade a malformed discovery response to legacy', async (t) => {
-  const root = await createTempDirectory('xyst-mcp-invalid-discovery-');
-  const manager = new StdioMcpManager({ config: managerConfig({ invalidDiscovery: true }), workspaceRoot: root });
-  t.after(async () => {
-    await manager.close();
-    await fs.rm(root, { recursive: true, force: true });
-  });
-  await manager.initialize();
-  assert.equal(manager.serverCatalog[0].connection_state, 'error');
-  assert.equal(manager.serverCatalog[0].error_code, 'MCP_INVALID_RESPONSE');
-  assert.deepEqual(manager.definitions, []);
+test('MCP stdio does not downgrade malformed discovery or protocol-version lists to legacy', async (t) => {
+  for (const [index, config] of [
+    { invalidDiscovery: true },
+    { invalidDiscoveryVersions: ['not-a-version', '2026-07-28'] },
+    { invalidDiscoveryVersions: Array(33).fill('2026-07-28') },
+  ].entries()) {
+    const root = await createTempDirectory(`xyst-mcp-invalid-discovery-${index}-`);
+    const manager = new StdioMcpManager({ config: managerConfig(config), workspaceRoot: root });
+    t.after(async () => {
+      await manager.close();
+      await fs.rm(root, { recursive: true, force: true });
+    });
+    await manager.initialize();
+    assert.equal(manager.serverCatalog[0].connection_state, 'error');
+    assert.equal(manager.serverCatalog[0].error_code, 'MCP_INVALID_RESPONSE');
+    assert.deepEqual(manager.definitions, []);
+  }
 });
 
 test('MCP stdio rejects response envelopes that contain both result and error', async (t) => {
@@ -1370,6 +1379,45 @@ test('MCP HTTP rejects malformed or oversized server protocol version lists', as
     });
     await assert.rejects(session.negotiate(), { code: 'MCP_INVALID_RESPONSE' });
   }
+});
+
+test('MCP HTTP falls back to legacy when discovery advertises only legacy versions', async (t) => {
+  const methods = [];
+  const session = new StreamableHttpMcpSession({
+    name: 'legacy-discovery',
+    settings: { url: 'https://mcp.example.test/mcp' },
+    headers: {},
+    timeoutMs: 1000,
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      methods.push(request.method);
+      if (request.method === 'server/discover')
+        return Response.json({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            resultType: 'complete',
+            cacheScope: 'private',
+            ttlMs: 0,
+            supportedVersions: ['2025-11-25'],
+            capabilities: { tools: {} },
+          },
+        });
+      if (request.method === 'initialize')
+        return Response.json({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'legacy-discovery', version: '1' } },
+        });
+      if (request.method === 'notifications/initialized') return new Response(null, { status: 202 });
+      throw new Error(`Unexpected request: ${request.method}`);
+    },
+  });
+  t.after(() => session.close());
+
+  await session.negotiate();
+  assert.equal(session.version, '2025-11-25');
+  assert.deepEqual(methods, ['server/discover', 'initialize', 'notifications/initialized']);
 });
 
 test('MCP resumable Streamable HTTP resumes interrupted SSE responses with the last event ID', async (t) => {

@@ -64,23 +64,14 @@ export class StreamableHttpMcpSession {
         { _meta: modernMeta() },
         { timeoutMs: Math.min(this.timeoutMs, 1800), allowError: true, protocolVersion: VERSION },
       );
-      if (discovered?.supportedVersions !== undefined) {
-        const supportedVersions = discovered.supportedVersions;
-        if (
-          !Array.isArray(supportedVersions) ||
-          supportedVersions.length > 32 ||
-          supportedVersions.some((version) => typeof version !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(version))
-        ) {
-          throw mcpError('MCP server returned an invalid protocol version list', 'MCP_INVALID_RESPONSE');
-        }
-        if (supportedVersions.includes(VERSION)) {
-          this.version = VERSION;
-          this.capabilities = discovered.capabilities || {};
-          this.serverInfo = discovered._meta?.['io.modelcontextprotocol/serverInfo'] || discovered.serverInfo || null;
-          return;
-        }
-        throw mcpError('MCP server does not support a compatible protocol version', 'MCP_VERSION_UNSUPPORTED');
+      if (discovered.supportedVersions.includes(VERSION)) {
+        this.version = VERSION;
+        this.capabilities = discovered.capabilities;
+        this.serverInfo = discovered._meta?.['io.modelcontextprotocol/serverInfo'] || discovered.serverInfo || null;
+        return;
       }
+      if (!discovered.supportedVersions.some((version) => LEGACY.includes(version)))
+        throw mcpError('MCP server does not support a compatible protocol version', 'MCP_VERSION_UNSUPPORTED');
     } catch (error) {
       if (error.code !== 'MCP_REMOTE_METHOD_MISSING' && !(error.code === 'MCP_HTTP_STATUS' && [404, 405].includes(error.status)))
         throw error;

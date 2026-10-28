@@ -19,6 +19,8 @@ const RESULT_TYPE_METHODS = new Set([
   'prompts/list',
   'prompts/get',
 ]);
+const MAX_SUPPORTED_PROTOCOL_VERSIONS = 32;
+const PROTOCOL_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Reject modern MCP control-flow results that Xyst does not yet implement. */
 export function validateMcpResultType(result, { protocolVersion, serverName, method }) {
@@ -48,7 +50,8 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
     protocolVersion === MODERN_PROTOCOL_VERSION &&
     method === 'server/discover' &&
     (!Array.isArray(result.supportedVersions) ||
-      !result.supportedVersions.every((version) => typeof version === 'string') ||
+      result.supportedVersions.length > MAX_SUPPORTED_PROTOCOL_VERSIONS ||
+      !result.supportedVersions.every((version) => typeof version === 'string' && PROTOCOL_VERSION_PATTERN.test(version)) ||
       !isServerCapabilities(result.capabilities) ||
       !isOptionalString(result.instructions))
   )
