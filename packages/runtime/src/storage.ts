@@ -482,10 +482,12 @@ export class MemoryStore {
   update(id: string, content: string): MemoryRecord {
     const text = content.trim(); if (!text || text.length > 20_000) throw new Error("Memory content must be between 1 and 20,000 characters");
     if (/\b(?:api[_ -]?key|token|password|secret)\s*[:=]/i.test(text)) throw new Error("Memory entries cannot contain credential-like values");
-    const now = new Date().toISOString(); const result = this.store.db.prepare("UPDATE memories SET content=?,updated_at=? WHERE id=?").run(text, now, id);
-    if (!result.changes) throw new Error(`Memory not found: ${id}`);
-    this.store.db.prepare("DELETE FROM memory_embeddings WHERE memory_id=?").run(id);
-    return this.store.db.prepare("SELECT * FROM memories WHERE id=?").get(id) as MemoryRecord;
+    return this.store.db.transaction(() => {
+      const now = new Date().toISOString(); const result = this.store.db.prepare("UPDATE memories SET content=?,updated_at=? WHERE id=?").run(text, now, id);
+      if (!result.changes) throw new Error(`Memory not found: ${id}`);
+      this.store.db.prepare("DELETE FROM memory_embeddings WHERE memory_id=?").run(id);
+      return this.store.db.prepare("SELECT * FROM memories WHERE id=?").get(id) as MemoryRecord;
+    }).immediate();
   }
   delete(id: string): void {
     const result = this.store.db.prepare("DELETE FROM memories WHERE id=?").run(id);

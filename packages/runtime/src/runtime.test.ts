@@ -4958,7 +4958,10 @@ test("memory is searchable, editable, deletable, and keeps inferred notes separa
   assert.equal(memories.embeddings("test-embed").length, 2);
   const updated = memories.update(preference.id, "Keep concise progress updates"); assert.match(updated.content, /progress updates/);
   assert.equal(memories.embeddings("test-embed").length, 1);
+  assert.equal(memories.searchSemantic([0, 1], "test-embed").some((memory) => memory.id === preference.id), false, "editing invalidates the old semantic vector");
   memories.delete(inferred.id); assert.equal(memories.list().length, 1); assert.throws(() => memories.delete(inferred.id), /not found/);
+  assert.equal(memories.embeddings("test-embed").length, 0, "deleting a memory cascades to its indexed semantic vector");
+  assert.equal(memories.searchSemantic([0, 1], "test-embed").length, 0);
   assert.equal((store.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 15);
   store.close();
 }));
