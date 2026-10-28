@@ -494,7 +494,7 @@ function App() {
     {layout.navigation && <aside className="sidebar">
       <div className="brand"><RobotMark/><div><strong>XYST</strong><span>CONTROL ROOM</span></div><span className="brand-version">0.1</span></div>
       <div className="workspace-chip"><span className="workspace-marker" aria-hidden="true"/>LOCAL WORKSPACE<i>⌄</i></div>
-      <div className="nav-label">COMMAND</div>
+      <div className="nav-label" style={prefs.highContrast ? { color: "#d6e2da" } : undefined}>COMMAND</div>
       <nav>
         <button className={view === "overview" ? "nav-item active" : "nav-item"} onClick={() => setView("overview")}><b>⌂</b>Overview<span className="nav-count">01</span></button>
         <button className={view === "sessions" ? "nav-item active" : "nav-item"} onClick={() => setView("sessions")}><b>◷</b>Sessions<span className="nav-count">{snapshot.sessions.length.toString().padStart(2, "0")}</span></button>
@@ -506,7 +506,7 @@ function App() {
         <button className={view === "github" ? "nav-item active" : "nav-item"} onClick={() => setView("github")}><b>⌘</b>GitHub bridge</button>
         <button className={view === "changes" ? "nav-item active" : "nav-item"} onClick={() => setView("changes")}><b>⌁</b>Changes</button>
       </nav>
-      <div className="nav-label secondary-label">SYSTEM</div>
+      <div className="nav-label secondary-label" style={prefs.highContrast ? { color: "#d6e2da" } : undefined}>SYSTEM</div>
       <button className={view === "memory" ? "nav-item active" : "nav-item"} onClick={() => setView("memory")}><b>✧</b>Memory<span className="nav-count">{snapshot.memories.length.toString().padStart(2, "0")}</span></button>
       <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}><b>⚙</b>Settings</button>
       <div className="sidebar-spacer"/>

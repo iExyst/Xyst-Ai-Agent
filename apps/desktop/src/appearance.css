@@ -18,6 +18,10 @@ html[data-high-contrast="true"] :is(.nav-label, .brand span:not(.brand-version),
   color: #d6e2da !important;
 }
 
+.sidebar .nav-label {
+  color: var(--muted);
+}
+
 html[data-decorative-effects="false"] .app-shell {
   background: var(--bg);
 }
