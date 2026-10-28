@@ -571,6 +571,20 @@ test('MCP JSON Schema enum and const compare JSON numbers mathematically', () =>
   });
 });
 
+test('MCP JSON Schema conditionals evaluate boolean subschemas', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      // biome-ignore lint/suspicious/noThenProperty: `then` is the JSON Schema conditional keyword.
+      choose_else: { if: false, then: false, else: { type: 'string' } },
+      // biome-ignore lint/suspicious/noThenProperty: `then` is the JSON Schema conditional keyword.
+      reject_else: { if: false, then: { type: 'string' }, else: false },
+    },
+  };
+  assert.deepEqual(validateArguments(schema, { choose_else: 'correct branch' }), { choose_else: 'correct branch' });
+  assert.throws(() => validateArguments(schema, { reject_else: 'wrong branch' }), /not allowed/);
+});
+
 test('modern MCP stdio progress notifications are correlated and surfaced to the active tool call', async (t) => {
   const root = await createTempDirectory('xyst-mcp-progress-');
   const manager = new StdioMcpManager({ config: managerConfig({ progressTool: true }), workspaceRoot: root });

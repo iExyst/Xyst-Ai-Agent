@@ -638,7 +638,7 @@ function validateValue(schema, value, location, state) {
     mergeEvaluated(evaluated, matchingProperties);
   }
   if (schema.not && tryValidateValue(schema.not, value, location, state)) throw new Error(`${location} must not match the excluded schema`);
-  if (schema.if) {
+  if (schema.if !== undefined) {
     const branch = tryValidateValue(schema.if, value, location, state) ? schema.then : schema.else;
     if (branch !== undefined) mergeEvaluated(evaluated, validateValue(branch, value, location, state));
   }
