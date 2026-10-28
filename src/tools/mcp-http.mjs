@@ -1400,7 +1400,8 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
       out[k] = k === 'description' && depth ? `Untrusted server-provided schema note: ${schema[k]}` : schema[k];
     }
   if (schema.enum !== undefined) {
-    if (!Array.isArray(schema.enum) || schema.enum.length > 100) throw mcpError('MCP enum invalid', 'MCP_INVALID_SCHEMA');
+    if (!Array.isArray(schema.enum) || schema.enum.length === 0 || schema.enum.length > 100)
+      throw mcpError('MCP enum invalid', 'MCP_INVALID_SCHEMA');
     out.enum = schema.enum;
   }
   if (Object.hasOwn(schema, 'const')) out.const = schema.const;

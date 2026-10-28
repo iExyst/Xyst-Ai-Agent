@@ -2716,6 +2716,10 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - Stdio and Streamable HTTP now preserve same-document recursive `$ref` links so schemas can validate nested data such as tree-shaped objects. Reference evaluation has a 128-step runtime limit; external references remain rejected.
 - Both transports cover valid nested trees and invalid child values; the stdio case also verifies that excessive recursive depth is rejected. `node --test tests/mcp.test.mjs` passed 37 tests with one expected Linux Bubblewrap capability skip; the additional depth regression passes locally. Changed-file Biome and whitespace checks pass. Exact-source hosted Windows/Linux CI is pending.
 
+## MCP JSON Schema enum conformance — 2026-10-28
+
+- MCP tool discovery now rejects empty `enum` arrays on stdio and Streamable HTTP, as JSON Schema requires. Focused transport regressions and changed-file Biome/whitespace checks pass; the running hosted CI revision predates this change.
+
 ## CI runner throughput — 2026-10-28
 
 - CI runs are now grouped by ref and superseded runs are cancelled on the next push, preventing stale full matrices from occupying Windows/Linux runner slots. The latest revision still runs the complete required matrix and both desktop package lifecycle jobs.

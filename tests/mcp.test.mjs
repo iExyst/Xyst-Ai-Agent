@@ -29,6 +29,7 @@ function fixtureServerCode({
   scalarOutputSchema = false,
   dynamicToolNotifications = false,
   invalidStructuredOutput = false,
+  emptyEnum = false,
 } = {}) {
   return `
 const readline = require('node:readline');
@@ -76,6 +77,7 @@ const sendMethodResult = (request, result) => {
     result.tools[0].inputSchema.properties.recursive_tree = { $ref: '#/$defs/TreeNode' };
     result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
     result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
+    if (${emptyEnum ? 'true' : 'false'}) result.tools[0].inputSchema.properties.invalid_enum = { type: 'string', enum: [] };
     result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
     result.tools[0].inputSchema.properties.ref_anchor = { $ref: '#ShortTextAnchor' };
     result.tools[0].inputSchema.properties.legacy_ref_text = { $ref: '#/definitions/LegacyShortText' };
@@ -157,6 +159,7 @@ function managerConfig({
   scalarOutputSchema = false,
   dynamicToolNotifications = false,
   invalidStructuredOutput = false,
+  emptyEnum = false,
 } = {}) {
   return {
     tools: { shell_enabled: true },
@@ -184,6 +187,7 @@ function managerConfig({
               scalarOutputSchema,
               dynamicToolNotifications,
               invalidStructuredOutput,
+              emptyEnum,
             }),
           ],
           timeout_ms: 3000,
@@ -692,6 +696,10 @@ test('MCP startup isolates one failed server and retains healthy server tools', 
   const root = await createTempDirectory('xyst-mcp-isolated-failure-');
   const config = managerConfig();
   config.mcp.servers.broken = { enabled: true, command: path.join(root, 'missing-mcp-server'), args: [], timeout_ms: 1000 };
+  config.mcp.servers.invalid_schema = {
+    ...config.mcp.servers.fixture,
+    args: ['-e', fixtureServerCode({ emptyEnum: true })],
+  };
   const manager = new StdioMcpManager({ config, workspaceRoot: root });
   t.after(async () => {
     await manager.close();
@@ -702,6 +710,9 @@ test('MCP startup isolates one failed server and retains healthy server tools', 
   const broken = manager.serverCatalog.find((server) => server.name === 'broken');
   assert.equal(broken.connection_state, 'error');
   assert.equal(broken.error_code, 'MCP_SPAWN_FAILED');
+  const invalidSchema = manager.serverCatalog.find((server) => server.name === 'invalid_schema');
+  assert.equal(invalidSchema.connection_state, 'error');
+  assert.equal(invalidSchema.error_code, 'MCP_INVALID_SCHEMA');
 });
 
 test('MCP startup handles a child that exits before accepting its first request', async (t) => {
@@ -1002,6 +1013,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   let templateMethodUnsupported = false;
   let callResultType = null;
   let scalarOutputSchema = false;
+  let emptyEnum = false;
   let callStructuredContent = { text: 'hello' };
   const fetchImpl = async (url, options) => {
     assert.equal(url, 'http://127.0.0.1:8765/mcp');
@@ -1093,6 +1105,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                       };
     result.resultType ||= 'complete';
     if (request.method === 'tools/list') {
+      if (emptyEnum) result.tools[0].inputSchema.properties.invalid_enum = { type: 'string', enum: [] };
       result.tools[0].inputSchema.properties.unevaluated_object = {
         allOf: [
           { type: 'object', properties: { first: { type: 'string' } } },
@@ -1462,6 +1475,8 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   assert.equal((await session.callTool('echo', { text: 'hello' }, scalarDefinition._mcp)).structuredContent, 'hello');
   callStructuredContent = 42;
   await assert.rejects(session.callTool('echo', { text: 'hello' }, scalarDefinition._mcp), { code: 'MCP_INVALID_RESULT' });
+  emptyEnum = true;
+  await assert.rejects(session.listTools(), { code: 'MCP_INVALID_SCHEMA' });
 });
 
 test('modern Streamable HTTP subscriptions forward acknowledged list changes', async (t) => {

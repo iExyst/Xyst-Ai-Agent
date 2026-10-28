@@ -1158,7 +1158,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
       result[key] = key === 'description' && depth > 0 ? `Untrusted server-provided schema note: ${schema[key]}` : schema[key];
     }
   if (schema.enum !== undefined) {
-    if (!Array.isArray(schema.enum) || schema.enum.length > 100)
+    if (!Array.isArray(schema.enum) || schema.enum.length === 0 || schema.enum.length > 100)
       throw mcpError('MCP tool input schema has an invalid enum', 'MCP_INVALID_SCHEMA');
     result.enum = schema.enum;
   }
