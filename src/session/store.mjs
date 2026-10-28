@@ -499,7 +499,7 @@ export class SessionStore {
       this.newSessionIds.delete(imported.id);
       if (saved) await this.delete(imported.id).catch(() => {});
       await Promise.all(createdArchives.map((file) => fs.rm(file, { force: true }).catch(() => {})));
-      if (createdArchives.length) await fs.rm(archiveDirectory, { recursive: true, force: true }).catch(() => {});
+      if (createdArchives.length) await fs.rmdir(archiveDirectory).catch(() => {});
       throw error;
     }
   }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { MAX_SESSION_EXPORT_BYTES, SessionStore, sessionFailureFromError } from '../src/session/store.mjs';
+import { MAX_SESSION_EXPORT_BYTES, SESSION_ARCHIVE_SCHEMA_VERSION, SessionStore, sessionFailureFromError } from '../src/session/store.mjs';
 import {
   GlobalMemoryStore,
   MAX_MEMORY_EXPORT_BYTES,
@@ -673,6 +673,56 @@ test('session import preserves failed status and sanitized failure details', asy
   assert.equal(imported.failure.code, 'PROVIDER_ERROR');
   assert.match(imported.failure.message, /\[REDACTED\]/);
   assert.doesNotMatch(imported.failure.message, /private-value/);
+});
+
+test('failed session import preserves unrelated files in its archive directory', async (t) => {
+  const sourceRoot = await createTempDirectory('xyst-session-import-cleanup-source-');
+  const destinationRoot = await createTempDirectory('xyst-session-import-cleanup-destination-');
+  t.after(() =>
+    Promise.all([fs.rm(sourceRoot, { recursive: true, force: true }), fs.rm(destinationRoot, { recursive: true, force: true })]),
+  );
+  const sourceStore = new SessionStore(sourceRoot);
+  const session = sourceStore.create({ messages: [{ role: 'user', content: 'Import two archives' }] });
+  await sourceStore.save(session);
+  const exported = await sourceStore.exportSession(session.id);
+  exported.archives = [
+    {
+      schema_version: SESSION_ARCHIVE_SCHEMA_VERSION,
+      archived_at: new Date().toISOString(),
+      messages: [{ role: 'assistant', content: 'first' }],
+    },
+    {
+      schema_version: SESSION_ARCHIVE_SCHEMA_VERSION,
+      archived_at: new Date().toISOString(),
+      messages: [{ role: 'assistant', content: 'second' }],
+    },
+  ];
+
+  const originalOpen = fs.open;
+  let archiveWriteCount = 0;
+  let archiveDirectory;
+  fs.open = async (filePath, flags, ...args) => {
+    if (filePath.includes(`${path.sep}.agent${path.sep}compactions${path.sep}`) && filePath.endsWith('.tmp') && flags === 'wx') {
+      archiveWriteCount += 1;
+      archiveDirectory = path.dirname(filePath);
+      if (archiveWriteCount === 2) {
+        const sentinel = await originalOpen(path.join(archiveDirectory, 'keep.txt'), 'wx', 0o600);
+        await sentinel.writeFile('unrelated archive file');
+        await sentinel.close();
+        throw Object.assign(new Error('simulated second archive write failure'), { code: 'EIO' });
+      }
+    }
+    return originalOpen(filePath, flags, ...args);
+  };
+  try {
+    await assert.rejects(new SessionStore(destinationRoot).importSession(exported), { code: 'EIO' });
+  } finally {
+    fs.open = originalOpen;
+  }
+
+  assert.equal(await fs.readFile(path.join(archiveDirectory, 'keep.txt'), 'utf8'), 'unrelated archive file');
+  assert.deepEqual(await fs.readdir(archiveDirectory), ['keep.txt']);
+  assert.deepEqual(await new SessionStore(destinationRoot).list(), []);
 });
 
 test('session import rejects conflicting goal identities without leaving a partial session', async (t) => {

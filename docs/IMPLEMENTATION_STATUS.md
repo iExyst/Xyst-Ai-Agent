@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## Session-import rollback cleanup — 2026-10-28
+
+- Failed session imports now remove only archive files created by the import attempt. They remove the containing directory only if it is empty, so unrelated files inside it survive rollback.
+- The injected second-archive-write failure regression passes and confirms both preservation of the unrelated file and absence of a partial session. Changed-file Biome and whitespace checks pass. Exact-source hosted confirmation is pending.
+
 ## Atomic and source-archive temp-file collision cleanup — 2026-10-28
 
 - `atomicWriteFile()` and `buildReleaseArchive()` now clean up their temporary paths only after successfully creating them with exclusive open. A collision that fails `open(..., 'wx')` leaves the pre-existing file untouched.
