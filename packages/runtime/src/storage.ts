@@ -129,6 +129,31 @@ export class XystStore {
 export type SettingScope = "global" | "project" | "mission" | "agent" | "session";
 export interface EffectiveSetting<T = unknown> { value: T; source: SettingScope; scopeId: string }
 
+const sensitiveSettingKey = /token|secret|password|credential|api.?key|authorization|cookie/i;
+
+function containsSensitiveSettingField(value: unknown): boolean {
+  const pending: unknown[] = [value];
+  const visited = new Set<object>();
+  while (pending.length) {
+    const current = pending.pop();
+    if (typeof current === "string") {
+      if (/\b(?:bearer|basic)\s+[-A-Za-z0-9._~+/]+=*/i.test(current) || /https?:\/\/[^/\s:@]+:[^/\s@]+@/i.test(current) || /[?&](?:access[_-]?token|api[_-]?key|password|secret)=/i.test(current)) return true;
+      continue;
+    }
+    if (!current || typeof current !== "object" || visited.has(current)) continue;
+    visited.add(current);
+    if (Array.isArray(current)) {
+      for (const child of current) pending.push(child);
+      continue;
+    }
+    for (const [key, child] of Object.entries(current)) {
+      if (sensitiveSettingKey.test(key)) return true;
+      pending.push(child);
+    }
+  }
+  return false;
+}
+
 export class ConfigStore {
   constructor(private readonly store: XystStore) {}
 
@@ -162,9 +187,10 @@ export class ConfigStore {
     const rows = this.store.db.prepare("SELECT scope, scope_id, key, value_json FROM settings ORDER BY scope, scope_id, key").all() as Array<{ scope: string; scope_id: string; key: string; value_json: string }>;
     const result: Record<string, Record<string, unknown>> = {};
     for (const row of rows) {
-      if (/token|secret|password|credential|api.?key/i.test(row.key)) continue;
+      const value = JSON.parse(row.value_json) as unknown;
+      if (sensitiveSettingKey.test(row.key) || containsSensitiveSettingField(value)) continue;
       const bucket = `${row.scope}:${row.scope_id}`;
-      (result[bucket] ??= {})[row.key] = JSON.parse(row.value_json);
+      (result[bucket] ??= {})[row.key] = value;
     }
     return result;
   }
@@ -178,7 +204,7 @@ export class ConfigStore {
         if (separator < 0 || !allowed.has(scope)) throw new Error(`Invalid settings scope: ${bucket}`);
         const scopeId = bucket.slice(separator + 1);
         for (const [key, value] of Object.entries(entries)) {
-          if (/token|secret|password|credential|api.?key/i.test(key)) continue;
+          if (sensitiveSettingKey.test(key) || containsSensitiveSettingField(value)) continue;
           this.set(scope, key, value, scopeId);
         }
       }

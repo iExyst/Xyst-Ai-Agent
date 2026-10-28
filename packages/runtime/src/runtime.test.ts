@@ -744,6 +744,23 @@ test("config export excludes secret-like keys", async () => withTemp(async (root
   const exported = config.export(); assert.deepEqual(exported["global:"], { "service.endpoint": "http://localhost" }); store.close();
 }));
 
+test("config import and export exclude settings with nested credential fields", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "nested-secret-settings.sqlite")); const config = new ConfigStore(store);
+  try {
+    config.set("global", "service.endpoint", "https://service.example.test");
+    config.set("global", "service.options", { retries: 2, auth: { Authorization: "Bearer do-not-export" } });
+    config.set("global", "service.proxy", "https://user:password@proxy.example.test");
+    assert.deepEqual(config.export()["global:"], { "service.endpoint": "https://service.example.test" });
+
+    config.import({ "project:project-a": {
+      "service.timeout": 30,
+      "service.headers": { Accept: "application/json", "X-Api-Key": "do-not-import" }
+    } });
+    assert.equal(config.resolve("service.timeout", { project: "project-a" })?.value, 30);
+    assert.equal(config.resolve("service.headers", { project: "project-a" }), undefined);
+  } finally { store.close(); }
+}));
+
 test("update settings require explicit opt-in and a credential-free HTTPS feed", () => {
   assert.doesNotThrow(() => validateSettingValue("integrations.lmStudio.nativeChat.enabled", false));
   assert.throws(() => validateSettingValue("integrations.lmStudio.nativeChat.enabled", "true"), /must be true or false/);
