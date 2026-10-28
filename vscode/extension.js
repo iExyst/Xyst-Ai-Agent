@@ -285,8 +285,9 @@ function activate(context, injectedVscode, dependencies = {}) {
     selectedModel = settings.default_model || '';
     sandboxMode = settings.sandbox?.mode || 'off';
     autonomyMode = settings.tools?.autonomy || 'assisted';
+    if (activeRunState?.model) selectedModel = activeRunState.model;
     await refreshUsageSnapshot();
-    updateStatus('ready');
+    updateStatus(activeRunState ? activeRunState.status : 'ready');
     postToPanel({
       type: 'initialize',
       settings: {

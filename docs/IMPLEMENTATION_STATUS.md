@@ -2572,3 +2572,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - The desktop service now enables the bundled Node runtime's environment proxy handling when standard proxy variables are configured, preserves bypass entries, and forces local LM Studio/control endpoints to stay direct. `NODE_USE_ENV_PROXY=0` is an explicit opt-out.
 - Windows desktop startup also reads the current user's enabled manual Internet Settings proxy, including separate HTTP/HTTPS servers and bypass entries, when environment variables do not specify that protocol. PAC/WPAD, `<local>` semantics, Linux desktop setting discovery, and proxy-authentication UI remain open. The registry parser is bounded and does not log proxy addresses or credentials.
 - The environment-proxy integration test and Windows NSIS smoke passed before the Windows system-proxy discovery change; the refreshed NSIS installer was applied to the per-user installation and the user config hash stayed identical. The new registry integration awaits the final cross-platform test and packaging pass requested by the user.
+
+## VS Code recovered-run status — 2026-10-28
+
+- Restored VS Code runs now show their active model and running/paused status in the status bar. Focused recovery regression, Biome checks, and git diff --check pass; exact-source hosted CI run 40669673612 is in progress.

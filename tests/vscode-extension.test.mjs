@@ -703,6 +703,7 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
     getRun: async () => ({
       status: currentRunStatus,
       session_id: sessionId,
+      model: 'run-model',
       budgets: { ...currentBudgets },
       initial_budgets: { ...initialBudgets },
       budget_adjustments_enabled: true,
@@ -787,6 +788,7 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
   await waitUntil(() => posted.some((message) => message.type === 'runPaused'));
   receiveMessage({ type: 'webviewReady' });
   await waitUntil(() => posted.some((message) => message.type === 'runRecovered' && message.status === 'paused'));
+  assert.match(statusBar.text, /run-model.*paused/);
   assert.ok(posted.some((message) => message.type === 'session' && message.session?.id === sessionId));
   assert.ok(
     posted.some((message) => message.type === 'approval' && message.approval?.approval_id === 'f42c8f33-3b89-4c3b-b21c-1be25a918509'),
