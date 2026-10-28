@@ -178,6 +178,7 @@ export class AgentRunner {
   async run(objective: string, options: AgentOptions = {}): Promise<AgentResult> {
     const safeObjective = this.deps.provider.redact(objective);
     const baseCompletionCriteria = [...new Set((options.completionCriteria?.length ? options.completionCriteria : [safeObjective]).map((item) => this.deps.provider.redact(String(item)).trim()).filter(Boolean))].slice(0, 50);
+    const criteriaForEvidenceInference = new Set(baseCompletionCriteria);
     const requiredToolEvidence = options.requiredToolEvidence ?? [];
     const requiredCompletionCriteria = [
       ...baseCompletionCriteria,
@@ -263,6 +264,7 @@ export class AgentRunner {
             for (const goal of summary.user_goals) {
               if (typeof goal !== "string") continue;
               const safeGoal = this.deps.provider.redact(goal).trim();
+              if (safeGoal) criteriaForEvidenceInference.add(safeGoal);
               if (safeGoal && !requiredCompletionCriteria.includes(safeGoal) && requiredCompletionCriteria.length < 50) requiredCompletionCriteria.push(safeGoal);
             }
           }
@@ -273,6 +275,7 @@ export class AgentRunner {
         const content = message.content;
         const text = typeof content === "string" ? content : Array.isArray(content) ? content.flatMap((part) => part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string" ? [(part as Record<string, unknown>).text as string] : []).join("\n") : "";
         const safeText = this.deps.provider.redact(text).trim();
+        if (safeText) criteriaForEvidenceInference.add(safeText);
         if (safeText && !requiredCompletionCriteria.includes(safeText) && requiredCompletionCriteria.length < 50) requiredCompletionCriteria.push(safeText);
       }
     }
@@ -587,7 +590,7 @@ export class AgentRunner {
     // descriptions of RequiredToolEvidence also contain words such as
     // "exactly match" and paths, which can otherwise be misread as the file's
     // expected contents (for example, "match \"marker\"").
-    refreshEvidenceRequirements(baseCompletionCriteria);
+    refreshEvidenceRequirements([...criteriaForEvidenceInference]);
     // A direct answer to a read-only question about an attached image has no
     // tool result to cite. Treat the model's non-empty answer as completion
     // only when there are no requested tool calls, URLs, file outputs, or

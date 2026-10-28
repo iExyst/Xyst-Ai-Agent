@@ -1,5 +1,12 @@
 > Compact resume checkpoint: [RESUME_CHECKPOINT.md](RESUME_CHECKPOINT.md).
 
+## Resume evidence-verification fix · 2026-10-28
+
+- Current `main` at `c9badee` is hosted-green: [Cross-platform CI](https://github.com/iExyst/Xyst-Ai-Agent-PC/actions/runs/40623070529) and [Desktop packages](https://github.com/iExyst/Xyst-Ai-Agent-PC/actions/runs/40623070515) both passed. There are no open PRs as of this audit.
+- A bounded live Qwen 3.5 9B coding run exposed a resume-verification gap. The model fixed a null/undefined handling defect after a failing test, then `node --test` passed all six cases and Xyst reread both files. On resume, however, Xyst's completion gate had dropped the original request's requirement to cite the successful `run_process` result. The run is not counted as accepted model-backed coding completion.
+- Current-source fix re-infers explicit tool and command evidence requirements from preserved user goals when resuming a session. A deterministic regression proves a file-list result alone is rejected and the original successful process result remains required. Runtime suite: 170 passed, 2 host-specific skips, 0 failures; workspace typechecks and `git diff --check` passed. These changes are local and still require hosted Windows/Linux workflows.
+- The earlier temp-workspace mistake wrote only the two disposable `normalizeTags` fixtures to the PC checkout root; both were moved into the isolated temp workspace. The four existing untracked vision fixtures remain untouched.
+
 ## Current local Windows source verification · 2026-10-27
 
 - Re-ran `npm test` on the current dirty `master` worktree: runtime 160 passed, 2 host-specific skips, 0 failures; CLI 19/19; release-verification tests 5/5. The subsequent `npm run typecheck` passed for runtime, CLI, and desktop. These results cover this local source, not hosted CI or a packaged release. Linux verification remains separately recorded below and in `docs/verification-history.md`.
