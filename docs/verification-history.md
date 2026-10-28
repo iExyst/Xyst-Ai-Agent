@@ -4,7 +4,7 @@
 
 - A bounded local LM Studio coding run used Qwen 3.5 9B in an isolated workspace. It created `normalizeTags.mjs` and six `node:test` cases, fixed a test failure involving `null` and `undefined`, reran `node --test normalizeTags.test.mjs` successfully (6 passed), and read both final files. The session's persisted journal confirms the successful `run_process` result.
 - The live run is not counted as accepted coding completion: after resuming, `task_complete` accepted evidence that omitted the successful `run_process` result. Inspection traced this to resume logic that retained historical user goals but inferred mandatory tool evidence only from the latest goal.
-- Updated resume requirement inference and added a regression: after a goal requiring a command is resumed with a non-command follow-up, a file-list result alone is rejected and completion requires the earlier successful `run_process`. Focused regression and full runtime suite passed (170 passed, 2 host-specific skips); workspace typechecks and `git diff --check` passed. Hosted Actions are pending for this local change.
+- Updated resume requirement inference and added a regression: after a goal requiring a command is resumed with a non-command follow-up, a file-list result alone is rejected and completion requires the earlier successful `run_process`. Focused regression and full runtime suite passed (170 passed, 2 host-specific skips); workspace typechecks and `git diff --check` passed. PR #23 passed all eight duplicated hosted Windows/Linux jobs and merged as `c19da03`; its post-merge Cross-platform CI (`40625002950`) and Desktop packages (`40625002953`) workflows also passed.
 
 ## GitHub App installation authentication hardening · 2026-10-28
 
