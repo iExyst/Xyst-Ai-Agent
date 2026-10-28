@@ -215,6 +215,16 @@ function sameResolvedPath(left, right) {
     : normalizedLeft === normalizedRight;
 }
 
+function sameFileVersion(left, right) {
+  return left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
+}
+
+function staleEditError() {
+  return Object.assign(new Error('File changed after it was opened; no changes were applied. Re-read the file and retry the edit.'), {
+    code: 'STALE_FILE',
+  });
+}
+
 async function assertToolPathUnchanged(root, requestedPath, resolvedPath, config) {
   const currentPath = await resolveToolPath(root, requestedPath, { machineScope: machineScope(config) });
   if (!sameResolvedPath(currentPath, resolvedPath)) throw new Error('File target changed while preparing the write; retry the operation');
@@ -366,13 +376,14 @@ async function editFile(root, args, config, context = {}) {
   let updated;
   let sourceSnapshot;
   try {
-    const stat = await handle.stat();
+    const stat = await handle.stat({ bigint: true });
     if (!stat.isFile()) throw new Error('Requested path is not a file');
-    const [openedPath, currentStat] = await Promise.all([fs.realpath(filePath), fs.stat(filePath)]);
-    if (!sameResolvedPath(openedPath, filePath) || stat.dev !== currentStat.dev || stat.ino !== currentStat.ino)
-      throw new Error('File changed while opening; retry the edit');
+    const [openedPath, currentStat] = await Promise.all([fs.realpath(filePath), fs.stat(filePath, { bigint: true })]);
     const maxReadBytes = toolFileLimit(config, config.tools?.max_file_bytes ?? DEFAULT_FILE_LIMIT);
-    if (stat.size > maxReadBytes) throw new Error('File is too large to edit through this tool');
+    if (stat.size > BigInt(maxReadBytes) || currentStat.size > BigInt(maxReadBytes))
+      throw new Error('File is too large to edit through this tool');
+    if (!sameResolvedPath(openedPath, filePath) || stat.dev !== currentStat.dev || stat.ino !== currentStat.ino) throw staleEditError();
+    if (!sameFileVersion(stat, currentStat)) throw staleEditError();
     const bytes = await readBoundedFile(handle, maxReadBytes);
     let source;
     try {
@@ -382,6 +393,8 @@ async function editFile(root, args, config, context = {}) {
     }
     if (source.includes('\u0000')) throw new Error('Binary file content is not supported');
     const first = source.indexOf(args.old_string);
+    const readStat = await handle.stat({ bigint: true });
+    if (!sameFileVersion(stat, readStat)) throw staleEditError();
     if (first < 0) throw new Error('old_string was not found; no changes made');
     if (source.indexOf(args.old_string, first + args.old_string.length) >= 0)
       throw new Error('old_string matched multiple places; provide a more specific block');

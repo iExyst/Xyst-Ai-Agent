@@ -1,5 +1,11 @@
 # Xyst development build status — 2026-10-28
 
+## Stale file edit concurrency detection — 2026-10-28
+
+- A same-inode content change during `edit_file` open/read previously could be reported as a missing `old_string`. The tool now compares nanosecond size/mtime/ctime snapshots around the read and returns `STALE_FILE` without writing when the source changes. If the concurrent version exceeds the configured read limit, it retains the specific size-limit error.
+- Focused stale-edit and concurrent-growth regressions pass 2/2; Biome formatting and `git diff --check` pass. The failing exact-source hosted run was [40625153880](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40625153880); hosted confirmation of this fix is pending.
+
+
 ## Interrupted Windows file replacement recovery — 2026-10-28
 
 - `read_file` and `edit_file` now recover a missing file from exactly one bounded, regular Windows replacement backup. Recovery checks the resolved target again, uses a no-overwrite hard link, and preserves multiple, invalid, linked, unsafe, or oversized candidates for manual recovery. The restored bytes are not rewritten or normalized.
