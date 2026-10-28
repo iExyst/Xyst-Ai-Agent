@@ -46,7 +46,7 @@ xyst git fetch origin main
 xyst git push origin feature/issue-123
 ```
 
-`git clone` also accepts a local `file:` URL. Clone destination parents must exist and the final destination must be new. Fetch does not merge or rebase. Commit requires an explicit path list; new files must be staged first. Push targets `HEAD` at the named branch and never force-pushes. Server-side branch protections still apply.
+`git clone` also accepts a local `file:` URL. Clone destination parents must exist and the final destination must be new. Fetch does not merge or rebase. Commit requires an explicit path list; new files must be staged first. Push targets `HEAD` at the named branch and never force-pushes. If the remote has commits the local branch lacks, Xyst explains that it rejected the non-fast-forward push and directs the agent to fetch, inspect, and integrate explicitly; it does not merge or retry automatically. Server-side branch protections still apply and may reject pushes for other policy reasons.
 
 The desktop GitHub view can search accessible repositories, list issues or pull requests by state, and open an item on `github.com`. Configure authentication and enable the integration from the CLI first. The desktop browser view performs reads only; write actions continue to use the runtime's explicit integration and access checks.
 
