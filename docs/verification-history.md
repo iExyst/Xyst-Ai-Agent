@@ -1927,3 +1927,10 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Expanded the AgentRunner approval regression from closing a browser tab to seven effectful browser operations: click, fill, select, key press, download, upload, and close. For each call, the test proves that the browser executor is not reached without approval and a durable tool-call record is marked `effect='external'` with execution scope and request hash.
 - Focused regression passed 1/1, workspace `npm run typecheck` passed, and `git diff --check` passed. The test uses injected deterministic browser tools; live-site behavior and cross-platform interaction remain separate coverage.
+
+## Recovered isolated Qwen3.5 9B coding acceptance · 2026-10-28
+
+- Fresh isolated CLI session `e7e2d3c8-cf2c-434a-a195-562028b3e53d` used Qwen3.5 9B, a dedicated temporary APPDATA profile, and the process working directory `.xyst-live-acceptance/coding-median-20261028/workspace`. It created `median.mjs` and `median.test.mjs`; no product source files were touched.
+- The first test attempt failed because the generated test omitted `import { test } from "node:test"`, and the first completion check correctly failed because `median.mjs` had not yet been read. After the explicit resume instruction, Xyst fixed the import, ran exactly `node --test median.test.mjs` (12/12 passed), read both complete output files with Xyst `file_read`, then persisted `task_complete verified=true`. The final session status is `completed`; a separate independent rerun also passed 12/12. Temporary profile SQLite integrity is `ok`.
+- SHA-256: `median.mjs` `E364B85F11C9F54B6198D7739CFFC478623E85BEBE4583F3BE1F54E88ECE5ECD`; `median.test.mjs` `E2820493C20D8665F1064F4B7F1E36B716CC422E985135DED305CA1FB199AF5A`.
+- This adds one recovered, bounded coding-loop success to C1. The initial failure remains visible and does not count separately; this case does not prove broad or sustained coding reliability.
