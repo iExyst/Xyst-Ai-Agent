@@ -31,3 +31,26 @@ export function rememberSessionId(id, storage) {
     // Session recovery remains optional when browser storage is unavailable.
   }
 }
+
+/** Restore the desktop's last selected UUID across native app/service restarts. */
+export async function getDesktopRememberedSessionId() {
+  try {
+    const invoke = globalThis.__TAURI__?.core?.invoke;
+    const id = typeof invoke === 'function' ? await invoke('get_last_session') : null;
+    return UUID_PATTERN.test(id || '') ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist only the selected UUID through the narrow native desktop command. */
+export function rememberDesktopSessionId(id) {
+  try {
+    const invoke = globalThis.__TAURI__?.core?.invoke;
+    if (typeof invoke === 'function') {
+      return invoke('set_last_session', { id: UUID_PATTERN.test(id || '') ? id : null }).catch(() => {});
+    }
+  } catch {
+    // Browser mode and shutdown may not have a native bridge.
+  }
+}

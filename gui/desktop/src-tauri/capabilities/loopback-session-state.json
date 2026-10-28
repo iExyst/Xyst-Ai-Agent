@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "loopback-session-state",
+  "description": "Persist only the selected conversation UUID for the authenticated local desktop UI.",
+  "local": false,
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "windows": ["main"],
+  "permissions": ["allow-get-last-session", "allow-set-last-session"]
+}

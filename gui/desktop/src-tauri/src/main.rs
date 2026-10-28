@@ -98,6 +98,55 @@ fn workspace_history_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         .map(|dir| dir.join("last-workspace.json"))
 }
 
+fn last_session_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("last-session.json"))
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct LastSession {
+    id: String,
+}
+
+fn valid_session_id(id: &str) -> bool {
+    let bytes = id.as_bytes();
+    bytes.len() == 36
+        && [8, 13, 18, 23].iter().all(|&i| bytes[i] == b'-')
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| [8, 13, 18, 23].contains(&i) || b.is_ascii_hexdigit())
+}
+
+#[tauri::command]
+fn get_last_session(app: tauri::AppHandle) -> Option<String> {
+    let bytes = std::fs::read(last_session_path(&app)?).ok()?;
+    let state = serde_json::from_slice::<LastSession>(&bytes).ok()?;
+    valid_session_id(&state.id).then_some(state.id)
+}
+
+#[tauri::command]
+fn set_last_session(app: tauri::AppHandle, id: Option<String>) -> Result<(), String> {
+    let path =
+        last_session_path(&app).ok_or_else(|| "App config directory is unavailable".to_owned())?;
+    match id {
+        Some(id) if valid_session_id(&id) => {
+            let bytes =
+                serde_json::to_vec(&LastSession { id }).map_err(|error| error.to_string())?;
+            write_atomic_bytes(&path, &bytes).map_err(|error| error.to_string())
+        }
+        Some(_) => Err("Session ID must be a UUID".to_owned()),
+        None => match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        },
+    }
+}
+
 fn restore_last_workspace(state_path: &Path) -> Option<PathBuf> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -404,6 +453,7 @@ fn main() {
             Some(tauri::utils::config::AppDirectoriesOverride::Root(root));
     }
     let result = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![get_last_session, set_last_session])
         .setup(move |app| {
             let workspace = if let Some(path) = launch_workspace.as_deref() {
                 match canonical_directory(path) {

@@ -20,7 +20,13 @@ import {
 } from './review-plan.mjs';
 import { mountWorkspacePanel } from './workspace-panel.mjs';
 import { localProfileFromDiscovery, markDiscoveredModelLoaded, postLoadModelChoice } from './onboarding.mjs';
-import { getRememberedSessionId, isInterruptedSession, rememberSessionId } from './session-status.mjs';
+import {
+  getDesktopRememberedSessionId,
+  getRememberedSessionId,
+  isInterruptedSession,
+  rememberDesktopSessionId,
+  rememberSessionId,
+} from './session-status.mjs';
 import { resolveWebSearchProvider } from './web-search-settings.mjs';
 import { modelCapabilitiesDataStatus, modelCapabilitiesStatus, modelPricingDataStatus, modelPricingStatus } from './model-pricing.mjs';
 import { withStartupTimeout } from './startup.mjs';
@@ -709,6 +715,7 @@ function renderSessions(sessions) {
           if (session.id === activeSessionId) {
             activeSessionId = null;
             rememberSessionId(null);
+            void rememberDesktopSessionId(null);
             elements.session_actions.hidden = true;
             elements.conversation_title.textContent = 'New conversation';
             resetTimeline();
@@ -967,6 +974,7 @@ async function openSession(id) {
     const session = await client.getSession(id);
     activeSessionId = session.id;
     rememberSessionId(activeSessionId);
+    void rememberDesktopSessionId(activeSessionId);
     const configuredMcpServers = new Set(mcpServerCatalog.map((server) => server.name));
     mcpServerSelection = Array.isArray(session.mcp_servers) ? session.mcp_servers.filter((name) => configuredMcpServers.has(name)) : null;
     renderMcpRunSelection();
@@ -1398,6 +1406,7 @@ async function submitPrompt(prompt) {
       if (data.session_id) {
         activeSessionId = data.session_id;
         rememberSessionId(activeSessionId);
+        void rememberDesktopSessionId(activeSessionId);
       }
       if (event.type === 'run_started' && data.routing_decision) {
         activeRunModel = data.model || data.routing_decision.model || activeRunModel;
@@ -1579,6 +1588,7 @@ async function submitPrompt(prompt) {
           .catch(() => {});
         activeSessionId = data.session_id || activeSessionId;
         rememberSessionId(activeSessionId);
+        void rememberDesktopSessionId(activeSessionId);
         elements.conversation_title.textContent = sessionsById.get(activeSessionId)?.title || 'Conversation';
         if (!responseBody.textContent && data.status !== 'complete') responseBody.textContent = `Run ${data.status}.`;
         await refreshSessions();
@@ -1782,6 +1792,7 @@ async function manageSession(action) {
       await client.archiveSession(id);
       activeSessionId = null;
       rememberSessionId(null);
+      void rememberDesktopSessionId(null);
       elements.session_actions.hidden = true;
       elements.conversation_title.textContent = 'New conversation';
       resetTimeline();
@@ -1794,6 +1805,7 @@ async function manageSession(action) {
       await client.deleteSession(id);
       activeSessionId = null;
       rememberSessionId(null);
+      void rememberDesktopSessionId(null);
       elements.session_actions.hidden = true;
       elements.conversation_title.textContent = 'New conversation';
       resetTimeline();
@@ -4910,7 +4922,12 @@ async function initialize() {
     elements.model_picker.replaceChildren(fallback);
     elements.model_picker.disabled = false;
     await withStartupTimeout('recent sessions', (signal) => refreshSessions({ signal }));
-    const rememberedSessionId = getRememberedSessionId([...sessionsById.values()]);
+    const availableSessions = [...sessionsById.values()];
+    const nativeSessionId = await getDesktopRememberedSessionId();
+    const rememberedSessionId =
+      nativeSessionId && availableSessions.some((session) => session.id === nativeSessionId)
+        ? nativeSessionId
+        : getRememberedSessionId(availableSessions);
     if (rememberedSessionId) await openSession(rememberedSessionId);
     clearError();
     setConnected(true);
@@ -5002,6 +5019,7 @@ elements.new_session.addEventListener('click', () => {
   if (runController) return;
   activeSessionId = null;
   rememberSessionId(null);
+  void rememberDesktopSessionId(null);
   elements.run_mode.value = 'agent';
   selectPrimaryTab('agent');
   mcpServerSelection = null;
