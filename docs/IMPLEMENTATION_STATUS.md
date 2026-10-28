@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## CI acceptance steps after platform test failures — 2026-10-28
+
+- The hosted Node matrix previously skipped independent CLI, VS Code package, browser, agent/routing/injection evaluation, example-config, and source-archive checks after the required OS test step failed. Those steps now run when locked JavaScript dependencies are installed, with browser smoke also gated on successful Chrome setup. A platform test failure remains visible as a failed job; independent acceptance results will still be reported. The first exact-source CI run for this workflow change is pending.
+- Exact-source run [40645666852](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40645666852) for session-import rollback cleanup passed security. Windows and Ubuntu desktop lifecycle/build jobs were still running when recorded. Its Node matrix retained the known hosted ConPTY (`0xC0000142`) and Bubblewrap loopback (`RTM_NEWADDR: Operation not permitted`) failures. Independent workflow checks were skipped by the prior workflow structure and await the updated run.
+
 ## Session-import rollback cleanup — 2026-10-28
 
 - Failed session imports now remove only archive files created by the import attempt. They remove the containing directory only if it is empty, so unrelated files inside it survive rollback.

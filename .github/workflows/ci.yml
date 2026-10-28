@@ -70,6 +70,7 @@ jobs:
           version: 11.25.0
           run_install: false
       - name: Install locked JavaScript development tools
+        id: javascript-tools
         run: pnpm install --frozen-lockfile
       - name: Check JavaScript formatting and lint rules
         run: pnpm lint
@@ -95,17 +96,30 @@ jobs:
           XYST_REQUIRE_LINK_TESTS: 'false'
           XYST_REQUIRE_WMI_TEST: 'true'
       - name: Run end-to-end CLI tool workflow through available shells
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
         run: pnpm smoke:cli-shells
-      - run: node scripts/check-vscode-package.mjs
-      - run: pnpm smoke:browser
+      - name: Validate the VS Code package
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
+        run: node scripts/check-vscode-package.mjs
+      - name: Run browser UI and accessibility smoke
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' && steps.chrome.outcome == 'success' }}
+        run: pnpm smoke:browser
         env:
           XYST_BROWSER_EXECUTABLE: ${{ steps.chrome.outputs.chrome-path }}
-      - run: node scripts/evaluate-routing.mjs
-      - run: node scripts/evaluate-agent.mjs
-      - run: node scripts/evaluate-injection-signals.mjs
+      - name: Evaluate routing decisions
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
+        run: node scripts/evaluate-routing.mjs
+      - name: Evaluate agent behavior
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
+        run: node scripts/evaluate-agent.mjs
+      - name: Evaluate injection signals
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
+        run: node scripts/evaluate-injection-signals.mjs
       - name: Validate example configuration
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
         run: node --input-type=module -e "import fs from 'node:fs/promises'; import { parseToml } from './src/config/toml.mjs'; parseToml(await fs.readFile('config.example.toml', 'utf8'))"
       - name: Build release source archive
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
         run: node scripts/build-release.mjs
 
   desktop:
