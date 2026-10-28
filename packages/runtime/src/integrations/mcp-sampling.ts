@@ -17,6 +17,8 @@ type SamplingProvider = {
 
 type JsonObject = Record<string, unknown>;
 type ToolMapEntry = { mcpName: string; openAiName: string };
+const samplingImageLimitBytes = 5 * 1024 * 1024;
+const samplingImagesTotalLimitBytes = 10 * 1024 * 1024;
 
 function asObject(value: unknown): JsonObject | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : undefined;
@@ -76,12 +78,45 @@ export function createMcpSamplingHandler(provider: SamplingProvider, selectedMod
     const inputMessages: unknown[] = [];
     const outstandingCalls = new Map<string, string>();
     const completedCalls = new Set<string>();
+    let imageBytes = 0;
+    let hasImages = false;
+    const toOpenAiContent = (block: JsonObject): unknown => {
+      if (block.type === "text" && typeof block.text === "string") {
+        if (block.text.length > 20_000) throw new Error("An MCP sampling message exceeds the 20,000 character limit");
+        return { type: "text", text: block.text };
+      }
+      if (block.type !== "image" || typeof block.data !== "string" || typeof block.mimeType !== "string") throw new Error("MCP sampling supports text and image content; audio sampling is unsupported");
+      const mimeType = block.mimeType.toLowerCase();
+      if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mimeType)) throw new Error(`MCP sampling does not support image MIME type: ${block.mimeType}`);
+      const data = block.data;
+      if (data.length > Math.ceil(samplingImageLimitBytes / 3) * 4) throw new Error("An MCP sampling image exceeds the 5 MiB limit");
+      if (!data || data.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) throw new Error("MCP sampling image data must be valid base64");
+      const bytes = Buffer.from(data, "base64").byteLength;
+      if (bytes > samplingImageLimitBytes) throw new Error("An MCP sampling image exceeds the 5 MiB limit");
+      imageBytes += bytes;
+      if (imageBytes > samplingImagesTotalLimitBytes) throw new Error("MCP sampling images exceed the 10 MiB request limit");
+      hasImages = true;
+      return { type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } };
+    };
 
     for (const message of request.messages) {
       const content = message.content as JsonObject;
+      if (Array.isArray(message.content)) {
+        const parts = message.content.map((part) => {
+          const block = asObject(part);
+          if (!block) throw new Error("MCP sampling content blocks must be objects");
+          return toOpenAiContent(block);
+        });
+        inputMessages.push({ role: message.role, content: parts });
+        continue;
+      }
       if (content.type === "text" && typeof content.text === "string") {
         if (content.text.length > 20_000) throw new Error("An MCP sampling message exceeds the 20,000 character limit");
         inputMessages.push({ role: message.role, content: content.text });
+        continue;
+      }
+      if (content.type === "image") {
+        inputMessages.push({ role: message.role, content: [toOpenAiContent(content)] });
         continue;
       }
       if (content.type === "tool_use") {
@@ -102,19 +137,20 @@ export function createMcpSamplingHandler(provider: SamplingProvider, selectedMod
         const id = String(content.toolUseId ?? "");
         if (!id || !outstandingCalls.has(id) || completedCalls.has(id)) throw new Error("MCP sampling history contains a tool result with no matching prior tool call");
         const resultContent = Array.isArray(content.content) ? content.content : [];
-        const textParts = resultContent.map((part) => {
+        const mappedParts = resultContent.map((part) => {
           const block = asObject(part);
-          if (block?.type !== "text" || typeof block.text !== "string") throw new Error("MCP sampling currently supports text-only tool results");
-          return block.text;
+          if (!block) throw new Error("MCP sampling tool results must contain content block objects");
+          return toOpenAiContent(block) as JsonObject;
         });
-        const resultText = textParts.join("\n");
-        if (resultText.length > 20_000) throw new Error("An MCP sampling tool result exceeds the 20,000 character limit");
-        inputMessages.push({ role: "tool", tool_call_id: id, content: resultText });
+        const textParts = mappedParts.filter((part) => part.type === "text").map((part) => String(part.text ?? ""));
+        if (textParts.join("\n").length > 20_000) throw new Error("An MCP sampling tool result exceeds the 20,000 character limit");
+        const result = mappedParts.some((part) => part.type === "image_url") ? mappedParts : textParts.join("\n");
+        inputMessages.push({ role: "tool", tool_call_id: id, content: result });
         outstandingCalls.delete(id);
         completedCalls.add(id);
         continue;
       }
-      throw new Error("MCP sampling currently accepts text messages and tool-use/result blocks; image and audio sampling are unsupported");
+      throw new Error("MCP sampling currently accepts text and image messages plus tool-use/result blocks; audio sampling is unsupported");
     }
     if (outstandingCalls.size > 0) throw new Error("MCP sampling history is missing results for prior tool calls");
 
@@ -124,8 +160,8 @@ export function createMcpSamplingHandler(provider: SamplingProvider, selectedMod
     const maxTokens = Math.max(1, Math.min(2048, requestedTokens));
     const temperature = typeof request.temperature === "number" ? Math.max(0, Math.min(1, request.temperature)) : undefined;
     let response: Record<string, unknown>;
-    if (tools.length > 0) {
-      if (!provider.chatWithTools) throw new Error("The active inference provider does not support MCP sampling with tools");
+    if (tools.length > 0 || hasImages) {
+      if (!provider.chatWithTools) throw new Error("The active inference provider does not support multimodal MCP sampling");
       response = await provider.chatWithTools({
         model: inferenceModel,
         messages: [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...inputMessages],
@@ -134,8 +170,7 @@ export function createMcpSamplingHandler(provider: SamplingProvider, selectedMod
           description: `${tool.description ?? `MCP tool ${tool.name}`}${tool.name === toolMap[index]!.openAiName ? "" : `\nOriginal MCP tool name: ${tool.name}`}`.slice(0, 4000),
           parameters: tool.inputSchema
         } })),
-        tool_choice: request.toolChoice?.mode ?? "auto",
-        parallel_tool_calls: false,
+        ...(tools.length ? { tool_choice: request.toolChoice?.mode ?? "auto", parallel_tool_calls: false } : {}),
         max_tokens: maxTokens,
         ...(temperature === undefined ? {} : { temperature })
       }, signal);

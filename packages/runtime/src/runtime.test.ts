@@ -4399,11 +4399,60 @@ test("MCP sampling with tools returns a server-directed tool use and accepts its
   ]);
 });
 
-test("MCP sampling rejects undeclared calls, mismatched results, and unsupported image content", async () => {
+test("MCP sampling rejects undeclared calls, mismatched results, and unsupported audio content", async () => {
   const sample = createMcpSamplingHandler({ chat: async () => ({ choices: [{ message: { content: "ok" } }] }) }, "qwen/local", "qwen/local:2");
   await assert.rejects(() => sample({ messages: [{ role: "assistant", content: { type: "tool_use", id: "call-x", name: "unknown", input: {} } }], maxTokens: 16, tools: [{ name: "known", inputSchema: { type: "object" } }] }), /unknown or duplicate tool call/);
   await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "tool_result", toolUseId: "missing", content: [{ type: "text", text: "x" }] } }], maxTokens: 16, tools: [{ name: "known", inputSchema: { type: "object" } }] }), /no matching prior tool call/);
-  await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "AA==", mimeType: "image/png" } }], maxTokens: 16 }), /image and audio sampling are unsupported/);
+  await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "audio", data: "AA==", mimeType: "audio/wav" } }], maxTokens: 16 }), /audio sampling is unsupported/);
+});
+
+test("MCP sampling forwards bounded image pixels to LM Studio vision input", async () => {
+  let request: { model: string; messages: unknown[]; tools: unknown[] } | undefined;
+  const sample = createMcpSamplingHandler({
+    chat: async () => { throw new Error("image sampling must use the multimodal chat endpoint"); },
+    chatWithTools: async (value) => { request = value; return { choices: [{ message: { content: "The image contains a blue square" } }] }; }
+  }, "qwen/vision", "qwen/vision:1");
+  const result = await sample({ messages: [{ role: "user", content: [
+    { type: "text", text: "Describe this image" },
+    { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }
+  ] }], maxTokens: 64 });
+  assert.deepEqual(result, { model: "qwen/vision", role: "assistant", content: { type: "text", text: "The image contains a blue square" }, stopReason: "endTurn" });
+  assert.deepEqual(request?.messages, [{ role: "user", content: [
+    { type: "text", text: "Describe this image" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }
+  ] }]);
+  assert.deepEqual(request?.tools, []);
+  await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "AA==", mimeType: "image/svg+xml" } }], maxTokens: 16 }), /does not support image MIME type/);
+  await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "not base64", mimeType: "image/png" } }], maxTokens: 16 }), /Invalid Base64 string/);
+  await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "A".repeat(7_000_000), mimeType: "image/png" } }], maxTokens: 16 }), /exceeds the 5 MiB limit/);
+});
+
+test("MCP sampling preserves image content returned by a request-scoped tool", async () => {
+  const requests: Array<{ model: string; messages: unknown[]; tools: unknown[] }> = [];
+  const sample = createMcpSamplingHandler({
+    chat: async () => { throw new Error("tool-assisted image sampling must use the multimodal endpoint"); },
+    chatWithTools: async (request) => {
+      requests.push(request);
+      return requests.length === 1
+        ? { choices: [{ message: { content: null, tool_calls: [{ id: "call-image", type: "function", function: { name: "inspect_image", arguments: "{}" } }] } }] }
+        : { choices: [{ message: { content: "The image shows a red warning icon" } }] };
+    }
+  }, "qwen/vision", "qwen/vision:1");
+  const tools = [{ name: "inspect_image", inputSchema: { type: "object" } }];
+  await sample({ messages: [{ role: "user", content: { type: "text", text: "Inspect the image" } }], maxTokens: 64, tools });
+  const result = await sample({ messages: [
+    { role: "user", content: { type: "text", text: "Inspect the image" } },
+    { role: "assistant", content: { type: "tool_use", id: "call-image", name: "inspect_image", input: {} } },
+    { role: "user", content: { type: "tool_result", toolUseId: "call-image", content: [
+      { type: "text", text: "Rendered preview" },
+      { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }
+    ] } }
+  ], maxTokens: 64, tools });
+  assert.equal((result as { content: { text: string } }).content.text, "The image shows a red warning icon");
+  assert.deepEqual(requests[1]?.messages[2], { role: "tool", tool_call_id: "call-image", content: [
+    { type: "text", text: "Rendered preview" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }
+  ] });
 });
 
 test("LM Studio native integrations validate plugin and ephemeral MCP configuration and resolve vault headers", async () => {
