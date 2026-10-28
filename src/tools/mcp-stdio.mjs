@@ -628,37 +628,52 @@ class McpStdioSession {
     return result;
   }
 
-  async callTool(originalName, args, { outputSchema } = {}) {
+  async callTool(originalName, args, { signal, outputSchema } = {}) {
     const params = { name: originalName, arguments: args };
     if (this.protocolVersion === MODERN_VERSION) params._meta = modernMeta();
-    const result = await this.#request('tools/call', params);
+    const result = await this.#request('tools/call', params, this.timeoutMs, this.protocolVersion, { signal });
     if (!result || typeof result !== 'object' || Array.isArray(result))
       throw mcpError(`MCP server '${this.name}' returned an invalid tool result`, 'MCP_INVALID_RESPONSE');
     return validateMcpToolOutput(outputSchema, result);
   }
 
-  #request(method, params, timeoutMs = this.timeoutMs, protocolVersion = this.protocolVersion) {
+  #request(method, params, timeoutMs = this.timeoutMs, protocolVersion = this.protocolVersion, { signal } = {}) {
     if (this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded)
       return Promise.reject(mcpError(`MCP server '${this.name}' is unavailable`, 'MCP_SERVER_UNAVAILABLE'));
+    if (signal?.aborted) return Promise.reject(mcpError(`MCP call '${method}' was cancelled`, 'MCP_CANCELLED'));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const pending = { id, resolve, reject, timer: null, method, protocolVersion, signal, onAbort: null };
+      const cancel = (reason, code, message) => {
+        if (this.pending.get(id) !== pending) return;
+        clearTimeout(pending.timer);
         this.pending.delete(id);
-        reject(mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT'));
+        signal?.removeEventListener('abort', pending.onAbort);
+        this.#notify('notifications/cancelled', { requestId: id, reason });
+        reject(mcpError(message, code));
+      };
+      pending.timer = setTimeout(() => {
+        cancel('Request timed out', 'MCP_TIMEOUT', `MCP server '${this.name}' timed out during ${method}`);
       }, timeoutMs);
-      this.pending.set(id, { id, resolve, reject, timer, method, protocolVersion });
+      pending.onAbort = () => cancel('Request cancelled by the caller', 'MCP_CANCELLED', `MCP call '${method}' was cancelled`);
+      this.pending.set(id, pending);
+      signal?.addEventListener('abort', pending.onAbort, { once: true });
+      if (signal?.aborted) {
+        pending.onAbort();
+        return;
+      }
       const message = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
       try {
         this.child.stdin.write(message, (error) => {
           if (!error) return;
           const pending = this.pending.get(id);
           if (!pending) return;
-          clearTimeout(pending.timer);
+          this.#clearPending(pending);
           this.pending.delete(id);
           pending.reject(mcpError(`Unable to write to MCP server '${this.name}'`, 'MCP_TRANSPORT_ERROR'));
         });
       } catch {
-        clearTimeout(timer);
+        this.#clearPending(pending);
         this.pending.delete(id);
         reject(mcpError(`Unable to write to MCP server '${this.name}'`, 'MCP_TRANSPORT_ERROR'));
       }
@@ -668,6 +683,11 @@ class McpStdioSession {
   #notify(method, params) {
     if (this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded) return;
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+  }
+
+  #clearPending(pending) {
+    clearTimeout(pending.timer);
+    pending.signal?.removeEventListener('abort', pending.onAbort);
   }
 
   #onStdout(chunk) {
@@ -711,7 +731,7 @@ class McpStdioSession {
       }
       const pending = this.pending.get(message.id);
       if (!pending) continue;
-      clearTimeout(pending.timer);
+      this.#clearPending(pending);
       this.pending.delete(message.id);
       try {
         validateMcpJsonRpcResponse(message, pending.id);
@@ -784,7 +804,7 @@ class McpStdioSession {
 
   #failAll(message, code) {
     for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
+      this.#clearPending(pending);
       pending.reject(mcpError(message, code));
     }
     this.pending.clear();

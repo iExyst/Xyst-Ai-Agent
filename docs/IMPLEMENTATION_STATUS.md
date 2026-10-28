@@ -2750,3 +2750,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Ran the index against an Ubuntu WSL ext4 workspace containing 2,500 files. The file cap indexed 512 and reported truncation; a separate 1,000-entry cap indexed 999 and reported truncation. Both paths cleared the index and removed their locks cleanly.
 - This validates bounded overflow and recovery on ext4 but does not replace native Ubuntu Desktop/Wayland acceptance or a maximum-size 50,000-entry soak. The evidence was gathered from the current source revision.
+
+## MCP stdio cancellation — 2026-10-28
+
+- Tool-call abort signals now send `notifications/cancelled` with the original request ID to the stdio MCP server. The local pending promise rejects with `MCP_CANCELLED` and releases its timer and abort listener; timed-out calls also notify the server. A focused follow-up call confirms the server observed cancellation. The regression and changed-file checks pass locally; hosted Windows/Linux confirmation is pending.

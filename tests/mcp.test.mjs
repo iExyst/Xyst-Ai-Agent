@@ -31,12 +31,14 @@ function fixtureServerCode({
   invalidStructuredOutput = false,
   emptyEnum = false,
   unsupportedSchemaDialect = false,
+  hangTool = false,
 } = {}) {
   return `
 const readline = require('node:readline');
 const lines = readline.createInterface({ input: process.stdin });
 let subscriptionId = null;
 let dynamicToolChanged = false;
+let cancelledToolCall = null;
 const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
 const sendMethodResult = (request, result) => {
   if (request.method === 'tools/list' && result.tools?.[0]) {
@@ -135,9 +137,19 @@ lines.on('line', (line) => {
     subscriptionId = request.id;
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/subscriptions/acknowledged', params: { _meta: { 'io.modelcontextprotocol/subscriptionId': subscriptionId }, notifications: { toolsListChanged: true } } }) + '\\n');
   } else if (request.method === 'notifications/cancelled') {
+    if (${hangTool ? 'true' : 'false'} && request.params?.requestId === cancelledToolCall) cancelledToolCall = 'cancelled';
   } else if (request.method === 'tools/list') {
     sendMethodResult(request, { tools: [{ name: 'echo', description: 'Return the supplied text.', inputSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', properties: { text: { type: 'string', minLength: 1, maxLength: 40 }, format_metadata: { type: 'string', format: 'email', contentEncoding: 'utf-8', contentMediaType: 'text/plain', contentSchema: { type: 'object', properties: { value: { type: 'string' } } }, default: 'person@example.test', examples: ['person@example.test'], deprecated: true, readOnly: true }, optional_null: { type: 'null' }, nullable_text: { type: ['string', 'null'], maxLength: 10 }, fixed_mode: { type: 'string', const: 'safe' }, object_choice: { type: 'object', properties: { mode: { type: 'string' } }, required: ['mode'], enum: [{ mode: 'fast' }] }, bounded_object: { type: 'object', properties: { flag: { type: 'boolean' } }, minProperties: 1, maxProperties: 1 }, unique_tags: { type: 'array', items: { type: 'object', properties: { tag: { type: 'string' } } }, uniqueItems: true }, positive_number: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 10, multipleOf: 0.1 }, any_value: true, forbidden: false, one_character: { type: 'string', maxLength: 1 }, composed_text: { allOf: [{ type: 'string' }, { type: 'string', minLength: 2 }] }, choice: { anyOf: [{ type: 'string', minLength: 2 }, { type: 'integer' }] }, exclusive_choice: { oneOf: [{ type: 'integer' }, { const: 1 }] }, not_long_text: { not: { type: 'string', minLength: 2 } }, conditional_text: { if: { type: 'string' }, then: { type: 'string', minLength: 2 }, else: { type: 'integer' } }, pattern_code: { type: 'string', pattern: '^[A-Z]{2}-[0-9]{3}$' }, slow_pattern: { type: 'string', pattern: '^(a+)+$' }, pattern_map: { patternProperties: { '^S_': { type: 'string' }, '^I_': { type: 'integer' } }, additionalProperties: false }, names_only: { propertyNames: { pattern: '^[a-z_]+$' } }, implicit_minimum: { minimum: 1 }, implicit_length: { minLength: 2 }, typed_free_object: { required: ['flag'] }, dependent_fields: { dependentRequired: { card: ['billing'] }, dependentSchemas: { member: { required: ['id'] } } }, contain_array: { type: 'array', contains: { const: 'hit' }, minContains: 1, maxContains: 2 }, tuple_values: { type: 'array', prefixItems: [{ type: 'string' }, { type: 'integer' }], items: { type: 'boolean' } } }, required: ['text'], additionalProperties: { type: 'string' } } }, { name: 'count', inputSchema: { type: 'object', properties: { count: { type: 'integer', enum: [1, 2] } } } }] });
   } else if (request.method === 'tools/call') {
+    if (${hangTool ? 'true' : 'false'} && cancelledToolCall === 'cancelled') {
+      cancelledToolCall = null;
+      sendMethodResult(request, { content: [{ type: 'text', text: 'server observed cancellation' }] });
+      return;
+    }
+    if (${hangTool ? 'true' : 'false'} && request.params.arguments.text === 'hang') {
+      cancelledToolCall = request.id;
+      return;
+    }
     if (${dynamicToolNotifications ? 'true' : 'false'} && subscriptionId && !dynamicToolChanged) {
       dynamicToolChanged = true;
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed', params: { _meta: { 'io.modelcontextprotocol/subscriptionId': subscriptionId } } }) + '\\n');
@@ -179,6 +191,7 @@ function managerConfig({
   dynamicToolNotifications = false,
   invalidStructuredOutput = false,
   emptyEnum = false,
+  hangTool = false,
 } = {}) {
   return {
     tools: { shell_enabled: true },
@@ -207,6 +220,7 @@ function managerConfig({
               dynamicToolNotifications,
               invalidStructuredOutput,
               emptyEnum,
+              hangTool,
             }),
           ],
           timeout_ms: 3000,
@@ -576,6 +590,24 @@ test('modern MCP stdio subscriptions refresh advertised definitions after list c
       else setTimeout(check, 10);
     };
     check();
+  });
+});
+
+test('cancelling an MCP stdio tool call notifies the server and stops waiting for its response', async (t) => {
+  const root = await createTempDirectory('xyst-mcp-cancel-');
+  const manager = new StdioMcpManager({ config: managerConfig({ hangTool: true }), workspaceRoot: root });
+  t.after(async () => {
+    await manager.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await manager.initialize();
+  const controller = new AbortController();
+  const call = manager.call('mcp__fixture__echo', { text: 'hang' }, { signal: controller.signal });
+  setTimeout(() => controller.abort(), 50);
+  await assert.rejects(call, { code: 'MCP_CANCELLED' });
+  assert.deepEqual(await manager.call('mcp__fixture__echo', { text: 'follow-up' }), {
+    content: [{ type: 'text', text: 'server observed cancellation' }],
+    resultType: 'complete',
   });
 });
 
