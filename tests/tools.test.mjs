@@ -543,6 +543,19 @@ test('unrestricted autonomy exposes all machine paths and returns unredacted fil
   assert.equal(await fs.readFile(path.join(root, 'large-write.txt'), 'utf8'), 'unrestricted-write');
   await tools.call('edit_file', { path: path.join(root, 'large-write.txt'), old_string: 'unrestricted', new_string: 'expanded' });
   assert.equal(await fs.readFile(path.join(root, 'large-write.txt'), 'utf8'), 'expanded-write');
+
+  const oversizedEdit = path.join(root, 'oversized-edit.txt');
+  await fs.writeFile(oversizedEdit, '');
+  await fs.truncate(oversizedEdit, 32 * 1024 * 1024 + 1);
+  await assert.rejects(
+    tools.call('edit_file', { path: oversizedEdit, old_string: 'not-present', new_string: 'replacement' }),
+    /File is too large to edit through this tool/,
+  );
+  await assert.rejects(
+    tools.call('write_file', { path: 'oversized-write.txt', content: 'w'.repeat(32 * 1024 * 1024 + 1) }),
+    /File content exceeds the tool write limit/,
+  );
+  await assert.rejects(fs.access(path.join(root, 'oversized-write.txt')));
 });
 
 test('unrestricted tool output remains bounded by the runtime transport limit', async (t) => {

@@ -2,8 +2,8 @@
 
 ## Bounded tool result transport — 2026-10-27
 
-- Built-in JSON tool responses now have a hard 1 MB runtime ceiling, including unrestricted mode. File reads are capped at 32 MiB, and directory listings at 5,000 entries, so large results are bounded before transport truncation; larger files must be read in bounded line chunks. Screenshot images retain the separate 8 MiB decoded-image limit.
-- Focused output-cap and unrestricted file-read regressions pass; Biome and whitespace checks pass. Exact-source run [40605155443](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40605155443) passed security and both desktop/package lifecycle jobs. Windows Node 22/24 each passed 933/955 with one known ConPTY resize failure and 21 skips; Ubuntu Node 22/24 each passed 947/955 with Bubblewrap loopback and dependent signed-MCP isolation failures and six skips. No new failure was attributed to this change.
+- Built-in JSON tool responses now have a hard 1 MB runtime ceiling, including unrestricted mode. File reads, edits, and writes are capped at 32 MiB, and directory listings at 5,000 entries, so large results and operations are bounded. Screenshot images retain the separate 8 MiB decoded-image limit.
+- Focused output-cap and unrestricted file-operation regressions pass; Biome and whitespace checks pass. Exact-source run [40605155443](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40605155443) passed security and both desktop/package lifecycle jobs. Windows Node 22/24 each passed 933/955 with one known ConPTY resize failure and 21 skips; Ubuntu Node 22/24 each passed 947/955 with Bubblewrap loopback and dependent signed-MCP isolation failures and six skips. No new failure was attributed to the transport caps; this expanded edit/write ceiling change is awaiting hosted CI.
 
 ## Signed update and revocation cache recovery — 2026-10-27
 
@@ -1271,7 +1271,7 @@
 
 ## Unrestricted file-size policy — 2026-10-20
 
-- Unrestricted file reads, writes, and edits bypass configured per-file and per-write byte ceilings, matching its machine-wide filesystem and no-app-policy behavior. Since 2026-10-27, reads still have a hard 32 MiB transport ceiling and all built-in tool results have a hard 1 MB output ceiling; larger content must be processed in bounded chunks or with shell tools.
+- Unrestricted file reads, writes, and edits bypass configured per-file and per-write byte ceilings, matching its machine-wide filesystem and no-app-policy behavior. Hard runtime ceilings now cap reads, edits, and writes at 32 MiB, directory listings at 5,000 entries, and JSON tool results at 1 MB; larger content must be processed in bounded chunks or with shell tools.
 - Regression coverage uses configured one-byte limits to confirm unrestricted reads, writes, and edits exceed those limits.
 
 ## Unrestricted automation output and listing limits — 2026-10-21

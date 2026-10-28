@@ -186,10 +186,7 @@ async function readFile(root, args, config) {
     const [openedPath, currentStat] = await Promise.all([fs.realpath(filePath), fs.stat(filePath)]);
     if (!sameResolvedPath(openedPath, filePath) || stat.dev !== currentStat.dev || stat.ino !== currentStat.ino)
       throw new Error('File changed while opening; retry the read');
-    const maxReadBytes = Math.min(
-      isUnrestricted(config) ? MAX_TOOL_FILE_READ_BYTES : (config.tools?.max_file_bytes ?? DEFAULT_FILE_LIMIT),
-      MAX_TOOL_FILE_READ_BYTES,
-    );
+    const maxReadBytes = toolFileLimit(config, config.tools?.max_file_bytes ?? DEFAULT_FILE_LIMIT);
     if (stat.size > maxReadBytes) throw new Error('File is too large to read through this tool');
     const start = Math.max(1, args.start_line || 1);
     const requestedEnd = args.end_line || Number.MAX_SAFE_INTEGER;
@@ -305,8 +302,8 @@ async function writeFile(root, args, config, context = {}) {
   if (!isUnrestricted(config) && isSensitivePath(args.path))
     throw new Error('Writing credential or key files is blocked by the secret-safety policy');
   const content = context.approvedFileContent ?? args.content;
-  if (!isUnrestricted(config) && Buffer.byteLength(content) > (config.tools?.max_write_bytes || DEFAULT_FILE_LIMIT))
-    throw new Error('File content exceeds the configured write limit');
+  if (Buffer.byteLength(content) > toolFileLimit(config, config.tools?.max_write_bytes ?? DEFAULT_FILE_LIMIT))
+    throw new Error('File content exceeds the tool write limit');
   const filePath = await resolveToolPath(root, args.path, { machineScope: machineScope(config) });
   if (!isUnrestricted(config) && (await isSensitiveResolvedPath(root, filePath)))
     throw new Error('Writing credential or key files is blocked by the secret-safety policy');
@@ -338,7 +335,7 @@ async function editFile(root, args, config, context = {}) {
     const [openedPath, currentStat] = await Promise.all([fs.realpath(filePath), fs.stat(filePath)]);
     if (!sameResolvedPath(openedPath, filePath) || stat.dev !== currentStat.dev || stat.ino !== currentStat.ino)
       throw new Error('File changed while opening; retry the edit');
-    const maxReadBytes = isUnrestricted(config) ? Number.MAX_SAFE_INTEGER : config.tools?.max_file_bytes || DEFAULT_FILE_LIMIT;
+    const maxReadBytes = toolFileLimit(config, config.tools?.max_file_bytes ?? DEFAULT_FILE_LIMIT);
     if (stat.size > maxReadBytes) throw new Error('File is too large to edit through this tool');
     const bytes = await readBoundedFile(handle, maxReadBytes);
     let source;
@@ -353,8 +350,8 @@ async function editFile(root, args, config, context = {}) {
     if (source.indexOf(args.old_string, first + args.old_string.length) >= 0)
       throw new Error('old_string matched multiple places; provide a more specific block');
     updated = context.approvedFileContent ?? source.slice(0, first) + args.new_string + source.slice(first + args.old_string.length);
-    if (!isUnrestricted(config) && Buffer.byteLength(updated) > (config.tools?.max_write_bytes || DEFAULT_FILE_LIMIT))
-      throw new Error('Updated file exceeds the configured write limit');
+    if (Buffer.byteLength(updated) > toolFileLimit(config, config.tools?.max_write_bytes ?? DEFAULT_FILE_LIMIT))
+      throw new Error('Updated file exceeds the tool write limit');
     sourceSnapshot = { target: filePath, exists: true, sha256: createHash('sha256').update(bytes).digest('hex') };
   } finally {
     await handle.close();
@@ -444,6 +441,9 @@ function isShellEnabled(config) {
 function toolOutputLimit(config) {
   const configured = isUnrestricted(config) ? MAX_TOOL_RESULT_BYTES : (config.budgets?.max_tool_output_bytes ?? DEFAULT_OUTPUT_LIMIT);
   return Math.min(configured, MAX_TOOL_RESULT_BYTES);
+}
+function toolFileLimit(config, configured) {
+  return Math.min(isUnrestricted(config) ? MAX_TOOL_FILE_READ_BYTES : configured, MAX_TOOL_FILE_READ_BYTES);
 }
 
 async function atomicWrite(filePath, content, options) {
