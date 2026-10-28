@@ -7,7 +7,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { resolveToolPath } from '../platform/paths.mjs';
 import { safeProcessEnvironment, terminateProcessTree } from '../platform/process.mjs';
-import { deepFreeze, resolveToolTimeoutMs, TOOL_SCHEMA_VERSION } from './schemas.mjs';
+import { deepFreeze, resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, validateMcpToolOutput } from './schemas.mjs';
 import { LegacySseMcpSession, StreamableHttpMcpSession } from './mcp-http.mjs';
 import { getActiveInstalledMcpPackages } from '../extensions/package-registry.mjs';
 import { buildBubblewrapArgs, bubblewrapLauncherEnvironment, findBubblewrap, validateBubblewrapWorkspace } from '../platform/sandbox.mjs';
@@ -237,6 +237,7 @@ export class StdioMcpManager {
     return entry.session.callTool(metadata.originalName, args, {
       ...context,
       headerParameters: metadata.headerParameters || [],
+      outputSchema: metadata.outputSchema,
     });
   }
 
@@ -526,13 +527,13 @@ class McpStdioSession {
     return result;
   }
 
-  async callTool(originalName, args) {
+  async callTool(originalName, args, { outputSchema } = {}) {
     const params = { name: originalName, arguments: args };
     if (this.protocolVersion === MODERN_VERSION) params._meta = modernMeta();
     const result = await this.#request('tools/call', params);
     if (!result || typeof result !== 'object' || Array.isArray(result))
       throw mcpError(`MCP server '${this.name}' returned an invalid tool result`, 'MCP_INVALID_RESPONSE');
-    return result;
+    return validateMcpToolOutput(outputSchema, result);
   }
 
   #request(method, params, timeoutMs = this.timeoutMs, protocolVersion = this.protocolVersion) {
@@ -666,6 +667,12 @@ function normalizeMcpTool(serverName, tool) {
   if (exposedName.length > 64)
     throw mcpError(`MCP server '${serverName}' advertised a tool name that exceeds the provider limit`, 'MCP_INVALID_TOOL');
   const parameters = normalizeSchema(tool.inputSchema, 0);
+  if (
+    tool.outputSchema !== undefined &&
+    (!tool.outputSchema || typeof tool.outputSchema !== 'object' || Array.isArray(tool.outputSchema) || tool.outputSchema.type !== 'object')
+  )
+    throw mcpError(`MCP server '${serverName}' tool output schema must have type object`, 'MCP_INVALID_SCHEMA');
+  const outputSchema = tool.outputSchema === undefined ? undefined : normalizeSchema(tool.outputSchema, 0);
   const note = typeof tool.description === 'string' ? ` Untrusted server description: ${tool.description.slice(0, 1200)}` : '';
   return deepFreeze({
     schema_version: TOOL_SCHEMA_VERSION,
@@ -678,7 +685,7 @@ function normalizeMcpTool(serverName, tool) {
     parameters,
     approval: 'ask',
     destructive: true,
-    _mcp: { server: serverName, originalName: tool.name },
+    _mcp: { server: serverName, originalName: tool.name, ...(outputSchema ? { outputSchema } : {}) },
   });
 }
 

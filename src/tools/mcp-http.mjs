@@ -1,4 +1,4 @@
-import { resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, deepFreeze } from './schemas.mjs';
+import { resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, deepFreeze, validateMcpToolOutput } from './schemas.mjs';
 import { validateMcpInitializeResult, validateMcpJsonRpcResponse, validateMcpResultType } from './mcp-protocol.mjs';
 
 const VERSION = '2026-07-28';
@@ -185,7 +185,7 @@ export class StreamableHttpMcpSession {
     return result;
   }
 
-  async callTool(name, args, { signal, headerParameters = [] } = {}) {
+  async callTool(name, args, { signal, headerParameters = [], outputSchema } = {}) {
     const params = { name, arguments: args };
     if (this.version === VERSION) params._meta = modernMeta();
     const extraHeaders = {};
@@ -200,7 +200,7 @@ export class StreamableHttpMcpSession {
     const result = await this.request('tools/call', params, { signal, extraHeaders });
     if (!result || typeof result !== 'object' || Array.isArray(result))
       throw mcpError('MCP server returned an invalid tool result', 'MCP_INVALID_RESPONSE');
-    return result;
+    return validateMcpToolOutput(outputSchema, result);
   }
 
   async request(
@@ -957,6 +957,12 @@ function normalizeTool(server, tool) {
   const name = `mcp__${server}__${tool.name}`;
   if (name.length > 64) throw mcpError('MCP tool name exceeds provider limit', 'MCP_INVALID_TOOL');
   const headerParameters = findHeaderParameters(tool.inputSchema);
+  if (
+    tool.outputSchema !== undefined &&
+    (!tool.outputSchema || typeof tool.outputSchema !== 'object' || Array.isArray(tool.outputSchema) || tool.outputSchema.type !== 'object')
+  )
+    throw mcpError(`MCP server '${server}' tool output schema must have type object`, 'MCP_INVALID_SCHEMA');
+  const outputSchema = tool.outputSchema === undefined ? undefined : normalizeSchema(tool.outputSchema);
   return deepFreeze({
     schema_version: TOOL_SCHEMA_VERSION,
     execution: { timeout: timeoutPolicy(server), sandbox: 'unsupported' },
@@ -969,7 +975,7 @@ function normalizeTool(server, tool) {
     parameters: normalizeSchema(tool.inputSchema),
     approval: 'ask',
     destructive: true,
-    _mcp: { server, originalName: tool.name, headerParameters },
+    _mcp: { server, originalName: tool.name, headerParameters, ...(outputSchema ? { outputSchema } : {}) },
   });
 }
 

@@ -408,6 +408,22 @@ export function validateArguments(schema, input) {
   return value;
 }
 
+export function validateMcpToolOutput(schema, result) {
+  if (!schema || result?.isError) return result;
+  if (!Object.hasOwn(result, 'structuredContent'))
+    throw Object.assign(new Error('MCP tool result is missing structuredContent required by its outputSchema'), {
+      code: 'MCP_INVALID_RESULT',
+    });
+  try {
+    validateValue(schema, result.structuredContent, '$.structuredContent', { patternChecksRemaining: 256 });
+  } catch {
+    throw Object.assign(new Error('MCP tool structuredContent does not match its advertised outputSchema'), {
+      code: 'MCP_INVALID_RESULT',
+    });
+  }
+  return result;
+}
+
 function validateValue(schema, value, location, state) {
   if (schema === true) return;
   if (schema === false) throw new Error(`${location} is not allowed`);
