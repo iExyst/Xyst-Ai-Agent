@@ -527,6 +527,32 @@ test('session reads reject oversized records before parsing and preserve them on
   assert.equal((await fs.stat(recordPath)).size, MAX_SESSION_EXPORT_BYTES + 1);
 });
 
+test('session reads stop at the configured limit plus one byte when a record grows during reading', async (t) => {
+  const root = await createTempDirectory('xyst-session-bounded-read-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore(root);
+  const session = store.create();
+  await store.save(session);
+  const recordPath = path.join(root, '.agent', 'sessions', `${session.id}.json`);
+
+  const probe = await fs.open(recordPath, 'r');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const read = fileHandlePrototype.read;
+  let bytesRead = 0;
+  fileHandlePrototype.read = async (buffer, offset, length) => {
+    buffer.fill(0, offset, offset + length);
+    bytesRead += length;
+    return { bytesRead: length, buffer };
+  };
+  try {
+    await assert.rejects(store.load(session.id), { code: 'SESSION_RECORD_TOO_LARGE' });
+    assert.equal(bytesRead, MAX_SESSION_EXPORT_BYTES + 1);
+  } finally {
+    fileHandlePrototype.read = read;
+  }
+});
+
 test('session reads reject linked session state directories', async (t) => {
   const root = await createTempDirectory('xyst-session-link-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

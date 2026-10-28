@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## Bounded session record reads — 2026-10-28
+
+- Session records now use the shared capped file-handle reader and stop at `MAX_SESSION_EXPORT_BYTES + 1`, even if a record grows after its initial metadata checks. Reads also revalidate the opened inode and file version before parsing so concurrent replacement or mutation fails closed.
+- Focused session size and injected-growth regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+
 ## Bounded application update replay-cache reads — 2026-10-28
 
 - The signed application-update sequence cache now uses the shared bounded file-handle reader, so a cache that grows after its metadata check cannot trigger an unbounded allocation while anti-replay state is being verified. Oversized or changed cache contents fail closed as `APP_UPDATE_CACHE_INVALID`.

@@ -3,7 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson } from '../platform/files.mjs';
+import { atomicWriteJson, readBoundedFileHandle } from '../platform/files.mjs';
 import { MAX_SESSION_GRANTS } from '../tools/grants.mjs';
 import { ToolAuditStore } from '../tools/audit.mjs';
 import { redactSecrets, redactStructuredSecrets } from '../platform/redaction.mjs';
@@ -729,10 +729,10 @@ async function readSafeSessionRecord(workspaceRoot, directory, file) {
     errorCode: 'SESSION_DIRECTORY_INVALID',
     label: 'Session store',
   });
-  const before = await fs.lstat(file);
+  const before = await fs.lstat(file, { bigint: true });
   if (before.isSymbolicLink() || !before.isFile() || before.nlink > 1)
     throw Object.assign(new Error('Session record must be a regular single-link file'), { code: 'SESSION_FILE_INVALID' });
-  if (before.size > MAX_SESSION_EXPORT_BYTES)
+  if (before.size > BigInt(MAX_SESSION_EXPORT_BYTES))
     throw Object.assign(new Error('Session record exceeds the size limit'), { code: 'SESSION_RECORD_TOO_LARGE' });
   const realFile = await fs.realpath(file);
   if (path.dirname(realFile) !== (await fs.realpath(expectedDirectory)))
@@ -741,19 +741,33 @@ async function readSafeSessionRecord(workspaceRoot, directory, file) {
   const noFollow = fsConstants.O_NOFOLLOW || 0;
   const handle = await fs.open(file, fsConstants.O_RDONLY | noFollow);
   try {
-    const opened = await handle.stat();
-    if (
-      !opened.isFile() ||
-      opened.nlink > 1 ||
-      opened.dev !== before.dev ||
-      opened.ino !== before.ino ||
-      opened.size > MAX_SESSION_EXPORT_BYTES
-    )
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || opened.nlink > 1n || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size)
       throw Object.assign(new Error('Session record changed while it was being opened'), { code: 'SESSION_FILE_INVALID' });
-    return JSON.parse(await handle.readFile('utf8'));
+    if (opened.size > BigInt(MAX_SESSION_EXPORT_BYTES))
+      throw Object.assign(new Error('Session record exceeds the size limit'), { code: 'SESSION_RECORD_TOO_LARGE' });
+    const bytes = await readBoundedFileHandle(handle, MAX_SESSION_EXPORT_BYTES);
+    if (bytes === null) throw Object.assign(new Error('Session record exceeds the size limit'), { code: 'SESSION_RECORD_TOO_LARGE' });
+    const [after, current] = await Promise.all([handle.stat({ bigint: true }), fs.lstat(file, { bigint: true })]);
+    if (!sameSessionFileVersion(opened, after) || !sameSessionFileVersion(opened, current))
+      throw Object.assign(new Error('Session record changed while it was being read'), { code: 'SESSION_FILE_INVALID' });
+    return JSON.parse(bytes.toString('utf8'));
   } finally {
     await handle.close();
   }
+}
+
+function sameSessionFileVersion(first, second) {
+  return (
+    second.isFile() &&
+    !second.isSymbolicLink() &&
+    second.nlink <= 1n &&
+    second.dev === first.dev &&
+    second.ino === first.ino &&
+    second.size === first.size &&
+    second.mtimeNs === first.mtimeNs &&
+    second.ctimeNs === first.ctimeNs
+  );
 }
 
 function assertId(id) {
