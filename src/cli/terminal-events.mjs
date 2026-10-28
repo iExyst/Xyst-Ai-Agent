@@ -1,6 +1,7 @@
 import { sanitizeTerminalText } from './terminal-text.mjs';
 import { createTerminalTheme } from './terminal-theme.mjs';
 import { redactSecrets } from '../platform/redaction.mjs';
+import { formatModelFallbackActivity } from '../core/model-fallback.mjs';
 
 export function writeRuntimeEvent(event, { stdout, stderr, jsonOutput = false }) {
   if (jsonOutput) return;
@@ -13,6 +14,8 @@ export function writeRuntimeEvent(event, { stdout, stderr, jsonOutput = false })
     stderr.write(
       `\n${theme.cyan(`[${sanitizeTerminalText(event.model)}, turn ${safeCount(event.turn, '?')}]`)} ${theme.violet('Thinking...')}\n`,
     );
+  if (event.type === 'model_fallback')
+    stderr.write(`${theme.warning(`[model] ${sanitizeTerminalText(formatModelFallbackActivity(event))}`)}\n`);
   if (event.type === 'assistant_delta') stdout.write(sanitizeTerminalText(event.text));
   if (event.type === 'tool_started') stderr.write(`${theme.cyan('[tool]')} ${sanitizeTerminalText(event.tool)} started\n`);
   if (event.type === 'tool_finished') {

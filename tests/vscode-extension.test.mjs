@@ -717,6 +717,16 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
     },
     followRunEvents: async function* (id) {
       assert.equal(id, runId);
+      yield {
+        type: 'model_fallback',
+        data: {
+          session_id: sessionId,
+          from_model: 'local',
+          to_model: 'remote',
+          cause: 'CONNECTION_FAILED',
+          reason: 'configured fallback 1 after local',
+        },
+      };
       yield { type: 'compaction_started', data: { session_id: sessionId, trigger_reason: 'context' } };
       yield {
         type: 'compaction_finished',
@@ -815,6 +825,13 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
     ),
   );
   assert.ok(posted.some((message) => message.type === 'activity' && message.activity.label === 'Compaction failed · REQUEST_TIMEOUT'));
+  assert.ok(
+    posted.some(
+      (message) =>
+        message.type === 'activity' &&
+        message.activity.label === 'Model fallback · local → remote · provider connection failed · configured fallback 1 after local',
+    ),
+  );
   assert.deepEqual(currentBudgets, { max_turns: 2, max_output_tokens: 1000 });
 });
 

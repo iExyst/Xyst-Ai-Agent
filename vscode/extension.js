@@ -954,6 +954,14 @@ function activate(context, injectedVscode, dependencies = {}) {
           postWorktreeState();
         }
         if (event.type === 'assistant_delta') postToPanel({ type: 'assistantDelta', text: data.text });
+        if (event.type === 'model_fallback') {
+          selectedModel = safeEventLabel(data.to_model, selectedModel || 'next model');
+          postToPanel({
+            type: 'activity',
+            activity: { type: 'model_fallback', tool: 'model', label: formatModelFallbackActivity(data) },
+          });
+          updateStatus('running');
+        }
         if (event.type === 'compaction_started' || event.type === 'compaction_finished' || event.type === 'compaction_failed')
           postToPanel({
             type: 'activity',
@@ -1301,6 +1309,34 @@ function formatCompactionActivity(event) {
   }
   const code = typeof data.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(data.code) ? data.code : 'COMPACTION_FAILED';
   return `Compaction failed · ${code}`;
+}
+
+function formatModelFallbackActivity(data) {
+  const causes = {
+    AUTHENTICATION_FAILED: 'provider rejected its credentials',
+    CONNECTION_FAILED: 'provider connection failed',
+    INVALID_RESPONSE: 'provider returned an invalid response',
+    INVALID_STREAM: 'provider stream was invalid',
+    PROVIDER_UNAVAILABLE: 'provider was unavailable',
+    RATE_LIMITED: 'provider rate limit reached',
+    REQUEST_TIMEOUT: 'provider request timed out',
+    STREAM_FAILED: 'provider stream failed',
+  };
+  const from = safeEventLabel(data?.from_model, 'previous model');
+  const to = safeEventLabel(data?.to_model, 'next model');
+  const cause = typeof data?.cause === 'string' ? causes[data.cause] || 'provider request failed' : 'provider request failed';
+  const reason = safeEventLabel(data?.reason, '');
+  return `Model fallback · ${from} → ${to} · ${cause}${reason ? ` · ${reason}` : ''}`;
+}
+
+function safeEventLabel(value, fallback) {
+  return typeof value === 'string' && value.trim()
+    ? value
+        .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 180)
+    : fallback;
 }
 
 function formatBudgetSnapshot(snapshot, autonomy = 'assisted') {

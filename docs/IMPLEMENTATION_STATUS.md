@@ -2760,3 +2760,11 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## MCP JSON Schema format annotations — 2026-10-28
 
 - The 2020-12 dialect declares `format` annotation behavior by default. Xyst no longer hard-rejects non-UUID strings for `format: "uuid"` when no format-assertion option was requested. A focused stdio manager regression, Biome check, and whitespace check pass; exact-source hosted confirmation is pending.
+
+## Model fallback visibility — 2026-10-28
+
+- `model_fallback` events are now shown in the browser/native desktop timeline, VS Code activity feed, Ink prompt, and plain CLI. The shared formatter gives a readable cause and routing reason, bounds and sanitizes fields, and redacts credential-like text. Focused formatter, CLI, and VS Code integration checks pass; exact-source hosted confirmation is pending.
+
+## Repository-wide secret scan findings — 2026-10-28
+
+- Exact-source run [40748305699](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40748305699) failed its security scan on three credential-like findings in commits `a3462713e7cfae574e6b1abf9f9e7530756e7fdf` and `d1c8e922d183e174b3f5f1c65959509fa197d8b6`. Both commits are reachable from `origin/codex/integrate-green-prs-58-71` and absent from the authorized build branch's history. Scanner output remains redacted; no allowlist or other-branch history change was made. The branch build is not release-qualified while this repository-wide gate remains red.

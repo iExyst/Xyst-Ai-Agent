@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Static, Text, render, useInput, useWindowSize } from 'ink';
 import { redactSecrets } from '../platform/redaction.mjs';
 import { sanitizeTerminalText } from './terminal-text.mjs';
+import { formatModelFallbackActivity } from '../core/model-fallback.mjs';
 
 const h = React.createElement;
 const ANSI_SEQUENCE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/g;
@@ -452,6 +453,7 @@ export function createInkTerminal({ workspace, session, model, mode, stdin, stdo
         publish({ status: `Thinking · ${displayText(event.model)} · turn ${event.turn}` });
         return;
       }
+      if (event.type === 'model_fallback') return addActivity(formatModelFallbackActivity(event), 'yellow');
       if (event.type === 'assistant_delta') {
         publish({ draft: `${view.draft}${event.text}`.slice(-MAX_HISTORY_MESSAGE_CHARS) });
         return;

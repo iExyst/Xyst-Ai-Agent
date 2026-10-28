@@ -31,6 +31,7 @@ import { resolveWebSearchProvider } from './web-search-settings.mjs';
 import { modelCapabilitiesDataStatus, modelCapabilitiesStatus, modelPricingDataStatus, modelPricingStatus } from './model-pricing.mjs';
 import { withStartupTimeout } from './startup.mjs';
 import { DEFAULT_UI_SHORTCUTS, matchesUiShortcut } from '../src/core/keybindings.mjs';
+import { formatModelFallbackActivity } from '../src/core/model-fallback.mjs';
 
 const token = document.querySelector('meta[name="xyst-token"]')?.content;
 const client = new ControlApiClient({ url: location.origin, token });
@@ -841,6 +842,13 @@ async function reconnectActiveBrowserRun() {
     for await (const event of client.followRunEvents(state.run_id, { after: state.last_event_sequence, signal: runController.signal })) {
       const data = event.data;
       if (event.type === 'approval_required') createApproval(event);
+      if (event.type === 'model_fallback') {
+        activeRunModel = data.to_model;
+        ensureModelPickerOption(activeRunModel);
+        elements.model_picker.value = activeRunModel;
+        renderRunModelControl();
+        appendActivity(formatModelFallbackActivity(data), 'warning');
+      }
       if (event.type === 'approval_resolved') {
         for (const card of elements.approval_region.querySelectorAll('.approval-card')) {
           if (card.dataset.approvalId !== data.approval_id) continue;
@@ -1424,6 +1432,13 @@ async function submitPrompt(prompt) {
         renderRunInspector();
       }
       if (event.type === 'assistant_delta' && typeof data.text === 'string') responseBody.textContent += data.text;
+      if (event.type === 'model_fallback') {
+        activeRunModel = data.to_model;
+        ensureModelPickerOption(activeRunModel);
+        elements.model_picker.value = activeRunModel;
+        renderRunModelControl();
+        appendActivity(formatModelFallbackActivity(data), 'warning');
+      }
       if (event.type === 'model_load_started') {
         const activity = appendActivity(`Loading local model · ${data.model}`, 'working');
         modelLoadRows.set(data.model, activity);

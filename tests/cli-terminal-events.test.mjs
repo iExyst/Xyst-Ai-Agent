@@ -17,6 +17,16 @@ test('CLI runtime events show tool lifecycle and sanitize model/tool text before
   const output = capture();
   writeRuntimeEvent({ type: 'tool_started', tool: 'read_file\u001b[2J' }, output.streams);
   writeRuntimeEvent(
+    {
+      type: 'model_fallback',
+      from_model: 'primary\u001b[2J',
+      to_model: 'backup',
+      cause: 'CONNECTION_FAILED',
+      reason: 'configured fallback 1 after primary',
+    },
+    output.streams,
+  );
+  writeRuntimeEvent(
     { type: 'tool_finished', tool: 'edit_file', duration_ms: 2.6, applied_hunks: ['h1', 'h2'], summary: 'Applied the file edit.' },
     output.streams,
   );
@@ -24,6 +34,10 @@ test('CLI runtime events show tool lifecycle and sanitize model/tool text before
   writeRuntimeEvent({ type: 'tool_failed', tool: 'run_process', message: 'failed\u001b[31m\u0007' }, output.streams);
 
   assert.match(output.stderr.join(''), /read_file\[2J started/);
+  assert.match(
+    output.stderr.join(''),
+    /Model fallback · primary \[2J → backup · provider connection failed · configured fallback 1 after primary/,
+  );
   assert.match(output.stderr.join(''), /edit_file finished in 3 ms \(2 diff hunks applied\) — Applied the file edit\./);
   assert.match(output.stderr.join(''), /run_process: failed\[31m/);
   assert.match(output.stdout.join(''), /answer\]52;c;payload/);
