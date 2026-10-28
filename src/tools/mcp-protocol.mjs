@@ -20,7 +20,10 @@ const RESULT_TYPE_METHODS = new Set([
 
 /** Reject modern MCP control-flow results that Xyst does not yet implement. */
 export function validateMcpResultType(result, { protocolVersion, serverName, method }) {
-  if (isRecord(result) && !isOptionalMeta(result._meta))
+  if (
+    isRecord(result) &&
+    !(protocolVersion === MODERN_PROTOCOL_VERSION ? isOptionalResultMeta(result._meta) : isOptionalMeta(result._meta))
+  )
     throw mcpError(`MCP server '${serverName}' returned invalid result metadata during ${method}`, 'MCP_INVALID_RESPONSE');
   if (
     protocolVersion === MODERN_PROTOCOL_VERSION &&
@@ -154,7 +157,7 @@ function isResourceContents(value) {
   if (
     !isRecord(value) ||
     !isOptionalMeta(value._meta) ||
-    typeof value.uri !== 'string' ||
+    !isUri(value.uri) ||
     (value.mimeType !== undefined && typeof value.mimeType !== 'string')
   )
     return false;
@@ -166,9 +169,8 @@ function isToolDefinition(value) {
     isRecord(value) &&
     isOptionalMeta(value._meta) &&
     typeof value.name === 'string' &&
-    isRecord(value.inputSchema) &&
-    value.inputSchema.type === 'object' &&
-    (value.outputSchema === undefined || isRecord(value.outputSchema)) &&
+    isInputSchema(value.inputSchema) &&
+    (value.outputSchema === undefined || isOutputSchema(value.outputSchema)) &&
     isOptionalString(value.description) &&
     isOptionalString(value.title) &&
     isOptionalToolAnnotations(value.annotations) &&
@@ -206,7 +208,7 @@ function isResourceDefinition(value) {
     isRecord(value) &&
     isOptionalMeta(value._meta) &&
     typeof value.name === 'string' &&
-    typeof value.uri === 'string' &&
+    isUri(value.uri) &&
     isOptionalString(value.title) &&
     isOptionalString(value.description) &&
     isOptionalString(value.mimeType) &&
@@ -254,7 +256,7 @@ function isPromptDefinition(value) {
 function isResourceLink(value) {
   return (
     isOptionalMeta(value._meta) &&
-    typeof value.uri === 'string' &&
+    isUri(value.uri) &&
     typeof value.name === 'string' &&
     isOptionalString(value.title) &&
     isOptionalString(value.description) &&
@@ -273,6 +275,43 @@ function isOptionalMeta(value) {
   return value === undefined || isRecord(value);
 }
 
+function isOptionalResultMeta(value) {
+  return (
+    value === undefined ||
+    (isRecord(value) &&
+      (value['io.modelcontextprotocol/serverInfo'] === undefined || isImplementation(value['io.modelcontextprotocol/serverInfo'])))
+  );
+}
+
+function isImplementation(value) {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    typeof value.version === 'string' &&
+    isOptionalString(value.title) &&
+    isOptionalString(value.description) &&
+    (value.websiteUrl === undefined || isUri(value.websiteUrl)) &&
+    isOptionalIcons(value.icons)
+  );
+}
+
+function isInputSchema(value) {
+  return isRecord(value) && value.type === 'object' && isOptionalString(value.$schema);
+}
+
+function isOutputSchema(value) {
+  return isRecord(value) && isOptionalString(value.$schema);
+}
+
+function isUri(value) {
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim() || /\s/.test(value)) return false;
+  try {
+    return Boolean(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
 function isOptionalIcons(value) {
   return value === undefined || (Array.isArray(value) && value.every(isIcon));
 }
@@ -280,7 +319,7 @@ function isOptionalIcons(value) {
 function isIcon(value) {
   return (
     isRecord(value) &&
-    typeof value.src === 'string' &&
+    isUri(value.src) &&
     isOptionalString(value.mimeType) &&
     (value.sizes === undefined || (Array.isArray(value.sizes) && value.sizes.every((size) => typeof size === 'string'))) &&
     (value.theme === undefined || value.theme === 'light' || value.theme === 'dark')

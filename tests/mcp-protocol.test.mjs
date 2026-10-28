@@ -52,13 +52,49 @@ test('MCP tool-call results validate content blocks and standard flags', () => {
   );
 });
 
+test('MCP modern result metadata and schema URI fields validate against protocol shapes', () => {
+  const options = { protocolVersion: '2026-07-28', serverName: 'fixture', method: 'tools/call' };
+  const result = {
+    resultType: 'complete',
+    content: [],
+    _meta: {
+      'io.modelcontextprotocol/serverInfo': {
+        name: 'fixture',
+        version: '1.0.0',
+        websiteUrl: 'https://example.test/',
+        icons: [{ src: 'data:image/png;base64,AAAA' }],
+      },
+    },
+  };
+  assert.equal(validateMcpResultType(result, options), result);
+  for (const serverInfo of ['fixture', { name: 'fixture' }, { name: 'fixture', version: '1.0.0', websiteUrl: '/relative' }]) {
+    assert.throws(() => validateMcpResultType({ ...result, _meta: { 'io.modelcontextprotocol/serverInfo': serverInfo } }, options), {
+      code: 'MCP_INVALID_RESPONSE',
+    });
+  }
+  assert.throws(() => validateMcpResultType({ ...result, _meta: [] }, options), { code: 'MCP_INVALID_RESPONSE' });
+
+  const legacy = { content: [], _meta: { 'io.modelcontextprotocol/serverInfo': 'legacy extension data' } };
+  assert.equal(validateMcpResultType(legacy, { ...options, protocolVersion: '2025-11-25' }), legacy);
+});
+
 test('MCP list results validate tool, resource, template, and prompt definitions', () => {
   const options = { protocolVersion: '2026-07-28', serverName: 'fixture' };
   const cache = { resultType: 'complete', cacheScope: 'private', ttlMs: 10 };
   const validCases = [
     [
       'tools/list',
-      { ...cache, tools: [{ name: 'search', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } }] },
+      {
+        ...cache,
+        tools: [
+          {
+            name: 'search',
+            inputSchema: { type: 'object', $schema: 'https://json-schema.org/draft/2020-12/schema', properties: {} },
+            outputSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema' },
+            annotations: { readOnlyHint: true },
+          },
+        ],
+      },
     ],
     [
       'resources/list',
@@ -77,7 +113,10 @@ test('MCP list results validate tool, resource, template, and prompt definitions
 
   for (const [method, result] of [
     ['tools/list', { ...cache, tools: [{ name: 'bad', inputSchema: { type: 'array' } }] }],
+    ['tools/list', { ...cache, tools: [{ name: 'bad', inputSchema: { type: 'object', $schema: 1 } }] }],
+    ['tools/list', { ...cache, tools: [{ name: 'bad', inputSchema: { type: 'object' }, outputSchema: { $schema: 1 } }] }],
     ['resources/list', { ...cache, resources: [{ name: 'missing uri' }] }],
+    ['resources/list', { ...cache, resources: [{ name: 'bad uri', uri: '/relative' }] }],
     ['resources/templates/list', { ...cache, resourceTemplates: [{ name: 'missing template' }] }],
     ['prompts/list', { ...cache, prompts: [{ name: 'bad', arguments: [{ name: 'x', required: 'yes' }] }] }],
   ])
