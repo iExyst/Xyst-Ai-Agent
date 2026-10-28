@@ -1804,6 +1804,55 @@ test('MCP HTTP falls back to legacy when discovery advertises only legacy versio
   assert.deepEqual(methods, ['server/discover', 'initialize', 'notifications/initialized']);
 });
 
+test('cancelling HTTP MCP calls sends notifications/cancelled with the active request ID', async (t) => {
+  for (const [name, Session, version] of [
+    ['streamable-http', StreamableHttpMcpSession, '2026-07-28'],
+    ['legacy-sse', LegacySseMcpSession, '2025-11-25'],
+  ]) {
+    let resolveCancellation;
+    const cancelled = new Promise((resolve) => {
+      resolveCancellation = resolve;
+    });
+    const calls = [];
+    const session = new Session({
+      name,
+      settings: { url: 'http://127.0.0.1:8765/mcp' },
+      headers: {},
+      timeoutMs: 1_000,
+      fetchImpl: async (_url, options) => {
+        const request = JSON.parse(options.body);
+        calls.push(request);
+        if (request.method === 'notifications/cancelled') {
+          resolveCancellation(request);
+          return new Response(null, { status: 202 });
+        }
+        return new Promise((_resolve, reject) => {
+          const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+          if (options.signal.aborted) abort();
+          else options.signal.addEventListener('abort', abort, { once: true });
+        });
+      },
+    });
+    session.version = version;
+    if (name === 'legacy-sse') session.endpointUrl = 'http://127.0.0.1:8765/messages?sessionId=fixture';
+    t.after(() => session.close());
+
+    const controller = new AbortController();
+    const call = session.callTool('slow_tool', {}, { signal: controller.signal });
+    const callRequest = await new Promise((resolve) => {
+      const check = () => {
+        const request = calls.find((entry) => entry.method === 'tools/call');
+        if (request) resolve(request);
+        else setTimeout(check, 1);
+      };
+      check();
+    });
+    controller.abort();
+    await assert.rejects(call, { code: 'MCP_CANCELLED' });
+    assert.equal((await cancelled).params.requestId, callRequest.id);
+  }
+});
+
 test('MCP resumable Streamable HTTP resumes interrupted SSE responses with the last event ID', async (t) => {
   const calls = [];
   let toolRequestId;

@@ -300,9 +300,15 @@ export class StreamableHttpMcpSession {
         this.sessionId = validateSessionId(response.headers.get('mcp-session-id'));
       return validateMcpResultType(message.result, { protocolVersion, serverName: this.name, method });
     } catch (error) {
-      if (error.code) throw error;
+      if ((signal?.aborted || controller.signal.aborted) && id !== undefined && !notification)
+        void this.request(
+          'notifications/cancelled',
+          { requestId: id, reason: signal?.aborted ? 'Request cancelled by the caller' : 'Request timed out' },
+          { timeoutMs: Math.min(timeoutMs, 1_000), protocolVersion, methodHeader, notification: true },
+        ).catch(() => {});
       if (signal?.aborted) throw mcpError(`MCP call '${method}' was cancelled`, 'MCP_CANCELLED');
       if (controller.signal.aborted) throw mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT');
+      if (error.code) throw error;
       throw mcpError(`MCP transport failed during ${method}`, 'MCP_TRANSPORT_ERROR');
     } finally {
       clearTimeout(timer);
@@ -915,9 +921,15 @@ export class LegacySseMcpSession extends StreamableHttpMcpSession {
       return message.result;
     } catch (error) {
       if (typeof error?.code === 'string' && error.code.startsWith('MCP_')) throw error;
+      if ((signal?.aborted || controller.signal.aborted) && id !== undefined && !notification)
+        void this.request(
+          'notifications/cancelled',
+          { requestId: id, reason: signal?.aborted ? 'Request cancelled by the caller' : 'Request timed out' },
+          { timeoutMs: Math.min(timeoutMs, 1_000), protocolVersion, notification: true },
+        ).catch(() => {});
       if (signal?.aborted) throw mcpError(`MCP call '${method}' was cancelled`, 'MCP_CANCELLED');
-      if (this.closed) throw mcpError(`MCP server '${this.name}' is closed`, 'MCP_SERVER_CLOSED');
       if (controller.signal.aborted) throw mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT');
+      if (this.closed) throw mcpError(`MCP server '${this.name}' is closed`, 'MCP_SERVER_CLOSED');
       throw mcpError(`MCP transport failed during ${method}`, 'MCP_TRANSPORT_ERROR');
     } finally {
       clearTimeout(timer);
