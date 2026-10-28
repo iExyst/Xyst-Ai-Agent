@@ -2632,7 +2632,10 @@ export class LocalControlServer {
       };
       run.pendingApprovals.set(approvalId, { resolve: settle, timer, onAbort, proposal, event });
       run.controller.signal.addEventListener('abort', onAbort, { once: true });
-      this.#publish(run, event);
+      this.#publish(run, {
+        type: 'approval_required',
+        ...event,
+      });
     });
   }
 
