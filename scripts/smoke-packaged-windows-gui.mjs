@@ -137,7 +137,7 @@ async function verifyAppearanceAccessibility(page) {
   assert.ok(measurements.zoom >= 1.14 && measurements.after >= measurements.before * 1.14, `Larger text should enlarge the renderer: ${JSON.stringify(measurements)}`);
   assert.notEqual(measurements.borderAfter, measurements.borderBefore, `High contrast should change panel borders: ${JSON.stringify(measurements)}`);
   assert.notEqual(measurements.textAfter, measurements.textBefore, `High contrast should brighten muted text: ${JSON.stringify(measurements)}`);
-  assert.ok(seconds(measurements.motionAfter) < seconds(measurements.motionBefore) / 100, `Reduced motion should suppress spinner animation: ${JSON.stringify(measurements)}`);
+  assert.ok(seconds(measurements.motionBefore) <= 0.00001 || seconds(measurements.motionAfter) < seconds(measurements.motionBefore) / 100, `Reduced motion should suppress spinner animation unless the OS already suppresses it: ${JSON.stringify(measurements)}`);
   return measurements;
 }
 
