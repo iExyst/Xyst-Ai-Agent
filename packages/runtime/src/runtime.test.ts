@@ -484,7 +484,7 @@ test("desktop automation setting controls which native tools reach the agent", a
     assert.equal(hasDesktopTools(toolSnapshots[0]!), false);
     config.set("global", "desktop.automation.enabled", true);
     await agent.run("Say hello in one sentence.", { workspace: root, model: "loaded-chat", maxTurns: 1 });
-    assert.equal(hasDesktopTools(toolSnapshots[1]!), true);
+    assert.equal(hasDesktopTools(toolSnapshots[1]!), inspectNativeAutomation().available);
   } finally { store.close(); }
 }));
 
