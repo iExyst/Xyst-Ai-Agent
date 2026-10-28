@@ -24,7 +24,7 @@ test('image token estimates use dimensions and do not count base64 payload as te
 test('prompt classifier favors configured quality or speed scores only when its signals are clear', () => {
   assert.deepEqual(classifyRoutingTask('Implement the feature, add tests, and verify behavior across multiple files.'), {
     intent: 'quality',
-    quality_signals: 3,
+    quality_signals: 4,
     speed_signals: 0,
   });
   assert.deepEqual(classifyRoutingTask('Quickly define this option in one sentence.'), {
@@ -59,6 +59,12 @@ test('tool routing is required for implementation requests but not ordinary prog
   assert.equal(requiresToolsForTask('agent', 'Find information about current LM Studio releases.'), true);
   assert.equal(requiresToolsForTask('agent', 'What is the current price of gold?'), true);
   assert.equal(requiresToolsForTask('agent', 'What is programming?'), false);
+  assert.equal(requiresToolsForTask('agent', 'Read this file and tell me its version.'), true);
+  assert.equal(requiresToolsForTask('agent', 'Search the repository for the setting definition.'), true);
+  assert.equal(requiresToolsForTask('agent', 'Update the installation guide and add troubleshooting instructions.'), true);
+  assert.equal(requiresToolsForTask('agent', 'What does this configuration setting do?'), false);
+  assert.equal(requiresToolsForTask('agent', 'What work does this feature do?'), false);
+  assert.equal(requiresToolsForTask('agent', 'There is a problem with this application.'), true);
   assert.equal(requiresToolsForTask('plan', 'Make a plan.'), true);
   assert.deepEqual(classifyRoutingTask('Make a TTS program.'), {
     intent: 'quality',
@@ -111,7 +117,7 @@ test('default prompt routing selects by intent while preserving explicit strateg
   assert.match(quality.reason, /prompt classifier favored quality/);
   assert.deepEqual(quality.factors.task_classification, {
     intent: 'quality',
-    quality_signals: 2,
+    quality_signals: 3,
     speed_signals: 0,
     applied: true,
   });

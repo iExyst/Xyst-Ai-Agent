@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "dataset_version": "2026-10-24.2",
+  "dataset_version": "2026-10-28.1",
   "cases": [
   {
     "id": "quality-fallback-prefers-coding-strength",
@@ -67,7 +67,7 @@
       }
     },
     "options": { "taskPrompt": "Implement the feature, add tests, and verify behavior across multiple files." },
-    "expected_baseline_model": "general",
+    "expected_baseline_model": "strong",
     "expected_model": "strong"
   },
   {
@@ -115,7 +115,7 @@
       }
     },
     "options": { "taskPrompt": "Architect and build the whole project from scratch, add cross-platform integration tests, and review all of the code." },
-    "expected_baseline_model": "general",
+    "expected_baseline_model": "strong",
     "expected_model": "strong"
   },
   {
@@ -131,7 +131,7 @@
       }
     },
     "options": { "taskPrompt": "Diagnose and patch this production bug, then test the fix and verify the result." },
-    "expected_baseline_model": "general",
+    "expected_baseline_model": "strong",
     "expected_model": "strong"
   },
   {
@@ -179,7 +179,7 @@
       }
     },
     "options": { "taskPrompt": "Quickly implement a secure feature across all platforms, add tests, and verify it end to end." },
-    "expected_baseline_model": "general",
+    "expected_baseline_model": "strong",
     "expected_model": "strong"
   },
   {
@@ -210,7 +210,7 @@
       }
     },
     "options": { "taskPrompt": "Implement and test this security fix." },
-    "expected_model": "general"
+    "expected_model": "strong"
   },
   {
     "id": "configured-speed-strategy-takes-precedence-over-prompt-classifier",
@@ -278,6 +278,68 @@
     },
     "expected_baseline_model": "general",
     "expected_model": "coder"
+  },
+  {
+    "id": "everyday-find-file-version-requires-tools",
+    "category": "everyday-workflow",
+    "config": {
+      "default_model": "text-only",
+      "models": {
+        "text-only": { "supports_tools": false },
+        "tool-capable": { "supports_tools": true }
+      }
+    },
+    "options": { "taskPrompt": "Read this file and tell me its version." },
+    "expected_baseline_model": "tool-capable",
+    "expected_model": "tool-capable",
+    "expected_require_tools": true
+  },
+  {
+    "id": "everyday-search-repository-for-setting-requires-tools",
+    "category": "everyday-workflow",
+    "config": {
+      "default_model": "text-only",
+      "models": {
+        "text-only": { "supports_tools": false },
+        "tool-capable": { "supports_tools": true }
+      }
+    },
+    "options": { "taskPrompt": "Search the repository for the setting definition." },
+    "expected_baseline_model": "tool-capable",
+    "expected_model": "tool-capable",
+    "expected_require_tools": true
+  },
+  {
+    "id": "everyday-configuration-question-does-not-require-tools",
+    "category": "everyday-workflow",
+    "config": {
+      "default_model": "general",
+      "models": {
+        "general": { "supports_tools": false },
+        "agent": { "supports_tools": true }
+      }
+    },
+    "options": { "taskPrompt": "What does this configuration setting do?" },
+    "expected_baseline_model": "agent",
+    "expected_model": "agent",
+    "expected_require_tools": false
+  },
+  {
+    "id": "everyday-cross-platform-install-guide-selects-quality",
+    "category": "everyday-workflow",
+    "config": {
+      "default_model": "general",
+      "routing": { "prefer_local": false },
+      "models": {
+        "general": { "coding_strength": 5, "speed_score": 5, "supports_tools": true },
+        "strong": { "coding_strength": 10, "speed_score": 4, "supports_tools": true },
+        "fast": { "coding_strength": 4, "speed_score": 10, "supports_tools": true }
+      }
+    },
+    "options": { "taskPrompt": "Update the Windows and Linux installation guide, check every command, and add a troubleshooting example." },
+    "expected_baseline_model": "strong",
+    "expected_model": "strong",
+    "expected_require_tools": true
   }
   ]
 }

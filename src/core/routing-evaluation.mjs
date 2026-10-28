@@ -1,4 +1,4 @@
-import { selectModel } from './router.mjs';
+import { requiresToolsForTask, selectModel } from './router.mjs';
 
 export function validateRoutingDataset(dataset) {
   if (!dataset || typeof dataset !== 'object' || Array.isArray(dataset))
@@ -23,8 +23,13 @@ export function evaluateRoutingCases(cases, { failFast = false } = {}) {
     seen.add(example.id);
     let selectedModel = null;
     let error = null;
+    const selectionOptions = { ...(example.options || {}) };
+    const taskType = selectionOptions.taskType || 'agent';
+    const promptRequiresTools =
+      typeof selectionOptions.taskPrompt === 'string' ? requiresToolsForTask(taskType, selectionOptions.taskPrompt) : taskType !== 'agent';
+    if (!Object.hasOwn(selectionOptions, 'requireTools')) selectionOptions.requireTools = promptRequiresTools;
     try {
-      selectedModel = selectModel(example.config, example.options).name;
+      selectedModel = selectModel(example.config, selectionOptions).name;
     } catch (cause) {
       error = cause.message;
     }
@@ -33,7 +38,7 @@ export function evaluateRoutingCases(cases, { failFast = false } = {}) {
       typeof example.options?.taskPrompt === 'string' &&
       !example.options?.requestedModel &&
       !example.config.routing?.fallback_chain &&
-      (example.options?.taskType || 'agent') === 'agent' &&
+      taskType === 'agent' &&
       (example.config.routing?.selection || 'balanced') === 'balanced';
     let baselineModel = null;
     let baselineError = null;
@@ -41,14 +46,15 @@ export function evaluateRoutingCases(cases, { failFast = false } = {}) {
       try {
         const baselineConfig = structuredClone(example.config);
         baselineConfig.routing = { ...baselineConfig.routing, classifier: { enabled: false } };
-        baselineModel = selectModel(baselineConfig, example.options).name;
+        baselineModel = selectModel(baselineConfig, selectionOptions).name;
       } catch (cause) {
         baselineError = cause.message;
       }
     }
     const baselinePassed =
       !baselineError && (example.expected_baseline_model === undefined || baselineModel === example.expected_baseline_model);
-    const passed = selectedModel === example.expected_model && baselinePassed;
+    const toolRequirementPassed = example.expected_require_tools === undefined || promptRequiresTools === example.expected_require_tools;
+    const passed = selectedModel === example.expected_model && baselinePassed && toolRequirementPassed;
     const classifierComparison =
       classifierCanApply && !baselineError
         ? selectedModel === example.expected_model && baselineModel !== example.expected_model
@@ -62,6 +68,8 @@ export function evaluateRoutingCases(cases, { failFast = false } = {}) {
       category: example.category,
       expected_model: example.expected_model,
       selected_model: selectedModel,
+      required_tools: promptRequiresTools,
+      ...(example.expected_require_tools === undefined ? {} : { expected_require_tools: example.expected_require_tools }),
       passed,
       ...(classifierComparison
         ? {
@@ -128,6 +136,8 @@ function validateCase(example, index) {
     (typeof example.expected_baseline_model !== 'string' || !example.expected_baseline_model.trim())
   )
     throw new TypeError(`Routing evaluation case '${example.id}' expected_baseline_model must be a non-empty string`);
+  if (example.expected_require_tools !== undefined && typeof example.expected_require_tools !== 'boolean')
+    throw new TypeError(`Routing evaluation case '${example.id}' expected_require_tools must be a boolean`);
   if (
     !example.config ||
     typeof example.config !== 'object' ||

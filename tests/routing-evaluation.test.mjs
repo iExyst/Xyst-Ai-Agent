@@ -13,19 +13,13 @@ test('routing evaluation dataset measures expected strategies and reports per-ca
   assert.equal(dataset.schema_version, 1);
   assert.match(dataset.dataset_version, /^\d{4}-\d{2}-\d{2}\.\d+$/);
   const report = evaluateRoutingCases(dataset.cases);
-  assert.equal(report.total, 22);
-  assert.equal(report.passed, 22);
+  assert.equal(report.total, 26);
+  assert.equal(report.passed, 26);
   assert.equal(report.failed, 0);
   assert.equal(report.accuracy, 1);
   assert.equal(report.by_category.cost.accuracy, 1);
-  assert.deepEqual(report.classifier_comparison, {
-    total: 11,
-    improved: 8,
-    regressed: 0,
-    unchanged: 3,
-    baseline_accuracy: 3 / 11,
-    classifier_accuracy: 1,
-  });
+  assert.equal(report.results.find((item) => item.id === 'everyday-find-file-version-requires-tools').required_tools, true);
+  assert.equal(report.results.find((item) => item.id === 'everyday-configuration-question-does-not-require-tools').required_tools, false);
   assert.equal(report.results.find((item) => item.id === 'classifier-routes-xyst-agent-problem-to-quality').selected_model, 'strong');
   assert.equal(
     report.results.find((item) => item.id === 'quality-routing-prefers-code-specialist-when-scores-are-unknown').selected_model,

@@ -39,6 +39,10 @@ function estimateImageTokens(image) {
 
 const QUALITY_TASK_SIGNALS = [
   {
+    pattern: /\b(?:add|edit|change|update|remove|rename)\b/i,
+    weight: 1,
+  },
+  {
     pattern:
       /\b(?:implement|build|create|write|make|code|program|architect|design|debug|diagnos\w*|troubleshoot\w*|problem|issue|broken|not working|does not work|doesn't work|refactor|migrat\w*|integrat\w*|rewrite|patch|fix|audit|investigat\w*|analy[sz]\w*|evaluat\w*|optimi[sz]\w*|deploy|automate)\b/i,
     weight: 1,
@@ -55,9 +59,10 @@ const SPEED_TASK_SIGNALS = [
   { pattern: /\b(?:define|definition|what does .{1,80} mean|meaning of|convert .{1,80} to|calculate)\b/i, weight: 1 },
 ];
 const TOOL_ACTION_PATTERN =
-  /\b(?:implement|build|create|write|edit|modify|change|add|update|refactor|debug|diagnos\w*|fix|patch|test|run|install|deploy|automate|make|do|work(?:ing|ed|s)?)\b/i;
+  /\b(?:implement|build|create|write|edit|modify|change|add|update|refactor|debug|diagnos\w*|fix|patch|test|run|install|deploy|automate|read|find|search|inspect|open|list|locate|make)\b/i;
 const TOOL_SUBJECT_PATTERN =
-  /\b(?:code|coding|program(?:ming)?|script|app|application|project|repository|repo|file|function|feature|test|tool|agent|website|ui|service|library|package|module|api|bug|issue|problem|weather|forecast|temperature|rain|snow)\b/i;
+  /\b(?:code|coding|program(?:ming)?|script|app|application|project|repository|repo|file|files|folder|directory|path|workspace|config(?:uration)?|setting|document|documentation|guide|readme|notes|function|feature|test|tool|agent|website|ui|service|library|package|module|api|bug|issue|problem|weather|forecast|temperature|rain|snow)\b/i;
+const TROUBLESHOOTING_INTENT = /\b(?:bug|problem|issue|broken|not working|does not work|doesn't work|crash(?:es|ing|ed)?|error)\b/i;
 export const LIVE_LOOKUP_INTENT =
   /\b(?:look(?:ing)?\s+(?:(?:this|that|it|something|stuf+|things?)\s+)?up|find(?:ing)?\s+(?:out\s+)?(?:about|information|info|the\s+latest|the\s+current)|search(?:ing)?\s+(?:the\s+)?(?:web|internet|online)|web\s+search|browse(?:\s+the)?\s+web|research(?:\s+online)?|online|latest|current(?:ly)?|recent|today|right\s+now|real[- ]time|breaking\s+news|news|stock\s+price|exchange\s+rate|weather|forecast)\b/i;
 
@@ -99,7 +104,8 @@ export function requiresToolsForTask(taskType, prompt) {
   return (
     currentWeatherIntent ||
     LIVE_LOOKUP_INTENT.test(boundedPrompt) ||
-    (TOOL_ACTION_PATTERN.test(boundedPrompt) && TOOL_SUBJECT_PATTERN.test(boundedPrompt))
+    (TOOL_ACTION_PATTERN.test(boundedPrompt) && TOOL_SUBJECT_PATTERN.test(boundedPrompt)) ||
+    (TROUBLESHOOTING_INTENT.test(boundedPrompt) && TOOL_SUBJECT_PATTERN.test(boundedPrompt))
   );
 }
 
