@@ -935,6 +935,31 @@ test("office preview result sends the rendered PNG pixels to the next model requ
   } finally { store.close(); }
 }));
 
+test("office preview does not stale the source PDF readback evidence", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "office-preview-read-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const expectedPath = join(root, "vision.pdf"); const pdf = await PDFDocument.create(); pdf.addPage([180, 80]).drawText("VISION SOURCE READBACK", { x: 20, y: 35 }); await writeFile(expectedPath, await pdf.save());
+  let round = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async (request: { messages: Array<{ role: string; content?: unknown }> }) => {
+      round++;
+      if (round === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-source-pdf", type: "function", function: { name: "office_read", arguments: JSON.stringify({ format: "pdf", path: "vision.pdf" }) } }] } }] };
+      if (round === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-source-pdf", type: "function", function: { name: "office_preview", arguments: JSON.stringify({ path: "vision.pdf", page: 1, output_path: "vision.png" }) } }] } }] };
+      const previewMessage = request.messages.find((message) => message.role === "tool" && Array.isArray(message.content) && message.content.some((part) => Boolean(part && typeof part === "object" && (part as Record<string, unknown>).type === "image_url")));
+      assert.ok(previewMessage, "preview pixels must still reach the model after PDF readback");
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "complete-source-preview", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [2, 1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Review the declared PDF and its rendered preview.", { workspace: root, model: "test-model", maxTurns: 4, completionCriteria: [expectedPath], expectedOutputPaths: [expectedPath], requiredToolEvidence: [{ tool: "office_preview" }] });
+    assert.equal(result.status, "completed"); assert.equal(round, 3);
+    const completion = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='completed'").get(result.sessionId) as { output_json: string };
+    assert.equal(JSON.parse(completion.output_json).verified, true);
+  } finally { store.close(); }
+}));
+
 test("agent completion for a requested command requires successful process evidence", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "command-completion-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

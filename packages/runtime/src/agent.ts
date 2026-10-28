@@ -721,7 +721,9 @@ export class AgentRunner {
             if (!evidenceFilePath) return false;
             let mutationInput: Record<string, unknown> = {};
             try { mutationInput = asRecord(JSON.parse(mutation.input_json) as unknown); } catch { /* Malformed inputs cannot identify a matching path. */ }
-            const affectedPaths = [mutationInput.path, mutationInput.source, mutationInput.destination, mutationInput.from, mutationInput.to, mutationInput.output_path]
+            // office_preview reads `path` and writes only `output_path`; do not
+            // invalidate source-document readback merely because it was rendered.
+            const affectedPaths = (mutation.name === "office_preview" ? [mutationInput.output_path] : [mutationInput.path, mutationInput.source, mutationInput.destination, mutationInput.from, mutationInput.to, mutationInput.output_path])
               .filter((value): value is string => typeof value === "string");
             return affectedPaths.some((path) => {
               const mutationPath = normalizedOutputPath(path);
