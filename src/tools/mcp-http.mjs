@@ -1010,9 +1010,17 @@ function normalizeSchema(schema, depth = 0) {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || depth > 8)
     throw mcpError('MCP schema invalid or too deeply nested', 'MCP_INVALID_SCHEMA');
   const allowed = new Set([
+    '$schema',
+    '$comment',
     'type',
     'title',
     'description',
+    'format',
+    'default',
+    'examples',
+    'deprecated',
+    'readOnly',
+    'writeOnly',
     'properties',
     'required',
     'additionalProperties',
@@ -1044,6 +1052,18 @@ function normalizeSchema(schema, depth = 0) {
   )
     throw mcpError('MCP schema uses unsupported type', 'MCP_INVALID_SCHEMA');
   const out = { type };
+  for (const k of ['$schema', '$comment', 'format'])
+    if (schema[k] !== undefined) {
+      if (typeof schema[k] !== 'string') throw mcpError(`MCP schema ${k} invalid`, 'MCP_INVALID_SCHEMA');
+      out[k] = schema[k];
+    }
+  if (schema.examples !== undefined && !Array.isArray(schema.examples)) throw mcpError('MCP examples invalid', 'MCP_INVALID_SCHEMA');
+  for (const k of ['deprecated', 'readOnly', 'writeOnly'])
+    if (schema[k] !== undefined) {
+      if (typeof schema[k] !== 'boolean') throw mcpError(`MCP schema ${k} invalid`, 'MCP_INVALID_SCHEMA');
+      out[k] = schema[k];
+    }
+  for (const k of ['default', 'examples']) if (Object.hasOwn(schema, k)) out[k] = schema[k];
   for (const k of ['title', 'description'])
     if (schema[k] !== undefined) {
       if (typeof schema[k] !== 'string' || schema[k].length > 2000)
