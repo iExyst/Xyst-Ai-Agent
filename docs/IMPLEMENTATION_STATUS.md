@@ -18,7 +18,7 @@
 ## Hosted desktop runtime download reliability — 2026-10-28
 
 - Exact-source run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108) on `9b7b393` passed the security job and both Windows/Linux desktop build and lifecycle jobs. The runtime fetch retries transient interruptions up to three times, times out each attempt after five minutes, and validates the pinned checksum before cache installation.
-- `dist/dev/SHA256SUMS.txt` now matches the Windows NSIS, Linux DEB, and Linux AppImage artifacts from `9b7b393`; after this documentation update is committed, the source archive will be rebuilt from the new head and its checksum refreshed. The broader test matrix is still red only on the Windows ConPTY initialization (`0xC0000142`) and Ubuntu Bubblewrap loopback setup (`RTM_NEWADDR: Operation not permitted`) with its dependent signed-MCP test. Independent security review and native Ubuntu Desktop/Wayland acceptance remain open.
+- `dist/dev/SHA256SUMS.txt` records hashes for the Windows NSIS, Linux DEB, Linux AppImage, and reproducible source archive. The three packages are from exact-source hosted run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108); the source archive is generated from the current branch contents. The broader test matrix is still red only on the Windows ConPTY initialization (`0xC0000142`) and Ubuntu Bubblewrap loopback setup (`RTM_NEWADDR: Operation not permitted`) with its dependent signed-MCP test. Independent security review and native Ubuntu Desktop/Wayland acceptance remain open.
 
 ## Bounded application update replay-cache reads — 2026-10-28
 
