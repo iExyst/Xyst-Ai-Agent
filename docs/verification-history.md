@@ -1960,3 +1960,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Checked out exact PC branch head `d6b4b3a2d577d703c2e8e952f73a96e25af342fd` into an isolated WSL clone. With installed `/usr/bin/soffice`, Node 22.23.4, and Linux dependencies, the existing test `office preview renders DOCX, XLSX, and PPTX through installed LibreOffice` passed 1/1 without skips. This verifies Xyst's native Linux renderer path and PNG creation for those three formats.
 - The WSL runtime/CLI builds also passed at this exact source SHA. WSL cannot currently reach the Windows LM Studio endpoint; the temporary interface-bound proxy was stopped after a firewall/connectivity timeout. This regression does not claim live VLM response on Linux or bare-metal Linux acceptance; the independently verified VLM image-pixel acceptance remains the Windows CLI session recorded above.
+
+## Windows restricted file operations beyond MAX_PATH · 2026-10-28
+
+- On the combined PC Integration source at `2a61e1d549aa28e471e0673ee183e10d18951d5f`, ran the Windows-focused runtime regressions for long paths, drive/UNC/extended-UNC normalization, and junction resolution. All three passed with zero skips. The long-path case creates a nested Unicode path longer than 260 characters, atomically creates a UTF-8 file, reads it, then hash-guards and atomically patches it; it verifies the final text and line-ending normalization. Junction cases confirm restricted access resolves in-root links and rejects out-of-root links.
+- The exact source's push CI Windows job (`40744004302`) also passed its full `npm test` and desktop package steps. This closes those specific E1 acceptance cases; concurrent-edit races, additional filesystems, and UNC share operations remain open.
