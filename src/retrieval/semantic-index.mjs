@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import { constants, watch as watchFs } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -8,6 +9,7 @@ import { isSensitivePath, redactSecrets } from '../platform/redaction.mjs';
 import { embeddingIdentity } from '../providers/embeddings.mjs';
 import { searchWorkspaceDocuments } from './search.mjs';
 import { assertGitignoreLineLimit, readWorkspaceRuleFile } from './rule-files.mjs';
+import { captureProcessIdentity, verifyProcessIdentity } from '../platform/process-identity.mjs';
 
 const VERSION = 1;
 const MAX_CHUNKS = 5_000;
@@ -19,6 +21,8 @@ const CACHE_FULL_REFRESH_MS = 30_000;
 const CHUNK_CHARS = 1_800;
 const OVERLAP_CHARS = 240;
 const IGNORED = new Set(['.git', '.agent', 'node_modules', 'dist', 'coverage', '.next', 'target']);
+let semanticProcessIdentityPromise;
+const semanticLockOwnerStateCache = new Map();
 
 /** Incremental vector index. It stores paths, hashes, line ranges, and vectors; source text is never persisted. */
 export class SemanticWorkspaceIndex {
@@ -45,6 +49,7 @@ export class SemanticWorkspaceIndex {
     if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > MAX_SCAN_ENTRIES)
       throw new TypeError(`maxEntries must be between 1 and ${MAX_SCAN_ENTRIES}`);
     this.root = workspaceRoot;
+    semanticProcessIdentityPromise ||= captureProcessIdentity(process.pid).catch(() => null);
     this.embed = embed;
     this.model = model;
     this.usageBudgetStore = usageBudgetStore;
@@ -505,6 +510,7 @@ export class SemanticWorkspaceIndex {
         handle = await fs.open(this.lock, 'wx', 0o600);
       } catch (error) {
         if (error.code !== 'EEXIST') throw error;
+        if (await recoverStaleSemanticIndexLock(this.lock)) continue;
         await abortableDelay(40, signal);
       }
     }
@@ -513,13 +519,44 @@ export class SemanticWorkspaceIndex {
         new Error('Timed out waiting for semantic index lock; inspect .agent/retrieval/index.lock before manual recovery'),
         { code: 'INDEX_LOCKED' },
       );
-    const lockRecord = JSON.stringify({ lock_id: randomUUID(), pid: process.pid, created_at: new Date().toISOString() });
+    const processIdentityPromise = semanticProcessIdentityPromise || Promise.resolve(null);
+    const processIdentity = await settleWithin(processIdentityPromise, 100);
+    const lockId = randomUUID();
+    let lockRecord = JSON.stringify({
+      schema_version: 1,
+      lock_id: lockId,
+      pid: process.pid,
+      hostname: os.hostname(),
+      process_identity: processIdentity,
+      created_at: new Date().toISOString(),
+    });
     let lockIdentity;
+    let lockReleased = false;
+    let ownerIdentityUpdatePromise = null;
     try {
       lockIdentity = await handle.stat();
       await handle.writeFile(lockRecord);
+      if (!processIdentity) {
+        processIdentityPromise
+          .then(async (identity) => {
+            if (!identity || lockReleased) return;
+            ownerIdentityUpdatePromise = (async () => {
+              if (lockReleased) return;
+              const current = await readSemanticLockSnapshot(this.lock);
+              if (!current || current.record.lock_id !== lockId) return;
+              const enrichedRecord = JSON.stringify({ ...current.record, process_identity: identity });
+              await handle.truncate(0);
+              await handle.write(Buffer.from(enrichedRecord), 0, Buffer.byteLength(enrichedRecord), 0);
+              lockRecord = enrichedRecord;
+            })();
+            await ownerIdentityUpdatePromise;
+          })
+          .catch(() => {});
+      }
       return await operation();
     } finally {
+      lockReleased = true;
+      await ownerIdentityUpdatePromise?.catch(() => {});
       await handle.close().catch(() => {});
       if (lockIdentity) {
         const current = await fs.lstat(this.lock).catch(() => null);
@@ -534,6 +571,75 @@ export class SemanticWorkspaceIndex {
         }
       }
     }
+  }
+}
+
+async function recoverStaleSemanticIndexLock(lockPath) {
+  const snapshot = await readSemanticLockSnapshot(lockPath);
+  if (!snapshot) return true;
+  const { record } = snapshot;
+  if (
+    record?.schema_version !== 1 ||
+    typeof record.lock_id !== 'string' ||
+    !/^[0-9a-f-]{36}$/i.test(record.lock_id) ||
+    !Number.isInteger(record.pid) ||
+    record.pid < 1 ||
+    record.hostname !== os.hostname() ||
+    record.process_identity?.pid !== record.pid ||
+    record.process_identity?.platform !== process.platform ||
+    !Number.isFinite(Date.parse(record.created_at))
+  )
+    return false;
+  if (record.pid === process.pid) return false;
+  const now = Date.now();
+  const cached = semanticLockOwnerStateCache.get(record.lock_id);
+  const state = cached && cached.expiresAt > now ? cached.state : await verifyProcessIdentity(record.process_identity);
+  if (!cached || cached.expiresAt <= now) {
+    semanticLockOwnerStateCache.set(record.lock_id, { state, expiresAt: now + 250 });
+    if (semanticLockOwnerStateCache.size > 128) semanticLockOwnerStateCache.delete(semanticLockOwnerStateCache.keys().next().value);
+  }
+  if (state !== 'absent' && state !== 'mismatch') return false;
+
+  const current = await readSemanticLockSnapshot(lockPath);
+  if (!current) return true;
+  if (
+    !sameFileSnapshot(snapshot.metadata, current.metadata) ||
+    current.record.lock_id !== record.lock_id ||
+    current.record.pid !== record.pid ||
+    current.record.process_identity?.platform !== record.process_identity.platform
+  )
+    return false;
+  semanticLockOwnerStateCache.delete(record.lock_id);
+  await fs.rm(lockPath).catch((error) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+  return true;
+}
+
+async function readSemanticLockSnapshot(lockPath) {
+  let handle;
+  try {
+    const metadata = await fs.lstat(lockPath, { bigint: true });
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 4_096) return null;
+    handle = await fs.open(lockPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || !sameFileSnapshot(metadata, opened)) return null;
+    const bytes = await readBoundedFileHandle(handle, 4_096);
+    if (bytes === null) return null;
+    const afterRead = await handle.stat({ bigint: true });
+    const currentPath = await fs.lstat(lockPath, { bigint: true });
+    if (!sameFileSnapshot(opened, afterRead) || !sameFileSnapshot(opened, currentPath) || currentPath.isSymbolicLink()) return null;
+    try {
+      return { metadata: opened, record: JSON.parse(bytes.toString('utf8')) };
+    } catch {
+      return null;
+    }
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    if (error.code === 'ELOOP' || error.code === 'EMLINK') return null;
+    throw error;
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }
 
@@ -840,5 +946,11 @@ function abortableDelay(ms, signal) {
       callback(value);
     };
     signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+function settleWithin(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(resolve, () => resolve(null)).finally(() => clearTimeout(timer));
   });
 }

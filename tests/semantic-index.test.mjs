@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { SemanticWorkspaceIndex, cosineSimilarity } from '../src/retrieval/semantic-index.mjs';
 import { createSemanticIndex } from '../src/retrieval/create-semantic-index.mjs';
@@ -213,6 +214,50 @@ test('semantic index lock cleanup preserves a replacement lock from another writ
     throw error;
   }
   assert.equal(await fs.readFile(index.lock, 'utf8'), 'replacement writer lock');
+});
+
+test('semantic index reclaims a lock only after its recorded process identity is absent', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-stale-lock-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, '.agent', 'retrieval', 'index.lock');
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  const pid = 2_000_000_000;
+  const processIdentity =
+    process.platform === 'linux'
+      ? {
+          platform: 'linux',
+          pid,
+          boot_id: '00000000-0000-0000-0000-000000000000',
+          start_ticks: '1',
+          process_group_id: pid,
+          command_hash: '0'.repeat(64),
+        }
+      : { platform: 'win32', pid, creation_time: '1', image_hash: '0'.repeat(64) };
+  await fs.writeFile(
+    lockPath,
+    JSON.stringify({
+      schema_version: 1,
+      lock_id: 'e83f888f-8f8f-4c95-96f6-8108d31e5ba9',
+      pid,
+      hostname: os.hostname(),
+      process_identity: processIdentity,
+      created_at: new Date().toISOString(),
+    }),
+    { flag: 'wx', mode: 0o600 },
+  );
+  await fs.writeFile(path.join(root, 'source.txt'), 'vehicle recovery marker\n');
+  let embedded = false;
+  const index = new SemanticWorkspaceIndex(root, {
+    model: 'stale-lock-recovery',
+    embed: async (texts) => {
+      embedded = true;
+      return texts.map(() => [1, 0]);
+    },
+  });
+  const result = await index.search('vehicle');
+  assert.equal(embedded, true);
+  assert.equal(result.matches[0].path, 'source.txt');
+  await assert.rejects(fs.lstat(lockPath), { code: 'ENOENT' });
 });
 
 test('semantic index in another process respects a held lock and cancellation', async (t) => {
