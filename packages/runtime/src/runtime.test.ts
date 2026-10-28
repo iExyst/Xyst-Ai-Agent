@@ -1374,6 +1374,9 @@ test("agent completion requires successful persisted tool evidence", async () =>
     assert.equal(verified.status, "completed");
     assert.doesNotMatch(JSON.stringify(completionDefinition), /"criteria"/, "the model cannot replace or paraphrase runtime-defined criteria");
     assert.ok(completionSystemWithEvidence.includes("Available persisted evidence call indexes"));
+    assert.ok(completionSystemWithEvidence.includes(`Current workspace root: ${root}`));
+    assert.ok(completionSystemWithEvidence.includes('Use "." for the workspace root'));
+    assert.ok(completionSystemWithEvidence.includes('do not prepend "workspace/"'));
     assert.ok(completionSystemWithEvidence.includes("retrieve live information from an available web source or integration"));
     assert.ok(completionSystemWithEvidence.includes('1: "file_list"'), "one-based indexes and safe tool names are shown to the model");
     assert.equal(round, 2, "successful verification ends the run without another inference turn");
