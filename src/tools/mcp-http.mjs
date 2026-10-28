@@ -1028,6 +1028,7 @@ function normalizeSchema(schema, depth = 0) {
     'uniqueItems',
     'exclusiveMinimum',
     'exclusiveMaximum',
+    'multipleOf',
     'x-mcp-header',
     'enum',
     'const',
@@ -1060,6 +1061,11 @@ function normalizeSchema(schema, depth = 0) {
         throw mcpError('MCP numeric bound invalid', 'MCP_INVALID_SCHEMA');
       out[k] = schema[k];
     }
+  if (schema.multipleOf !== undefined) {
+    if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema.multipleOf) || schema.multipleOf <= 0)
+      throw mcpError('MCP multipleOf invalid', 'MCP_INVALID_SCHEMA');
+    out.multipleOf = schema.multipleOf;
+  }
   for (const k of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'])
     if (schema[k] !== undefined) {
       if (

@@ -456,7 +456,8 @@ function validateValue(schema, value, location) {
       (schema.minimum !== undefined && value < schema.minimum) ||
       (schema.maximum !== undefined && value > schema.maximum) ||
       (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) ||
-      (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum)
+      (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum) ||
+      (schema.multipleOf !== undefined && !isMultipleOf(value, schema.multipleOf))
     )
       throw new Error(`${location} must be a valid integer`);
   } else if (schema.type === 'number') {
@@ -466,7 +467,8 @@ function validateValue(schema, value, location) {
       (schema.minimum !== undefined && value < schema.minimum) ||
       (schema.maximum !== undefined && value > schema.maximum) ||
       (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) ||
-      (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum)
+      (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum) ||
+      (schema.multipleOf !== undefined && !isMultipleOf(value, schema.multipleOf))
     )
       throw new Error(`${location} must be a valid number`);
   } else if (schema.type === 'boolean') {
@@ -509,6 +511,20 @@ function matchesSchemaType(type, value) {
   if (type === 'integer') return Number.isInteger(value);
   if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
   return typeof value === type;
+}
+
+function isMultipleOf(value, divisor) {
+  const fraction = (number) => {
+    const [mantissa, exponentPart = '0'] = number.toString().split('e');
+    const exponent = Number(exponentPart);
+    const [whole, decimal = ''] = mantissa.split('.');
+    const numerator = BigInt(`${whole}${decimal}`);
+    const scale = decimal.length - exponent;
+    return scale > 0 ? { numerator, denominator: 10n ** BigInt(scale) } : { numerator: numerator * 10n ** BigInt(-scale), denominator: 1n };
+  };
+  const left = fraction(value);
+  const right = fraction(divisor);
+  return (left.numerator * right.denominator) % (left.denominator * right.numerator) === 0n;
 }
 
 function countCodePoints(value) {

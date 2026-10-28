@@ -847,6 +847,7 @@ function normalizeSchema(schema, depth) {
     'uniqueItems',
     'exclusiveMinimum',
     'exclusiveMaximum',
+    'multipleOf',
     'enum',
     'const',
   ]);
@@ -879,6 +880,11 @@ function normalizeSchema(schema, depth) {
         throw mcpError('MCP tool input schema has invalid numeric bounds', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
+  if (schema.multipleOf !== undefined) {
+    if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema.multipleOf) || schema.multipleOf <= 0)
+      throw mcpError('MCP tool input schema has invalid multipleOf', 'MCP_INVALID_SCHEMA');
+    result.multipleOf = schema.multipleOf;
+  }
   for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'])
     if (schema[key] !== undefined) {
       if (!Number.isInteger(schema[key]) || schema[key] < 0 || schema[key] > 1_000_000)
