@@ -109,6 +109,33 @@ test('semantic index reads stop at the size limit plus one byte when it grows du
   }
 });
 
+test('semantic index lock cleanup preserves a replacement lock from another writer', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-lock-replacement-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const index = new SemanticWorkspaceIndex(root, {
+    model: 'mock',
+    embed: async (texts) => {
+      try {
+        await fs.rm(index.lock);
+        await fs.writeFile(index.lock, 'replacement writer lock');
+      } catch (error) {
+        if (process.platform === 'win32' && ['EPERM', 'EACCES', 'EBUSY'].includes(error.code))
+          throw Object.assign(new Error(`replacement unavailable: ${error.code}`), { code: 'TEST_REPLACEMENT_UNAVAILABLE' });
+        throw error;
+      }
+      return texts.map(() => [1, 0]);
+    },
+  });
+  await fs.writeFile(path.join(root, 'source.txt'), 'vehicle data\n');
+  try {
+    await index.search('vehicle');
+  } catch (error) {
+    if (error.code === 'TEST_REPLACEMENT_UNAVAILABLE') return t.skip(error.message);
+    throw error;
+  }
+  assert.equal(await fs.readFile(index.lock, 'utf8'), 'replacement writer lock');
+});
+
 test('semantic retrieval bounds ignore and exclusion policy reads', async (t) => {
   const root = await createTempDirectory('xyst-semantic-rule-limits-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

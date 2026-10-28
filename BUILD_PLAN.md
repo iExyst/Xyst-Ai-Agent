@@ -103,6 +103,7 @@ Start hosted CI and independent security review in parallel as soon as the repos
 - Finish provider onboarding and extension author documentation with runnable examples and clear credential/network requirements.
 - Review remaining retrieval scale/overflow recovery, representative evaluations, VS Code reconnect, and native desktop resume gaps against actual user workflows.
 - 2026-10-28: semantic-index persistence reads now cap at 32 MiB plus one byte, reject symlink opens where supported, and revalidate the opened file identity after reading. The injected-growth regression passes; broader retrieval overflow soak remains open.
+- 2026-10-28: semantic-index lock release now checks its unique record and, when available, the original file identity before removing the lock path. An injected replacement-writer regression passes; crash recovery and cross-process contention coverage remain open.
 - Add only high-value fixes found by security review, acceptance runs, or reproducible user failures; avoid expanding scope with speculative features.
 
 **Exit:** the documented common workflows pass on each supported surface and user-facing setup/troubleshooting docs match the shipped behavior.

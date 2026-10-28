@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import { constants, watch as watchFs } from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { atomicWriteJson, hasAtomicWriteBackup, readBoundedFileHandle, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { isPathInside } from '../platform/paths.mjs';
 import { isSensitivePath, redactSecrets } from '../platform/redaction.mjs';
@@ -501,12 +501,26 @@ export class SemanticWorkspaceIndex {
         new Error('Timed out waiting for semantic index lock; inspect .agent/retrieval/index.lock before manual recovery'),
         { code: 'INDEX_LOCKED' },
       );
+    const lockRecord = JSON.stringify({ lock_id: randomUUID(), pid: process.pid, created_at: new Date().toISOString() });
+    let lockIdentity;
     try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() }));
+      lockIdentity = await handle.stat();
+      await handle.writeFile(lockRecord);
       return await operation();
     } finally {
       await handle.close().catch(() => {});
-      await fs.rm(this.lock, { force: true }).catch(() => {});
+      if (lockIdentity) {
+        const current = await fs.lstat(this.lock).catch(() => null);
+        const stableIdentity = Number.isFinite(lockIdentity.ino) && lockIdentity.ino !== 0;
+        if (
+          current?.isFile() &&
+          !current.isSymbolicLink() &&
+          (!stableIdentity || (current.dev === lockIdentity.dev && current.ino === lockIdentity.ino))
+        ) {
+          const currentRecord = await fs.readFile(this.lock, 'utf8').catch(() => null);
+          if (currentRecord === lockRecord) await fs.rm(this.lock, { force: true }).catch(() => {});
+        }
+      }
     }
   }
 }

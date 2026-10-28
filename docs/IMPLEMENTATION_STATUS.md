@@ -2588,3 +2588,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Bounded semantic-index persistence reads — 2026-10-28
 
 - The semantic index now reads through the shared 32 MiB capped file-handle reader and verifies the opened file identity/version before and after reading. Symlink opens are rejected where supported. The injected-growth regression stops at the configured cap plus one byte; full retrieval overflow soak remains open.
+
+## Semantic-index replacement-lock protection — 2026-10-28
+
+- Index lock release now removes only its own uniquely identified record and compares file identity when the platform supplies it. A regression that replaces the lock during embedding confirms the other writer's lock remains. Full process-contention and crash-recovery coverage remains open.
