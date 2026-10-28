@@ -849,6 +849,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     'dependentSchemas',
     'additionalProperties',
     'items',
+    'prefixItems',
     'contains',
     'minContains',
     'maxContains',
@@ -953,6 +954,11 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     result.pattern = schema.pattern;
   }
   if (schema.contains !== undefined) result.contains = normalizeSchema(schema.contains, depth + 1, budget);
+  if (schema.prefixItems !== undefined) {
+    if (!Array.isArray(schema.prefixItems) || schema.prefixItems.length > 64)
+      throw mcpError('MCP tool input schema has invalid prefixItems', 'MCP_INVALID_SCHEMA');
+    result.prefixItems = schema.prefixItems.map((item) => normalizeSchema(item, depth + 1, budget));
+  }
   if (result.minimum !== undefined && result.maximum !== undefined && result.minimum > result.maximum)
     throw mcpError('MCP tool input schema has inconsistent numeric bounds', 'MCP_INVALID_SCHEMA');
   if (result.minLength !== undefined && result.maxLength !== undefined && result.minLength > result.maxLength)

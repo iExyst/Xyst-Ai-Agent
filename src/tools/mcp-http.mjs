@@ -1030,6 +1030,7 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
     'dependentSchemas',
     'additionalProperties',
     'items',
+    'prefixItems',
     'contains',
     'minContains',
     'maxContains',
@@ -1131,6 +1132,11 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
     out.pattern = schema.pattern;
   }
   if (schema.contains !== undefined) out.contains = normalizeSchema(schema.contains, depth + 1, budget);
+  if (schema.prefixItems !== undefined) {
+    if (!Array.isArray(schema.prefixItems) || schema.prefixItems.length > 64)
+      throw mcpError('MCP prefixItems invalid', 'MCP_INVALID_SCHEMA');
+    out.prefixItems = schema.prefixItems.map((item) => normalizeSchema(item, depth + 1, budget));
+  }
   if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
     throw mcpError('MCP uniqueItems invalid', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined) out.uniqueItems = schema.uniqueItems;

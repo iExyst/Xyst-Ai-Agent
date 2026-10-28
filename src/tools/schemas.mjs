@@ -548,8 +548,12 @@ function validateValue(schema, value, location, state) {
       const minMatches = schema.minContains ?? 1;
       if (matches < minMatches) throw new Error(`${location} contains too few matching items`);
     }
+    const prefixItems = schema.prefixItems || [];
+    for (const [index, itemSchema] of prefixItems.entries())
+      if (index < value.length) validateValue(itemSchema, value[index], `${location}[${index}]`, state);
     if (schema.items !== undefined)
-      for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`, state);
+      for (let index = prefixItems.length; index < value.length; index++)
+        validateValue(schema.items, value[index], `${location}[${index}]`, state);
   }
 }
 
