@@ -356,7 +356,7 @@ export class LMStudioProvider {
     } finally { await reader?.cancel().catch(() => undefined); deadline.dispose(); }
   }
 
-  async chatWithTools(request: { model: string; messages: unknown[]; tools: unknown[]; temperature?: number; max_tokens?: number; top_p?: number; presence_penalty?: number; frequency_penalty?: number; stop?: string | string[]; reasoning_effort?: "none" | "low" | "medium" | "high" }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async chatWithTools(request: { model: string; messages: unknown[]; tools: unknown[]; tool_choice?: "auto" | "required" | "none"; parallel_tool_calls?: boolean; temperature?: number; max_tokens?: number; top_p?: number; presence_penalty?: number; frequency_penalty?: number; stop?: string | string[]; reasoning_effort?: "none" | "low" | "medium" | "high" }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.request("/v1/chat/completions", { method: "POST", body: JSON.stringify(request), ...(signal ? { signal } : {}) });
   }
   async structuredOutput(request: LMStudioStructuredOutputOptions, signal?: AbortSignal): Promise<Record<string, unknown>> {

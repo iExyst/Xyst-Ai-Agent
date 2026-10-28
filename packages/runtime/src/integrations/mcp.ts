@@ -1,4 +1,4 @@
-import { Client, SSEClientTransport, StreamableHTTPClientTransport, UnauthorizedError, type CreateMessageResult, type OAuthClientInformationContext, type OAuthClientMetadata, type OAuthClientProvider, type OAuthDiscoveryState, type StoredOAuthClientInformation, type StoredOAuthTokens } from "@modelcontextprotocol/client";
+import { Client, SSEClientTransport, StreamableHTTPClientTransport, UnauthorizedError, type CreateMessageResult, type CreateMessageResultWithTools, type OAuthClientInformationContext, type OAuthClientMetadata, type OAuthClientProvider, type OAuthDiscoveryState, type StoredOAuthClientInformation, type StoredOAuthTokens } from "@modelcontextprotocol/client";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/core";
 import { createServer, type Server } from "node:http";
@@ -54,12 +54,13 @@ type McpClient = {
 };
 type AgentTool = { definition: Record<string, unknown>; execute(args: unknown): Promise<unknown> };
 type McpSubscriptionHandle = { honoredFilter: { resourceSubscriptions?: string[] }; close(): Promise<void> };
-type McpToolOptions = { connect?: (server: z.infer<typeof serverSchema>, signal?: AbortSignal) => Promise<McpClient>; sample?: (request: unknown) => Promise<CreateMessageResult> };
+type McpSamplingResult = CreateMessageResult | CreateMessageResultWithTools;
+type McpToolOptions = { connect?: (server: z.infer<typeof serverSchema>, signal?: AbortSignal) => Promise<McpClient>; sample?: (request: unknown) => Promise<McpSamplingResult> };
 
-function newClient(mode: "auto" | "legacy" = "auto", sample?: (request: unknown) => Promise<CreateMessageResult>): Client {
+function newClient(mode: "auto" | "legacy" = "auto", sample?: (request: unknown) => Promise<McpSamplingResult>): Client {
   const client = new Client({ name: "xyst", version: "0.1.0" }, { versionNegotiation: { mode } });
   if (sample) {
-    client.registerCapabilities({ sampling: {} });
+    client.registerCapabilities({ sampling: { tools: {} } });
     client.setRequestHandler("sampling/createMessage", async (request) => sample(request.params ?? request));
   }
   return client;
@@ -224,7 +225,7 @@ export async function authenticateMcpOAuth(server: McpOAuthServer, credentials: 
   }
 }
 
-async function defaultConnect(server: z.infer<typeof serverSchema>, credentials: McpCredentialStore, access: AccessController, workspace: string, signal: AbortSignal | undefined, secrets: string[], sample?: (request: unknown) => Promise<CreateMessageResult>): Promise<McpClient> {
+async function defaultConnect(server: z.infer<typeof serverSchema>, credentials: McpCredentialStore, access: AccessController, workspace: string, signal: AbortSignal | undefined, secrets: string[], sample?: (request: unknown) => Promise<McpSamplingResult>): Promise<McpClient> {
   const timeout = server.timeout_ms ?? 30_000;
   const credentialValue = async (ref: { service: string; name: string }): Promise<string> => {
     const value = await credentials.get(ref.service, ref.name);
@@ -236,7 +237,7 @@ async function defaultConnect(server: z.infer<typeof serverSchema>, credentials:
     const cwd = resolve(workspace, server.cwd ?? "."); await access.assertPath(cwd, "read");
     const env: Record<string, string> = { ...getDefaultEnvironment(), ...(server.env ?? {}) };
     for (const [name, ref] of Object.entries(server.credential_env ?? {})) { env[name] = await credentialValue(ref); secrets.push(env[name]!); }
-    const client = newClient("auto", sample); const transport = new StdioClientTransport({ command: server.command, args: server.args ?? [], cwd, env, stderr: "ignore" });
+    const client = newClient(sample ? "legacy" : "auto", sample); const transport = new StdioClientTransport({ command: server.command, args: server.args ?? [], cwd, env, stderr: "ignore" });
     try { await client.connect(transport, { ...(signal ? { signal } : {}), timeout }); return client as unknown as McpClient; }
     catch (error) { await client.close().catch(() => undefined); throw error; }
   }
@@ -247,7 +248,7 @@ async function defaultConnect(server: z.infer<typeof serverSchema>, credentials:
     const provider = new McpOAuthClientProvider(server.id, redirectUrl, credentials, secrets);
     if (!(await provider.savedTokens())?.access_token) throw new Error(`MCP OAuth for ${server.id} is not authorized; run xyst mcp auth login ${server.id}`);
     secrets.push(...await provider.secretValues());
-    const client = newClient(server.transport === "sse" ? "legacy" : "auto", sample); const transport = createHttpTransport(server, provider);
+    const client = newClient(server.transport === "sse" || sample ? "legacy" : "auto", sample); const transport = createHttpTransport(server, provider);
     try { await client.connect(transport, { ...(signal ? { signal } : {}), timeout }); return client as unknown as McpClient; }
     catch (error) {
       await client.close().catch(() => undefined);
@@ -264,12 +265,12 @@ async function defaultConnect(server: z.infer<typeof serverSchema>, credentials:
     try { await client.connect(transport, { ...(signal ? { signal } : {}), timeout }); return client as unknown as McpClient; }
     catch (error) { await client.close().catch(() => undefined); throw error; }
   }
-  const streamableClient = newClient("auto", sample);
+  const streamableClient = newClient(sample ? "legacy" : "auto", sample);
   try { await streamableClient.connect(new StreamableHTTPClientTransport(url, { requestInit }), { ...(signal ? { signal } : {}), timeout }); return streamableClient as unknown as McpClient; }
   catch (streamableError) {
     await streamableClient.close().catch(() => undefined);
     if (signal?.aborted) throw streamableError;
-    const legacyClient = newClient("auto", sample); const legacy = new SSEClientTransport(url, { requestInit, eventSourceInit: { fetch: authFetch } });
+    const legacyClient = newClient("legacy", sample); const legacy = new SSEClientTransport(url, { requestInit, eventSourceInit: { fetch: authFetch } });
     try { await legacyClient.connect(legacy, { ...(signal ? { signal } : {}), timeout }); return legacyClient as unknown as McpClient; }
     catch (legacyError) { await legacyClient.close().catch(() => undefined); throw new Error(`MCP Streamable HTTP and legacy SSE connections failed: ${legacyError instanceof Error ? legacyError.message : String(legacyError)}`, { cause: streamableError }); }
   }

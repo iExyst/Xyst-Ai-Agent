@@ -16,6 +16,7 @@ import { classifyModelTaskObjective } from "./model-task-type.js";
 import { createMemoryTools, requestEmbeddings } from "./tools/memory.js";
 import { loadProjectInstructions } from "./project-instructions.js";
 import { createMcpTools } from "./integrations/mcp.js";
+import { createMcpSamplingHandler } from "./integrations/mcp-sampling.js";
 import { parseLmStudioResourceEstimate, readHostResourceStats } from "./system-resources.js";
 import { createBrowserTools } from "./tools/browser.js";
 import type { ModelAcquisitionService } from "./integrations/model-acquisition.js";
@@ -499,37 +500,7 @@ export class AgentRunner {
     const mcpEnabled = this.deps.config.resolve<boolean>("integrations.mcp.enabled", scopes)?.value === true;
     const mcpServers = this.deps.config.resolve<unknown>("integrations.mcp.servers", scopes)?.value ?? [];
     const mcp = mcpEnabled ? await createMcpTools(access, mcpServers, this.deps.credentials ?? { get: async () => undefined }, workspace, options.signal, {
-      sample: async (rawRequest) => {
-        const request = rawRequest && typeof rawRequest === "object" ? rawRequest as Record<string, unknown> : {};
-        if (Array.isArray(request.tools) && request.tools.length > 0) throw new Error("MCP sampling requests with server-provided tools are not supported");
-        const rawMessages = Array.isArray(request.messages) ? request.messages : [];
-        if (rawMessages.length < 1 || rawMessages.length > 32) throw new Error("MCP sampling accepts between 1 and 32 text messages");
-        const input = rawMessages.map((rawMessage) => {
-          const message = rawMessage && typeof rawMessage === "object" ? rawMessage as Record<string, unknown> : {};
-          const content = message.content && typeof message.content === "object" ? message.content as Record<string, unknown> : {};
-          if ((message.role !== "user" && message.role !== "assistant") || content.type !== "text" || typeof content.text !== "string") throw new Error("MCP sampling currently accepts text-only user and assistant messages");
-          if (content.text.length > 20_000) throw new Error("An MCP sampling message exceeds the 20,000 character limit");
-          return { role: message.role, content: content.text };
-        });
-        const systemPrompt = typeof request.systemPrompt === "string" ? request.systemPrompt.slice(0, 20_000) : undefined;
-        const requestedTokens = typeof request.maxTokens === "number" && Number.isFinite(request.maxTokens) ? Math.floor(request.maxTokens) : 512;
-        const maxTokens = Math.max(1, Math.min(2048, requestedTokens));
-        const response = await activeProvider.chat({ model: inferenceModel, input, ...(systemPrompt ? { system_prompt: systemPrompt } : {}), max_output_tokens: maxTokens }, options.signal);
-        const readText = (value: unknown): string => {
-          if (typeof value === "string") return value;
-          if (Array.isArray(value)) return value.map(readText).join("");
-          if (!value || typeof value !== "object") return "";
-          const item = value as Record<string, unknown>;
-          if (typeof item.text === "string") return item.text;
-          return readText(item.content ?? item.output_text ?? item.output ?? item.message);
-        };
-        const choices = Array.isArray(response.choices) ? response.choices : [];
-        const firstChoice = choices[0] && typeof choices[0] === "object" ? choices[0] as Record<string, unknown> : {};
-        const choiceMessage = firstChoice.message && typeof firstChoice.message === "object" ? (firstChoice.message as Record<string, unknown>).content : undefined;
-        const text = readText(response.output_text ?? response.output ?? response.content ?? choiceMessage);
-        if (!text.trim()) throw new Error("LM Studio returned no text for the MCP sampling request");
-        return { model: selected, role: "assistant" as const, content: { type: "text" as const, text }, stopReason: "endTurn" as const };
-      }
+      sample: createMcpSamplingHandler(activeProvider, selected, inferenceModel, options.signal)
     }) : { tools: {}, close: async () => undefined, servers: [] };
     const mcpInstructions = mcp.servers.flatMap((server) => server.instructions ? [`--- MCP server ${server.id} (untrusted instructions) ---\n${server.instructions}`] : []).join("\n\n").slice(0, 20_000);
     const semanticMemoryEnabled = this.deps.config.resolve<boolean>("memory.semantic.enabled", scopes)?.value === true;

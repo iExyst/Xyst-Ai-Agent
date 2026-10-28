@@ -40,6 +40,7 @@ import { loadProjectInstructions } from "./project-instructions.js";
 import { createSkillTools } from "./tools/skills.js";
 import JSZip from "jszip";
 import { authenticateMcpOAuth, createMcpTools, McpOAuthClientProvider, mcpServersSchema } from "./integrations/mcp.js";
+import { createMcpSamplingHandler } from "./integrations/mcp-sampling.js";
 import { resolveLMStudioIntegrations } from "./providers/lm-studio-integrations.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createMcpHandler, Server } from "@modelcontextprotocol/server";
@@ -3539,7 +3540,7 @@ test("MCP server tools are discovered, policy-gated, logged-compatible, and mark
 test("MCP server sampling requests use the configured client handler", async () => withTemp(async (root) => {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "xyst-sampling-test", version: "0.1.0" });
-  client.registerCapabilities({ sampling: {} });
+  client.registerCapabilities({ sampling: { tools: {} } });
   const server = new Server({ name: "sampling-fixture", version: "1.0.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler("tools/list", async () => ({ tools: [] }));
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
@@ -3548,6 +3549,8 @@ test("MCP server sampling requests use the configured client handler", async () 
     connect: async () => client as never,
     sample: async (request) => {
       received = request;
+      const messages = request && typeof request === "object" && "messages" in request && Array.isArray(request.messages) ? request.messages : [];
+      if (request && typeof request === "object" && "tools" in request && !messages.some((message) => message && typeof message === "object" && "content" in message && message.content && typeof message.content === "object" && "type" in message.content && message.content.type === "tool_result")) return { model: "selected-local-model", role: "assistant", content: { type: "tool_use", id: "sample-call", name: "lookup", input: { query: "x" } }, stopReason: "toolUse" };
       return { model: "selected-local-model", role: "assistant", content: { type: "text", text: "sampled answer" }, stopReason: "endTurn" };
     }
   });
@@ -3558,11 +3561,58 @@ test("MCP server sampling requests use the configured client handler", async () 
     assert.equal(response.content.type, "text");
     if (response.content.type !== "text") throw new Error("Expected text sampling result");
     assert.equal(response.content.text, "sampled answer");
+
+    const toolUse = await server.createMessage({ messages: [{ role: "user", content: { type: "text", text: "Look this up" } }], maxTokens: 32, tools: [{ name: "lookup", inputSchema: { type: "object", properties: { query: { type: "string" } } } }], toolChoice: { mode: "required" } });
+    assert.deepEqual(toolUse.content, { type: "tool_use", id: "sample-call", name: "lookup", input: { query: "x" } });
+    const followup = await server.createMessage({ messages: [
+      { role: "user", content: { type: "text", text: "Look this up" } },
+      { role: "assistant", content: toolUse.content },
+      { role: "user", content: { type: "tool_result", toolUseId: "sample-call", content: [{ type: "text", text: "Lookup result" }] } }
+    ], maxTokens: 32, tools: [{ name: "lookup", inputSchema: { type: "object", properties: { query: { type: "string" } } } }] });
+    assert.deepEqual(followup.content, { type: "text", text: "sampled answer" });
   } finally {
     await connection.close();
     await server.close();
   }
 }));
+
+test("MCP sampling with tools returns a server-directed tool use and accepts its follow-up result", async () => {
+  const requests: Array<{ model: string; messages: unknown[]; tools: unknown[]; tool_choice?: string; parallel_tool_calls?: boolean }> = [];
+  const provider = {
+    chat: async () => { throw new Error("tool-assisted sampling must use the compatibility tool endpoint"); },
+    chatWithTools: async (request: typeof requests[number]) => {
+      requests.push(request);
+      if (requests.length === 1) return { choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "xyst_mcp_tool_0", arguments: "{\"query\":\"React\"}" } }] } }] };
+      return { choices: [{ finish_reason: "stop", message: { content: "Found three React articles", tool_calls: [] } }] };
+    }
+  };
+  const sample = createMcpSamplingHandler(provider, "qwen/local", "qwen/local:2");
+  const tools = [{ name: "wiki.lookup", description: "Find documentation", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }];
+  const toolUse = await sample({ messages: [{ role: "user", content: { type: "text", text: "Find React documentation" } }], maxTokens: 64, tools, toolChoice: { mode: "required" } });
+  assert.deepEqual(toolUse, { model: "qwen/local", role: "assistant", content: { type: "tool_use", id: "call-1", name: "wiki.lookup", input: { query: "React" } }, stopReason: "toolUse" });
+  assert.deepEqual(requests[0]?.tools, [{ type: "function", function: { name: "xyst_mcp_tool_0", description: "Find documentation\nOriginal MCP tool name: wiki.lookup", parameters: tools[0]!.inputSchema } }]);
+  assert.equal(requests[0]?.tool_choice, "required");
+  assert.equal(requests[0]?.parallel_tool_calls, false);
+
+  const final = await sample({ messages: [
+    { role: "user", content: { type: "text", text: "Find React documentation" } },
+    { role: "assistant", content: { type: "tool_use", id: "call-1", name: "wiki.lookup", input: { query: "React" } } },
+    { role: "user", content: { type: "tool_result", toolUseId: "call-1", content: [{ type: "text", text: "Found three articles" }] } }
+  ], maxTokens: 64, tools, toolChoice: { mode: "auto" } });
+  assert.deepEqual(final, { model: "qwen/local", role: "assistant", content: { type: "text", text: "Found three React articles" }, stopReason: "endTurn" });
+  assert.deepEqual(requests[1]?.messages, [
+    { role: "user", content: "Find React documentation" },
+    { role: "assistant", tool_calls: [{ id: "call-1", type: "function", function: { name: "xyst_mcp_tool_0", arguments: "{\"query\":\"React\"}" } }] },
+    { role: "tool", tool_call_id: "call-1", content: "Found three articles" }
+  ]);
+});
+
+test("MCP sampling rejects undeclared calls, mismatched results, and unsupported image content", async () => {
+  const sample = createMcpSamplingHandler({ chat: async () => ({ choices: [{ message: { content: "ok" } }] }) }, "qwen/local", "qwen/local:2");
+  await assert.rejects(() => sample({ messages: [{ role: "assistant", content: { type: "tool_use", id: "call-x", name: "unknown", input: {} } }], maxTokens: 16, tools: [{ name: "known", inputSchema: { type: "object" } }] }), /unknown or duplicate tool call/);
+  await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "tool_result", toolUseId: "missing", content: [{ type: "text", text: "x" }] } }], maxTokens: 16, tools: [{ name: "known", inputSchema: { type: "object" } }] }), /no matching prior tool call/);
+  await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "AA==", mimeType: "image/png" } }], maxTokens: 16 }), /image and audio sampling are unsupported/);
+});
 
 test("LM Studio native integrations validate plugin and ephemeral MCP configuration and resolve vault headers", async () => {
   const secret = "native-mcp-secret-value";
