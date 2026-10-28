@@ -12,8 +12,8 @@
 
 ## MCP tool result validation — 2026-10-27
 
-- Stdio and Streamable HTTP now validate `tools/call` result envelopes, modern `resultType`, `isError`, and the standard content-block variants used by Xyst. Older negotiated protocol versions may omit `resultType`; modern versions may not. Unsupported control-flow result types remain explicitly rejected.
-- The focused MCP protocol/transport suite passes 32 tests with one expected Linux-sandbox skip on Windows. Biome and whitespace checks pass. Exact-source hosted CI is pending. Schema reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
+- Stdio and Streamable HTTP now validate `tools/call` result envelopes, modern `resultType`, boolean `isError`, object-shaped `structuredContent`, and the standard content-block variants used by Xyst. Older negotiated protocol versions may omit `resultType`; modern versions may not. Unsupported control-flow result types remain explicitly rejected.
+- The focused MCP protocol/transport suite passes 32 tests with one expected Linux-sandbox skip on Windows; the `structuredContent` shape regression is included in the current change. Biome and whitespace checks pass. Schema reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
 - Hosted run [40603674967](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40603674967) exposed a nonconforming modern protocol response in the published example MCP package; its result now includes the required `resultType: complete`. The focused example package suite passes 3/3. Ubuntu Bubblewrap namespace failures remain a runner limitation; exact-source CI for the fix is pending.
 
 ## Control API event sequence integrity — 2026-10-27

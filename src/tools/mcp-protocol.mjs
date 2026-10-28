@@ -37,6 +37,8 @@ function validateToolCallResult(result, { protocolVersion, serverName }) {
     throw mcpError(`MCP server '${serverName}' omitted the required tool result type`, 'MCP_INVALID_RESPONSE');
   if (result.isError !== undefined && typeof result.isError !== 'boolean')
     throw mcpError(`MCP server '${serverName}' returned an invalid tool error flag`, 'MCP_INVALID_RESPONSE');
+  if (result.structuredContent !== undefined && !isRecord(result.structuredContent))
+    throw mcpError(`MCP server '${serverName}' returned invalid structured tool content`, 'MCP_INVALID_RESPONSE');
   if (!result.content.every(isContentBlock))
     throw mcpError(`MCP server '${serverName}' returned an invalid content block`, 'MCP_INVALID_RESPONSE');
 }

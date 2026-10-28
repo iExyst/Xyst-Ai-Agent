@@ -33,6 +33,8 @@ test('MCP tool-call results validate content blocks and standard flags', () => {
     { resultType: 'complete', content: [{ type: 'image', data: 'abc' }] },
     { resultType: 'complete', content: [{ type: 'resource', resource: { uri: 'file:///workspace/a.txt', blob: 42 } }] },
     { resultType: 'complete', content: [], isError: 'false' },
+    { resultType: 'complete', content: [], structuredContent: [] },
+    { resultType: 'complete', content: [], structuredContent: null },
   ]) {
     assert.throws(() => validateMcpResultType(invalid, { protocolVersion: '2026-07-28', serverName: 'fixture', method: 'tools/call' }), {
       code: 'MCP_INVALID_RESPONSE',
