@@ -180,7 +180,7 @@ export function assertRequiredToolEvidence(toolName: string, output: unknown, re
 export interface AgentResult { sessionId: string; model: string; selectionReason: string; turns: number; status: "completed" | "unverified" | "cancelled" | "limit"; response: string }
 
 export class AgentRunner {
-  constructor(private readonly deps: { store: XystStore; config: ConfigStore; sessions: SessionStore; events: RuntimeEvents; access: AccessController; provider: LMStudioProvider; github: GitHubProvider; modelAcquisition?: ModelAcquisitionService; dataDir?: string; credentials?: { get(service: string, name: string): Promise<string | undefined> }; memories?: MemoryStore; resourceStatsReader?: typeof readHostResourceStats }) {}
+  constructor(private readonly deps: { store: XystStore; config: ConfigStore; sessions: SessionStore; events: RuntimeEvents; access: AccessController; provider: LMStudioProvider; github: GitHubProvider; modelAcquisition?: ModelAcquisitionService; dataDir?: string; credentials?: { get(service: string, name: string): Promise<string | undefined> }; memories?: MemoryStore; browserToolsFactory?: typeof createBrowserTools; resourceStatsReader?: typeof readHostResourceStats }) {}
 
   async run(objective: string, options: AgentOptions = {}): Promise<AgentResult> {
     const safeObjective = this.deps.provider.redact(objective);
@@ -541,7 +541,7 @@ export class AgentRunner {
     const browserHeadless = this.deps.config.resolve<boolean>("browser.headless", scopes)?.value ?? true;
     const browserMaxDownloadBytes = this.deps.config.resolve<number>("browser.maxDownloadBytes", scopes)?.value ?? 512 * 1024 ** 2;
     const browser = browserAutomationEnabled && this.deps.dataDir
-      ? createBrowserTools({ access, dataDir: this.deps.dataDir, sessionId, workspace, headless: browserHeadless, maxDownloadBytes: browserMaxDownloadBytes, ...(options.signal ? { signal: options.signal } : {}) })
+      ? (this.deps.browserToolsFactory ?? createBrowserTools)({ access, dataDir: this.deps.dataDir, sessionId, workspace, headless: browserHeadless, maxDownloadBytes: browserMaxDownloadBytes, ...(options.signal ? { signal: options.signal } : {}) })
       : { tools: {}, close: async () => undefined };
     const semanticMemory = this.deps.memories && semanticMemoryEnabled ? {
       search: async (query: string, limit: number) => {

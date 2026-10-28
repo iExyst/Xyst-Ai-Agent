@@ -491,13 +491,25 @@ test("desktop automation setting controls which native tools reach the agent", a
 test("browser automation setting controls whether browser tools reach the agent", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "browser-automation-setting.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "browser.automation.enabled", false);
+  config.set("global", "browser.headless", false);
+  config.set("global", "browser.maxDownloadBytes", 1024 * 1024);
   const toolSnapshots: unknown[][] = [];
+  const browserSettings: Array<{ headless: boolean; maxDownloadBytes: number }> = [];
   const provider = {
     redact: (value: string) => value,
     models: async () => [{ type: "llm" as const, publisher: "test", key: "loaded-chat", display_name: "Chat", size_bytes: 20, loaded_instances: [{ id: "loaded-chat", config: { context_length: 8192 } }], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }],
     streamChatWithTools: async (request: { tools: unknown[] }) => { toolSnapshots.push(request.tools); return { choices: [{ message: { role: "assistant", content: "Hello!" } }] }; }
   };
-  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never, dataDir: join(root, "data") });
+  const agent = new AgentRunner({
+    store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never, dataDir: join(root, "data"),
+    browserToolsFactory: (options) => {
+      browserSettings.push({ headless: options.headless, maxDownloadBytes: options.maxDownloadBytes });
+      return {
+        tools: { browser_probe: { definition: { type: "function", function: { name: "browser_probe", description: "Probe", parameters: { type: "object", properties: {}, required: [] } } }, execute: async () => ({}) } },
+        close: async () => undefined
+      } as ReturnType<typeof createBrowserTools>;
+    }
+  });
   const hasBrowserTools = (tools: unknown[]) => tools.some((tool) => String((tool as { function?: { name?: string } }).function?.name ?? "").startsWith("browser_"));
   try {
     await agent.run("Say hello in one sentence.", { workspace: root, model: "loaded-chat", maxTurns: 1 });
@@ -505,6 +517,7 @@ test("browser automation setting controls whether browser tools reach the agent"
     config.set("global", "browser.automation.enabled", true);
     await agent.run("Say hello in one sentence.", { workspace: root, model: "loaded-chat", maxTurns: 1 });
     assert.equal(hasBrowserTools(toolSnapshots[1]!), true);
+    assert.deepEqual(browserSettings, [{ headless: false, maxDownloadBytes: 1024 * 1024 }]);
   } finally { store.close(); }
 }));
 
