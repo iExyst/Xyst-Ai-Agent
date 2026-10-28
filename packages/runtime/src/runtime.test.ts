@@ -2426,6 +2426,43 @@ test("simultaneous patches with one read hash serialize and reject the stale wri
   assert.equal(final.sha256, (outcomes.find((outcome): outcome is PromiseFulfilledResult<{ path: string; sha256: string }> => outcome.status === "fulfilled")?.value.sha256));
 }));
 
+test("file patch waits for a competing process lock and then rejects its stale hash", { timeout: 10_000 }, async () => withTemp(async (root) => {
+  const path = join(root, "cross-process.txt"); const lockHeld = join(root, "lock-held.marker");
+  await writeFile(path, "value: original\n");
+  const original = await readText(path);
+  const childSource = `
+    import { writeFile } from "node:fs/promises";
+    import { lock } from "proper-lockfile";
+    const [path, marker] = process.argv.slice(1);
+    const release = await lock(path, { stale: 15000, update: 5000 });
+    await writeFile(path, "value: external writer\\n");
+    await writeFile(marker, "held");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await release();
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", childSource, path, lockHeld], { cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = ""; child.stderr.setEncoding("utf8"); child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  const childClosed = new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => resolve(code ?? -1));
+  });
+  try {
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(lockHeld) && child.exitCode === null && child.signalCode === null && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(existsSync(lockHeld), `lock holder did not start: ${stderr}`);
+    let settled = false;
+    const attempt = patchText(path, original.sha256, "original", "xyst writer").finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(settled, false, "the patch must wait for the competing process lock");
+    await assert.rejects(attempt, /File changed since it was read/);
+    assert.equal(await childClosed, 0, stderr);
+  } finally {
+    child.kill();
+    await childClosed.catch(() => undefined);
+  }
+  assert.equal((await readText(path)).text, "value: external writer\n");
+}));
+
 test("restricted path checks return the canonical symlink target and block out-of-root links", async (t) => withTemp(async (root) => {
   const allowed = join(root, "allowed"); const denied = join(root, "denied");
   await mkdir(allowed); await mkdir(denied);

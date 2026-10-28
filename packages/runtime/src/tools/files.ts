@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
+import { lock as acquireFileLock } from "proper-lockfile";
 import { normalizeUserPath } from "../platform.js";
 
 const hash = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
@@ -99,19 +100,26 @@ export async function createText(path: string, content: string, overwrite = fals
 export async function patchText(path: string, expectedSha256: string, oldText: string, newText: string): Promise<{ path: string; sha256: string }> {
   const absolute = normalizeUserPath(path);
   return withPathLock(absolute, async () => {
-    const original = await readFile(absolute); if (hash(original) !== expectedSha256) throw new Error("File changed since it was read; reload it before patching");
-    const decoded = decodeText(original); const normalized = normalizeLineEndings(decoded.text); const source = normalizeLineEndings(oldText).text;
-    const first = normalized.text.indexOf(source);
-    if (first < 0) throw new Error("Patch source text was not found");
-    if (normalized.text.indexOf(source, first + source.length) >= 0) throw new Error("Patch source text is ambiguous; include more context");
-    const rawStart = normalized.rawOffsets[first]!; const rawEnd = normalized.rawOffsets[first + source.length]!;
-    const neighborhood = decoded.text.slice(Math.max(0, rawStart - 256), Math.min(decoded.text.length, rawEnd + 256));
-    const newline = neighborhood.includes("\r\n") ? "\r\n" : neighborhood.includes("\n") ? "\n" : "\n";
-    const replacement = normalizeLineEndings(newText).text.replace(/\n/g, newline);
-    const updatedText = decoded.text.slice(0, rawStart) + replacement + decoded.text.slice(rawEnd); const updated = decoded.encode(updatedText); const temp = `${absolute}.${randomUUID()}.tmp`;
-    try { await writeFile(temp, updated, { flag: "wx" }); await rename(temp, absolute); }
-    catch (error) { await rm(temp, { force: true }); throw error; }
-    return { path: absolute, sha256: hash(updated) };
+    const release = await acquireFileLock(absolute, {
+      stale: 15_000,
+      update: 5_000,
+      retries: { retries: 50, factor: 1.2, minTimeout: 50, maxTimeout: 500, randomize: true }
+    });
+    try {
+      const original = await readFile(absolute); if (hash(original) !== expectedSha256) throw new Error("File changed since it was read; reload it before patching");
+      const decoded = decodeText(original); const normalized = normalizeLineEndings(decoded.text); const source = normalizeLineEndings(oldText).text;
+      const first = normalized.text.indexOf(source);
+      if (first < 0) throw new Error("Patch source text was not found");
+      if (normalized.text.indexOf(source, first + source.length) >= 0) throw new Error("Patch source text is ambiguous; include more context");
+      const rawStart = normalized.rawOffsets[first]!; const rawEnd = normalized.rawOffsets[first + source.length]!;
+      const neighborhood = decoded.text.slice(Math.max(0, rawStart - 256), Math.min(decoded.text.length, rawEnd + 256));
+      const newline = neighborhood.includes("\r\n") ? "\r\n" : neighborhood.includes("\n") ? "\n" : "\n";
+      const replacement = normalizeLineEndings(newText).text.replace(/\n/g, newline);
+      const updatedText = decoded.text.slice(0, rawStart) + replacement + decoded.text.slice(rawEnd); const updated = decoded.encode(updatedText); const temp = `${absolute}.${randomUUID()}.tmp`;
+      try { await writeFile(temp, updated, { flag: "wx" }); await rename(temp, absolute); }
+      catch (error) { await rm(temp, { force: true }); throw error; }
+      return { path: absolute, sha256: hash(updated) };
+    } finally { await release(); }
   });
 }
 
