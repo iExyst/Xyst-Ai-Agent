@@ -20,7 +20,7 @@ import {
 } from './review-plan.mjs';
 import { mountWorkspacePanel } from './workspace-panel.mjs';
 import { localProfileFromDiscovery, markDiscoveredModelLoaded, postLoadModelChoice } from './onboarding.mjs';
-import { isInterruptedSession } from './session-status.mjs';
+import { getRememberedSessionId, isInterruptedSession, rememberSessionId } from './session-status.mjs';
 import { resolveWebSearchProvider } from './web-search-settings.mjs';
 import { modelCapabilitiesDataStatus, modelCapabilitiesStatus, modelPricingDataStatus, modelPricingStatus } from './model-pricing.mjs';
 import { withStartupTimeout } from './startup.mjs';
@@ -708,6 +708,7 @@ function renderSessions(sessions) {
           await client.deleteSession(session.id);
           if (session.id === activeSessionId) {
             activeSessionId = null;
+            rememberSessionId(null);
             elements.session_actions.hidden = true;
             elements.conversation_title.textContent = 'New conversation';
             resetTimeline();
@@ -965,6 +966,7 @@ async function openSession(id) {
   try {
     const session = await client.getSession(id);
     activeSessionId = session.id;
+    rememberSessionId(activeSessionId);
     const configuredMcpServers = new Set(mcpServerCatalog.map((server) => server.name));
     mcpServerSelection = Array.isArray(session.mcp_servers) ? session.mcp_servers.filter((name) => configuredMcpServers.has(name)) : null;
     renderMcpRunSelection();
@@ -1393,7 +1395,10 @@ async function submitPrompt(prompt) {
     elements.send_direction.hidden = false;
     for await (const event of client.followRunEvents(activeRunId, { signal: runController.signal })) {
       const data = event.data;
-      if (data.session_id) activeSessionId = data.session_id;
+      if (data.session_id) {
+        activeSessionId = data.session_id;
+        rememberSessionId(activeSessionId);
+      }
       if (event.type === 'run_started' && data.routing_decision) {
         activeRunModel = data.model || data.routing_decision.model || activeRunModel;
         ensureModelPickerOption(activeRunModel);
@@ -1573,6 +1578,7 @@ async function submitPrompt(prompt) {
           })
           .catch(() => {});
         activeSessionId = data.session_id || activeSessionId;
+        rememberSessionId(activeSessionId);
         elements.conversation_title.textContent = sessionsById.get(activeSessionId)?.title || 'Conversation';
         if (!responseBody.textContent && data.status !== 'complete') responseBody.textContent = `Run ${data.status}.`;
         await refreshSessions();
@@ -1775,6 +1781,7 @@ async function manageSession(action) {
     if (action === 'archive') {
       await client.archiveSession(id);
       activeSessionId = null;
+      rememberSessionId(null);
       elements.session_actions.hidden = true;
       elements.conversation_title.textContent = 'New conversation';
       resetTimeline();
@@ -1786,6 +1793,7 @@ async function manageSession(action) {
       if (!window.confirm('Delete this conversation and its saved transcript? This cannot be undone.')) return;
       await client.deleteSession(id);
       activeSessionId = null;
+      rememberSessionId(null);
       elements.session_actions.hidden = true;
       elements.conversation_title.textContent = 'New conversation';
       resetTimeline();
@@ -4902,6 +4910,8 @@ async function initialize() {
     elements.model_picker.replaceChildren(fallback);
     elements.model_picker.disabled = false;
     await withStartupTimeout('recent sessions', (signal) => refreshSessions({ signal }));
+    const rememberedSessionId = getRememberedSessionId([...sessionsById.values()]);
+    if (rememberedSessionId) await openSession(rememberedSessionId);
     clearError();
     setConnected(true);
     void reconnectActiveBrowserRun().catch(showError);
@@ -4991,6 +5001,7 @@ elements.prompt_input.addEventListener('keydown', (event) => {
 elements.new_session.addEventListener('click', () => {
   if (runController) return;
   activeSessionId = null;
+  rememberSessionId(null);
   elements.run_mode.value = 'agent';
   selectPrimaryTab('agent');
   mcpServerSelection = null;

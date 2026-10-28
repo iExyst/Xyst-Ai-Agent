@@ -4,6 +4,7 @@
 
 - The browser reload path restores an in-progress session, approval cards, and run controls. Its browser smoke covers reload, approval, pause/resume, model changes, and budget changes; the API snapshot regression and package smoke pass.
 - The VS Code webview now rehydrates its active session and run state after reload/reopen, including pending approvals and budgets. The focused extension integration test and package-policy check pass. Exact-source hosted CI is pending; this remains development-build evidence, not release approval.
+- The shared browser/native desktop UI remembers only the selected session UUID and restores it only when that session is still present in the current workspace. Focused storage validation passes; no transcript or credential is written to browser storage.
 
 ## MCP resource-template result validation — 2026-10-28
 
