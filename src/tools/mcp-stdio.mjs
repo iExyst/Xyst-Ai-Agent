@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import uriTemplates from 'uri-templates';
+import uriTemplates from './vendor/uri-templates.cjs';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';

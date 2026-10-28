@@ -4,6 +4,8 @@ THIRD-PARTY LICENSE NOTICES
 Xyst AI Assistant Agent source is licensed under Apache-2.0; see the LICENSE file distributed with the application.
 The bundled Node.js runtime includes its own license in runtime/LICENSE.
 
+The source tree vendors `uri-templates` 0.2.0 by Geraint Luff for RFC 6570 URI-template expansion. The upstream project dedicates this code to the public domain: https://github.com/geraintluff/uri-templates.
+
 This file contains license texts and attribution for Rust dependencies included in the Windows and Linux desktop builds.
 The list is generated from Cargo.lock for the supported x86-64 and ARM64 Windows/Linux GNU targets.
 

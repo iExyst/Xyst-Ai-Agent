@@ -53,7 +53,6 @@
   },
   "dependencies": {
     "ink": "7.1.1",
-    "react": "19.2.0",
-    "uri-templates": "0.2.0"
+    "react": "19.2.0"
   }
 }
