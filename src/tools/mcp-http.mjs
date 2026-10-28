@@ -1028,7 +1028,7 @@ function normalizeSchema(schema, depth = 0) {
   if (Object.keys(schema).some((key) => !allowed.has(key)))
     throw mcpError('MCP schema uses unsupported JSON Schema keyword', 'MCP_INVALID_SCHEMA');
   const type = schema.type;
-  if (!['object', 'string', 'integer', 'number', 'boolean', 'array'].includes(type))
+  if (!['object', 'string', 'integer', 'number', 'boolean', 'array', 'null'].includes(type))
     throw mcpError('MCP schema uses unsupported type', 'MCP_INVALID_SCHEMA');
   const out = { type };
   for (const k of ['title', 'description'])
@@ -1044,7 +1044,9 @@ function normalizeSchema(schema, depth = 0) {
       schema.enum.some((x) => !['string', 'number', 'boolean'].includes(typeof x) && x !== null) ||
       type === 'object' ||
       type === 'array' ||
-      schema.enum.some((x) => x === null || (type === 'integer' ? !Number.isInteger(x) : typeof x !== type))
+      schema.enum.some((x) =>
+        type === 'null' ? x !== null : x === null || (type === 'integer' ? !Number.isInteger(x) : typeof x !== type),
+      )
     )
       throw mcpError('MCP enum invalid', 'MCP_INVALID_SCHEMA');
     out.enum = schema.enum;

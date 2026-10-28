@@ -444,6 +444,8 @@ function validateValue(schema, value, location) {
       throw new Error(`${location} must be a valid number`);
   } else if (schema.type === 'boolean') {
     if (typeof value !== 'boolean' || (schema.enum && !schema.enum.includes(value))) throw new Error(`${location} must be a boolean`);
+  } else if (schema.type === 'null') {
+    if (value !== null || (schema.enum && !schema.enum.includes(value))) throw new Error(`${location} must be null`);
   } else if (schema.type === 'array') {
     if (!Array.isArray(value)) throw new Error(`${location} must be an array`);
     if (
