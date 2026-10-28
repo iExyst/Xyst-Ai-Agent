@@ -118,6 +118,44 @@ test('Windows replacement fallback commits the temporary file and removes the ba
   });
 });
 
+test('Windows replacement fallback reports the new destination as committed if backup cleanup fails', async (t) => {
+  const root = await createTempDirectory('xyst-atomic-write-backup-cleanup-failure-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const destination = path.join(root, 'settings.json');
+  await fs.writeFile(destination, 'original');
+
+  await withWindowsPlatform(async () => {
+    const rename = fs.rename;
+    const remove = fs.rm;
+    let backupPath;
+    let destinationCommitAttempts = 0;
+    fs.rename = async (source, target) => {
+      if (source === destination && target.endsWith('.bak')) backupPath = target;
+      if (source.endsWith('.tmp') && target === destination) {
+        destinationCommitAttempts += 1;
+        if (destinationCommitAttempts === 1) throw Object.assign(new Error('simulated replace failure'), { code: 'EPERM' });
+      }
+      return rename(source, target);
+    };
+    fs.rm = async (target, options) => {
+      if (target === backupPath) throw Object.assign(new Error('simulated backup cleanup failure'), { code: 'EACCES' });
+      return remove(target, options);
+    };
+    try {
+      await assert.rejects(atomicWriteFile(destination, 'replacement'), (error) => {
+        assert.equal(error.code, 'EACCES');
+        assert.equal(error.committed, true);
+        return true;
+      });
+      assert.equal(await fs.readFile(destination, 'utf8'), 'replacement');
+      assert.equal(await fs.readFile(backupPath, 'utf8'), 'original');
+    } finally {
+      fs.rename = rename;
+      fs.rm = remove;
+    }
+  });
+});
+
 test('Windows replacement fallback restores the original file when commit fails', async (t) => {
   const root = await createTempDirectory('xyst-atomic-write-rollback-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

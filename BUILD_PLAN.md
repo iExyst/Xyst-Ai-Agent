@@ -1,6 +1,6 @@
 # Xyst AI Build Plan
 
-Updated: 2026-10-27
+Updated: 2026-10-28
 
 ## Objective
 
@@ -34,6 +34,7 @@ Start hosted CI and independent security review in parallel as soon as the repos
 - Triage findings by severity; resolve every critical/high finding and document mitigations for accepted lower-severity findings.
 - Finish crash/torn-write recovery and safe cleanup for sessions, worktrees, subprocesses, temporary files, and locks; cleanup must remain reviewable and must not delete user work automatically.
 - Session persistence now treats an atomic rename followed by a directory-flush error as committed: it advances the in-memory revision and reports a durability warning so retries and active runtime policy do not conflict with the visible record. A Linux-only fault-injection regression verifies reload and retry; hosted confirmation is pending.
+- 2026-10-28: the Windows atomic-replacement fallback now marks a write committed if the new destination was installed but cleanup of its old backup fails. This lets session persistence advance its in-memory revision instead of retrying against an already-replaced record. A fault-injection test verifies the new destination and retained backup; hosted CI is pending.
 - 2026-10-27: session load now recovers the interrupted Windows atomic-replacement state where the primary record is missing and the previous record remains in one UUID-named `.bak`. Recovery runs under the session lock and validates the candidate with the normal no-follow, single-link, size, schema, and session-ID checks before rename. Missing, ambiguous, or invalid backups are preserved for manual recovery. Focused valid-recovery and ambiguity regressions pass; hosted verification is pending.
 - 2026-10-27: background-process startup now restores one validated interrupted-replacement backup when its primary record is absent. A same-directory hard link makes the restore no-overwrite; startup also finishes cleanup if it finds the known interrupted link-and-unlink state. Unsafe, ambiguous, or unsupported recovery states preserve their files. Three focused Windows regressions pass with the required hard-link capability; hosted verification is pending.
 - 2026-10-27: hosted run `40599777689` exposed that a missing primary with no backup must remain an ordinary `ENOENT`, not a backup-recovery error. That caused session deletion, stale-writer, and VS Code lifecycle regressions on Windows and Ubuntu. The empty-backup path now preserves `ENOENT`; three focused regressions pass locally and exact-source hosted confirmation is pending. The same run passed security and formatting/lint; its platform suites also show the previously documented ConPTY and network-namespace runner limits.

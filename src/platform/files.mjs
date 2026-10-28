@@ -72,7 +72,16 @@ async function replaceExisting(temporary, destination, beforeReplace) {
       });
     throw error;
   }
-  if (hasDestination) await fs.rm(backup, { force: true });
+  if (hasDestination) {
+    try {
+      await fs.rm(backup, { force: true });
+    } catch (error) {
+      // The replacement rename committed. Callers must advance in-memory
+      // revisions even when cleanup of the previous copy needs recovery.
+      error.committed = true;
+      throw error;
+    }
+  }
 }
 
 async function syncParentDirectory(destination) {

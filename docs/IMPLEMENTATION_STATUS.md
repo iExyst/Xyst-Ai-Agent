@@ -1,4 +1,9 @@
-# Xyst development build status — 2026-10-27
+# Xyst development build status — 2026-10-28
+
+## Windows atomic-replacement cleanup failure — 2026-10-28
+
+- If Windows installs the replacement but cannot remove its previous-file backup, `atomicWriteFile` now tags the error as committed. The current destination and recovery backup are both preserved, and session writes can advance their in-memory revision instead of treating the visible commit as rolled back.
+- The focused platform-files suite passes the Windows replacement commit, cleanup-failure, rollback, and retained-backup cases (4/4). Exact-source hosted CI is pending.
 
 ## Bounded tool result transport — 2026-10-27
 
