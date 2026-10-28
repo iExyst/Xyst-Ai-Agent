@@ -15,7 +15,10 @@ const outputDirectory = path.join(root, 'dist', 'desktop-runtime');
 const cacheDirectory = path.join(root, '.toolchains', 'desktop-runtime-cache');
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
 const MAX_RUNTIME_BYTES = 160 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 120_000;
+// GitHub-hosted runners can take several minutes to fetch the pinned runtime
+// archive from nodejs.org. Keep the transfer bounded without treating a slow
+// but progressing connection as a failed desktop build.
+const DOWNLOAD_TIMEOUT_MS = 300_000;
 
 export async function readRuntimeSpec(platform = process.platform, arch = process.arch) {
   const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
