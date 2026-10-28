@@ -3350,11 +3350,25 @@ test('approval policy edits during an active run persist before notifying the ru
   assert.equal(started.status, 202);
   const { run_id: runId } = await started.json();
   const run = server.runs.get(runId);
-  const deadline = Date.now() + 5_000;
-  while (!run.events.some((event) => event.type === 'approval_required') && Date.now() < deadline)
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  const waitFor = async (predicate) => {
+    const deadline = Date.now() + 5_000;
+    while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(predicate(), JSON.stringify({ status: run.status, events: run.events.map((event) => event.type) }));
+  };
+  await waitFor(() => run.sessionId);
+  const activeSession = (await (await fetch(`${url}/v1/sessions`, { headers: auth })).json()).sessions.find(
+    (session) => session.id === run.sessionId,
+  );
+  assert.equal(activeSession.run_id, runId);
+  const runSnapshot = await (await fetch(`${url}/v1/runs/${runId}`, { headers: auth })).json();
+  assert.equal(runSnapshot.last_event_sequence, run.events.at(-1).sequence);
+  await waitFor(() => run.events.some((event) => event.type === 'approval_required'));
   const approval = run.events.find((event) => event.type === 'approval_required');
-  assert.ok(approval, JSON.stringify({ status: run.status, events: run.events }));
+  const pendingSnapshot = await (await fetch(`${url}/v1/runs/${runId}`, { headers: auth })).json();
+  assert.deepEqual(
+    pendingSnapshot.approval_requests.map((item) => item.approval_id),
+    [approval.approval_id],
+  );
 
   const addedResponse = await fetch(`${url}/v1/approval-rules`, {
     method: 'POST',

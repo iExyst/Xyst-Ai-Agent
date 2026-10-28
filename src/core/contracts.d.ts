@@ -60,7 +60,9 @@ export interface ControlApiRunState {
   pending_directions: number;
   created_at: string;
   session_id: string | null;
+  last_event_sequence: number;
   pending_approvals: string[];
+  approval_requests: Array<Extract<ControlApiLifecycleEvent, { type: 'approval_required' }>>;
   result: { status: AgentRunStatus; content: string; session_id: string } | null;
   error: ControlApiErrorDetails | null;
 }

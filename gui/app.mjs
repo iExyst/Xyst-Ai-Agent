@@ -791,6 +791,130 @@ async function refreshSessions(options) {
   renderSessions(sessions);
 }
 
+async function reconnectActiveBrowserRun() {
+  const session = [...sessionsById.values()].find((item) => item.run_active === true && typeof item.run_id === 'string');
+  if (!session || activeRunId) return;
+  let state;
+  try {
+    state = await client.getRun(session.run_id);
+  } catch (error) {
+    if (!(error instanceof ControlApiError) || error.status !== 404) throw error;
+    await openSession(session.id);
+    return;
+  }
+  if (!['running', 'paused'].includes(state.status)) {
+    await openSession(session.id);
+    return;
+  }
+
+  activeRunId = state.run_id;
+  activeRunModel = state.model || null;
+  activeRunMode = session.mode || 'agent';
+  activeRunHasImages = Boolean(session.messages?.some((message) => message.image_attachments?.length));
+  activeRunInitialBudgets = state.initial_budgets || {};
+  activeRunBudgets = state.budgets || {};
+  activeRunBudgetAdjustmentsEnabled = state.budget_adjustments_enabled === true;
+  activeRunPaused = state.status === 'paused';
+  runController = new AbortController();
+  await openSession(session.id);
+  elements.send_button.disabled = true;
+  elements.stop_run.hidden = false;
+  elements.pause_run.hidden = false;
+  elements.pause_run.disabled = false;
+  elements.pause_run.textContent = activeRunPaused ? 'Resume run' : 'Pause run';
+  elements.send_direction.hidden = false;
+  renderRunModelControl();
+  renderRunBudgetFields();
+  renderRunBudgetControl();
+  for (const request of state.approval_requests || []) createApproval({ type: 'approval_required', data: request });
+  appendActivity('Reconnected to the active run. The conversation will refresh when it finishes.', 'working');
+
+  try {
+    for await (const event of client.followRunEvents(state.run_id, { after: state.last_event_sequence, signal: runController.signal })) {
+      const data = event.data;
+      if (event.type === 'approval_required') createApproval(event);
+      if (event.type === 'approval_resolved') {
+        for (const card of elements.approval_region.querySelectorAll('.approval-card')) {
+          if (card.dataset.approvalId !== data.approval_id) continue;
+          const submitted = [...card.querySelectorAll('button')].every((button) => button.disabled);
+          if (submitted) {
+            card.replaceChildren(node('div', 'approval-expiry', data.status === 'approved' ? 'Approval submitted.' : 'Action denied.'));
+          } else {
+            card.remove();
+          }
+        }
+      }
+      if (event.type === 'run_paused') {
+        activeRunPaused = true;
+        elements.pause_run.textContent = 'Resume run';
+        elements.pause_run.disabled = false;
+        renderRunModelControl();
+        renderRunBudgetControl();
+      }
+      if (event.type === 'run_resumed') {
+        activeRunPaused = false;
+        elements.pause_run.textContent = 'Pause run';
+        elements.pause_run.disabled = false;
+        renderRunModelControl();
+        renderRunBudgetControl();
+      }
+      if (event.type === 'run_model_changed') {
+        activeRunModel = data.to_model;
+        runModelChangePending = false;
+        ensureModelPickerOption(activeRunModel);
+        elements.model_picker.value = activeRunModel;
+        renderRunModelControl();
+        showToast(`Run switched to ${activeRunModel}.`);
+      }
+      if (event.type === 'run_model_change_failed') {
+        runModelChangePending = false;
+        renderRunModelControl();
+        showToast('The model change could not be applied; the run kept its previous model.');
+      }
+      if (event.type === 'run_budgets_changed') {
+        activeRunBudgets = data.budgets || {};
+        runBudgetChangePending = false;
+        elements.run_budget_status.textContent = 'Budget changes are active for this run.';
+        renderRunBudgetFields();
+        renderRunBudgetControl();
+        showToast('Active-run budgets updated.');
+      }
+      if (event.type === 'run_budget_change_failed') {
+        runBudgetChangePending = false;
+        elements.run_budget_status.textContent = 'Budget changes could not be applied; the previous limits remain active.';
+        renderRunBudgetControl();
+        showToast('The budget change could not be applied; previous limits remain active.');
+      }
+      if (event.type === 'api_run_finished' || event.type === 'api_run_failed') break;
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') showToast(`Reconnected run monitoring stopped: ${error.message}`);
+  } finally {
+    if (activeRunId === state.run_id) {
+      activeRunId = null;
+      runController = null;
+      activeRunModel = null;
+      activeRunMode = 'agent';
+      activeRunHasImages = false;
+      activeRunInitialBudgets = {};
+      activeRunBudgets = {};
+      activeRunBudgetAdjustmentsEnabled = false;
+      activeRunPaused = false;
+      activeRunPauseRequested = false;
+      elements.send_button.disabled = false;
+      elements.stop_run.hidden = true;
+      elements.pause_run.hidden = true;
+      elements.send_direction.hidden = true;
+      elements.run_budget_fields.replaceChildren();
+      elements.run_budget_status.textContent = '';
+      renderRunModelControl();
+      renderRunBudgetControl();
+      await openSession(session.id);
+      await refreshSessions();
+    }
+  }
+}
+
 function renderMcpRunSelection() {
   const selection = Array.isArray(mcpServerSelection) ? new Set(mcpServerSelection) : null;
   elements.mcp_selection.hidden = mcpServerCatalog.length === 0;
@@ -4780,6 +4904,7 @@ async function initialize() {
     await withStartupTimeout('recent sessions', (signal) => refreshSessions({ signal }));
     clearError();
     setConnected(true);
+    void reconnectActiveBrowserRun().catch(showError);
     if (settings.app_updates?.mode === 'notify' && !appUpdateCheckedThisSession) {
       appUpdateCheckedThisSession = true;
       void client

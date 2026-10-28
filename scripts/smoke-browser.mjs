@@ -1020,6 +1020,9 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await waitForTimelineText(protocol, 'Approval policy added: allow write_file (tool). Pending tools are rechecked before execution.');
     await browserApiMutation(service, `/v1/approval-rules/${livePolicy.rule.id}`, 'DELETE', {}, 200);
     await waitForTimelineText(protocol, 'Approval policy revoked: allow write_file (tool). Pending tools are rechecked before execution.');
+    await protocol.call('Page.navigate', { url: appUrl });
+    const reconnectedApproval = await waitForApprovalCard(protocol);
+    assert.match(reconnectedApproval.details, /approval-smoke\.txt/, 'Reloading the browser must restore a pending approval');
     await evaluate(protocol, `document.querySelector('#approval-region [data-grant-scope="once"]').click()`);
     const approvalSubmitted = await waitForApprovalSubmitted(protocol);
     assert.equal(approvalSubmitted, 'Approval submitted.');

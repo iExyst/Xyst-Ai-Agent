@@ -566,10 +566,10 @@ export class LocalControlServer {
       if (url.pathname === `${API_PREFIX}/sessions` && request.method === 'GET') {
         const sessions = await this.sessionStore.list();
         return sendJson(response, 200, {
-          sessions: sessions.slice(0, 500).map((session) => ({
-            ...session,
-            run_active: this.activeSessions.has(session.id),
-          })),
+          sessions: sessions.slice(0, 500).map((session) => {
+            const activeRun = this.#activeRunForSession(session.id);
+            return { ...session, run_active: this.activeSessions.has(session.id), run_id: activeRun?.id || null };
+          }),
           truncated: sessions.length > 500,
         });
       }
@@ -596,9 +596,11 @@ export class LocalControlServer {
       if (sessionMatch && request.method === 'GET') {
         const session = await this.sessionStore.load(sessionMatch[1]);
         const lastMessage = session.messages.at(-1);
+        const activeRun = this.#activeRunForSession(session.id);
         return sendJson(response, 200, {
           ...session,
           run_active: this.activeSessions.has(session.id),
+          run_id: activeRun?.id || null,
           last_message_role: lastMessage?.role || null,
           last_message_has_tool_calls:
             lastMessage?.role === 'assistant' && Array.isArray(lastMessage.tool_calls) && lastMessage.tool_calls.length > 0,
@@ -2603,9 +2605,7 @@ export class LocalControlServer {
       };
       const onAbort = () => settle(false, 'cancelled');
       const timer = setTimeout(() => settle(false, 'expired'), timeoutMs);
-      run.pendingApprovals.set(approvalId, { resolve: settle, timer, onAbort, proposal });
-      run.controller.signal.addEventListener('abort', onAbort, { once: true });
-      this.#publish(run, {
+      const event = {
         type: 'approval_required',
         run_id: run.id,
         approval_id: approvalId,
@@ -2629,7 +2629,10 @@ export class LocalControlServer {
           max_active_grants: MAX_SESSION_GRANTS,
           exact_rule_duration_ms: 60 * 60 * 1000,
         },
-      });
+      };
+      run.pendingApprovals.set(approvalId, { resolve: settle, timer, onAbort, proposal, event });
+      run.controller.signal.addEventListener('abort', onAbort, { once: true });
+      this.#publish(run, event);
     });
   }
 
@@ -2868,6 +2871,13 @@ export class LocalControlServer {
     return run.directions.splice(0);
   }
 
+  #activeRunForSession(sessionId) {
+    for (const run of this.runs.values()) {
+      if (run.sessionId === sessionId && ['running', 'paused'].includes(run.status)) return run;
+    }
+    return null;
+  }
+
   #getRun(response, id) {
     const run = this.runs.get(id);
     if (!run) return sendJson(response, 404, { error: 'Run not found' });
@@ -2885,7 +2895,9 @@ export class LocalControlServer {
       pending_directions: run.directions.length,
       created_at: run.created_at,
       session_id: run.sessionId,
+      last_event_sequence: run.nextEventId - 1,
       pending_approvals: [...run.pendingApprovals.keys()],
+      approval_requests: [...run.pendingApprovals.values()].map((pending) => pending.event),
       result: run.result,
       error: run.error,
     });
