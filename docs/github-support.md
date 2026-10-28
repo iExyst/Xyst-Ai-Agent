@@ -2,6 +2,8 @@
 
 Xyst uses GitHub's REST API with version header `2026-03-10`. The provider reads the fine-grained token's actual permissions from the API behavior and includes `X-Accepted-GitHub-Permissions` details when GitHub rejects an operation. It does not claim scopes that the token does not have.
 
+For HTTP 403/429 rate-limit responses, Xyst reports primary exhaustion from `X-RateLimit-Remaining: 0`, the UTC reset time from `X-RateLimit-Reset`, and secondary-limit guidance from the response message and `Retry-After` header when available. If the server does not supply a retry time, the error recommends waiting at least 60 seconds. Xyst does not sleep or automatically replay a request: writes are never repeated just because the server returned a rate-limit response. Follow [GitHub's rate-limit guidance](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) before manually retrying.
+
 GitHub Enterprise Server is supported by setting `integrations.github.apiBaseUrl` to its HTTPS REST API base (commonly `https://HOST/api/v3`). Set it with `xyst config set integrations.github.apiBaseUrl '"https://github.example.com/api/v3"' global`, or use Settings → GitHub Server in the desktop. Xyst sends GitHub credentials only to the selected API host; HTTPS Git clone/fetch/push credentials are scoped to that same host. Leave the setting unset to use GitHub.com. Enterprise instances should be checked against their own GitHub API version and permissions policy before production use.
 
 ## Authentication

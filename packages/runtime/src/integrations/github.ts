@@ -87,7 +87,26 @@ export class GitHubProvider {
     const body = await response.text().catch(() => ""); let detail = body;
     try { const parsed = JSON.parse(body) as { message?: string }; detail = parsed.message ?? body; } catch { /* keep response text */ }
     const accepted = response.headers.get("X-Accepted-GitHub-Permissions") ?? undefined;
-    const rate = response.status === 403 && response.headers.get("X-RateLimit-Remaining") === "0" ? " (GitHub API rate limit reached)" : "";
+    const retryAfterHeader = response.headers.get("Retry-After");
+    const retryAfterNumber = retryAfterHeader && /^\d+(?:\.\d+)?$/.test(retryAfterHeader) ? Number(retryAfterHeader) : undefined;
+    const retryAfterDate = retryAfterHeader && retryAfterNumber === undefined ? Date.parse(retryAfterHeader) : Number.NaN;
+    const retryAfterSeconds = retryAfterNumber !== undefined && Number.isFinite(retryAfterNumber)
+      ? Math.max(0, Math.ceil(retryAfterNumber))
+      : Number.isFinite(retryAfterDate) ? Math.max(0, Math.ceil((retryAfterDate - Date.now()) / 1000)) : undefined;
+    const remaining = response.headers.get("X-RateLimit-Remaining");
+    const resetSeconds = Number(response.headers.get("X-RateLimit-Reset"));
+    const resetDate = new Date(resetSeconds * 1000);
+    const resetAt = Number.isFinite(resetSeconds) && Number.isFinite(resetDate.getTime()) && resetSeconds > 0 ? resetDate.toISOString() : undefined;
+    const rateStatus = response.status === 403 || response.status === 429;
+    const primaryLimit = rateStatus && remaining === "0";
+    const secondaryLimit = rateStatus && /secondary rate limit|abuse detection/i.test(detail);
+    const rateLimited = primaryLimit || secondaryLimit || (rateStatus && retryAfterSeconds !== undefined) || response.status === 429;
+    const waitSeconds = retryAfterSeconds ?? (primaryLimit && resetSeconds > Date.now() / 1000 ? Math.ceil(resetSeconds - Date.now() / 1000) : undefined);
+    const rate = !rateLimited ? "" : primaryLimit
+      ? ` (GitHub primary API rate limit reached${resetAt ? `; do not retry before ${resetAt} UTC` : waitSeconds === undefined ? "; wait at least 60 seconds before retrying" : `; wait about ${waitSeconds} seconds before retrying`})`
+      : secondaryLimit
+        ? ` (GitHub secondary rate limit or abuse protection triggered${waitSeconds === undefined ? "; wait at least 60 seconds before retrying" : `; wait at least ${waitSeconds} seconds before retrying`})`
+        : ` (GitHub returned HTTP ${response.status} rate limiting${waitSeconds === undefined ? "; wait at least 60 seconds before retrying" : `; wait at least ${waitSeconds} seconds before retrying`})`;
     return new GitHubError(redactSecrets(`GitHub API HTTP ${response.status}${rate}: ${detail.slice(0, 1000)}${accepted ? `; required permissions: ${accepted}` : ""}`), response.status, accepted);
   }
   async request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
