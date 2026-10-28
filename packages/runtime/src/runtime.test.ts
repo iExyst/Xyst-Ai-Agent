@@ -2510,6 +2510,32 @@ test("global mission scheduling setting stops and resumes cron registration", as
   } finally { await runner.shutdownScheduler(); store.close(); }
 }));
 
+test("mission scheduler applies missed-run policy and preserves the scheduled instant", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "missed-schedule.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  const finished: Array<Record<string, unknown>> = [];
+  const unsubscribe = events.on("mission.finished", (event) => finished.push(event.payload as Record<string, unknown>));
+  const runner = new PersistentMissionRunner({ store, config, events, agent: { run: async () => ({ sessionId: randomUUID(), model: "fake", turns: 1, status: "completed" as const, response: "done" }) } as never });
+  const runOnce = runner.repository.create({ name: "Run missed schedule", objective: "Run once after restart", schedule: { cron: "*/5 * * * *", timezone: "UTC", enabled: true, missedRun: "run_once" } });
+  const skip = runner.repository.create({ name: "Skip missed schedule", objective: "Do not replay stale work", schedule: { cron: "*/5 * * * *", timezone: "UTC", enabled: true, missedRun: "skip" } });
+  const missedAt = new Date(Date.now() - 60_000).toISOString();
+  runner.repository.setScheduleState(runOnce.id, missedAt);
+  runner.repository.setScheduleState(skip.id, missedAt);
+  try {
+    await runner.startScheduler();
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(() => reject(new Error("missed scheduled run did not finish")), 2_000);
+      const poll = setInterval(() => {
+        if (finished.some((event) => event.missionId === runOnce.id)) { clearTimeout(deadline); clearInterval(poll); resolve(); }
+      }, 10);
+    });
+    assert.equal(finished.filter((event) => event.missionId === runOnce.id).length, 1);
+    assert.equal(finished.some((event) => event.missionId === skip.id), false);
+    const runs = store.db.prepare("SELECT mission_id,trigger_type,scheduled_for FROM mission_runs ORDER BY mission_id").all() as Array<{ mission_id: string; trigger_type: string; scheduled_for: string | null }>;
+    assert.deepEqual(runs, [{ mission_id: runOnce.id, trigger_type: "schedule", scheduled_for: missedAt }]);
+    assert.notEqual(runner.repository.get(runOnce.id)?.next_run_at, missedAt, "the stale timestamp is advanced after the catch-up run");
+  } finally { unsubscribe(); await runner.shutdownScheduler(); store.close(); }
+}));
+
 test("mission cron scheduling resolves daylight-saving gaps and repeated hours explicitly", () => {
   const springForward = new Cron("30 2 * * *", { timezone: "America/New_York", paused: true });
   const fallBack = new Cron("30 1 * * *", { timezone: "America/New_York", paused: true });

@@ -1801,3 +1801,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Built a clean legacy v1 SQLite profile with the original session/message/tool, mission, agent, job, artifact, usage, and settings schema plus a saved user message. Opening it with the current runtime applied migrations 2 through 15, preserved the exact historical message, and returned `PRAGMA integrity_check = ok`.
 - Focused migration regression passed 1/1. Full `npm test` passed (runtime 185 passed / 2 host-specific skips, CLI 26/26, release checks 5/5), workspace `npm run typecheck` passed, and `git diff --check` passed. This verifies a clean version-one upgrade path only; other starting versions, large production-sized databases, and crash interruption remain open under E7.
+
+## Mission scheduler missed-run policy · 2026-10-28
+
+- Added deterministic restart coverage for two due schedules: `run_once` executes the mission once with the exact persisted `next_run_at` timestamp, then advances the next run; `skip` emits no mission run for stale work.
+- The focused behavior passed as part of the complete Windows local runtime suite (186 passed, 2 host-specific skips), along with CLI 26/26, release verification 5/5, workspace `npm run typecheck`, and `git diff --check`. C4 remains partial; this does not establish long-running multi-runner or bare-metal service behavior.
