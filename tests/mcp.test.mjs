@@ -571,6 +571,17 @@ test('MCP JSON Schema enum and const compare JSON numbers mathematically', () =>
   });
 });
 
+test('MCP JSON Schema equality handles deeply nested values without recursion', () => {
+  let schemaValue = 0;
+  let argumentValue = 0;
+  for (let depth = 0; depth < 12_000; depth++) {
+    schemaValue = { next: schemaValue };
+    argumentValue = { next: argumentValue };
+  }
+  const result = validateArguments({ type: 'object', properties: { nested: { const: schemaValue } } }, { nested: argumentValue });
+  assert.strictEqual(result.nested, argumentValue);
+});
+
 test('MCP JSON Schema conditionals evaluate boolean subschemas', () => {
   const schema = {
     type: 'object',

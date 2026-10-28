@@ -2781,7 +2781,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 ## MCP JSON Schema numeric equality — 2026-10-28
 
-- JSON Schema defines numeric equality by mathematical value, so `-0` and `0` compare equal, including inside arrays and objects. Xyst now uses JSON-value equality for `enum` and `const`, including nested values, instead of Node strict equality. A focused regression passes, and Biome plus `git diff --check` are clean; exact-source Windows/Linux CI is pending.
+- JSON Schema defines numeric equality by mathematical value, so `-0` and `0` compare equal, including inside arrays and objects. Xyst now uses an iterative JSON-value comparison for `enum` and `const`, including deeply nested values, instead of Node strict equality or recursive traversal. Regressions cover nested values through depth 12,000; Biome and `git diff --check` are clean. Exact-source Windows/Linux CI is pending.
 
 ## MCP JSON Schema boolean conditionals — 2026-10-28
 

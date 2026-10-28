@@ -817,22 +817,39 @@ function canonicalJson(value) {
 }
 
 function jsonSchemaValuesEqual(left, right) {
-  if (typeof left === 'number' && typeof right === 'number') return left === right;
-  if (left === right) return true;
-  if (Array.isArray(left) || Array.isArray(right))
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((item, index) => jsonSchemaValuesEqual(item, right[index]))
-    );
-  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every((key) => Object.hasOwn(right, key) && jsonSchemaValuesEqual(left[key], right[key]))
-  );
+  const pending = [[left, right]];
+  const compared = new WeakMap();
+  while (pending.length) {
+    const [currentLeft, currentRight] = pending.pop();
+    if (typeof currentLeft === 'number' && typeof currentRight === 'number') {
+      if (currentLeft !== currentRight) return false;
+      continue;
+    }
+    if (currentLeft === currentRight) continue;
+    if (Array.isArray(currentLeft) || Array.isArray(currentRight)) {
+      if (!Array.isArray(currentLeft) || !Array.isArray(currentRight) || currentLeft.length !== currentRight.length) return false;
+    } else if (currentLeft === null || currentRight === null || typeof currentLeft !== 'object' || typeof currentRight !== 'object')
+      return false;
+    let paired = compared.get(currentLeft);
+    if (paired?.has(currentRight)) continue;
+    if (!paired) {
+      paired = new WeakSet();
+      compared.set(currentLeft, paired);
+    }
+    paired.add(currentRight);
+    if (Array.isArray(currentLeft)) {
+      for (let index = 0; index < currentLeft.length; index++) pending.push([currentLeft[index], currentRight[index]]);
+      continue;
+    }
+    const leftKeys = Object.keys(currentLeft);
+    const rightKeys = Object.keys(currentRight);
+    if (leftKeys.length !== rightKeys.length) return false;
+    for (const key of leftKeys) {
+      if (!Object.hasOwn(currentRight, key)) return false;
+      pending.push([currentLeft[key], currentRight[key]]);
+    }
+  }
+  return true;
 }
 
 function matchesSchemaType(type, value) {
