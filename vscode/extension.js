@@ -255,7 +255,6 @@ function activate(context, injectedVscode, dependencies = {}) {
         panel = null;
         panelReady = false;
         pendingPanelMessages = [];
-        if (runController) runController.abort();
       },
       undefined,
       context.subscriptions,
@@ -266,10 +265,17 @@ function activate(context, injectedVscode, dependencies = {}) {
 
   async function initializeWorkspacePanel() {
     if (!client || !panel) throw new Error('Xyst AI Assistant workspace service is not connected.');
-    activeSessionId = null;
-    activeSessionWorktreeId = null;
-    activeSessionWorktreeUnavailable = false;
-    selectedWorktreeId = null;
+    let activeRunState = null;
+    if (activeRunId) {
+      activeRunState = await client.getRun(activeRunId);
+      if (!['running', 'paused'].includes(activeRunState.status)) activeRunState = null;
+    }
+    if (!activeRunState) {
+      activeSessionId = null;
+      activeSessionWorktreeId = null;
+      activeSessionWorktreeUnavailable = false;
+      selectedWorktreeId = null;
+    }
     worktreeCreatePending = false;
     const settings = await client.getSettings();
     const mcpServers = await client.listMcpServers().catch(() => []);
@@ -295,6 +301,17 @@ function activate(context, injectedVscode, dependencies = {}) {
     });
     postWorktreeState();
     await refreshSessions();
+    if (activeRunState) {
+      if (activeRunState.session_id) await loadSession(activeRunState.session_id);
+      postToPanel({ type: 'runRecovered', status: activeRunState.status });
+      postToPanel({
+        type: 'runBudgetState',
+        budgets: activeRunState.budgets,
+        initialBudgets: activeRunState.initial_budgets,
+        enabled: activeRunState.budget_adjustments_enabled,
+      });
+      for (const approval of activeRunState.approval_requests || []) postToPanel({ type: 'approval', approval });
+    }
   }
 
   async function ensureService({ reconnect = false } = {}) {
@@ -504,6 +521,8 @@ function activate(context, injectedVscode, dependencies = {}) {
         const queued = pendingPanelMessages;
         pendingPanelMessages = [];
         for (const queuedMessage of queued) void panel.webview.postMessage(queuedMessage);
+      } else if (panel) {
+        void initializeWorkspacePanel().catch((error) => reportError(vscode, error));
       }
       return;
     }

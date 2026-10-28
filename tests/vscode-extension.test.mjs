@@ -671,6 +671,7 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
   const sessionId = 'e2a26b61-d261-41e8-aa10-565c05eadb91';
   const currentBudgets = { max_turns: 1, max_output_tokens: 1000 };
   const initialBudgets = { ...currentBudgets };
+  let currentRunStatus = 'running';
   let receiveMessage;
   let nextRunEvent;
   const resumeRunEvents = new Promise((resolve) => {
@@ -697,11 +698,15 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
     listMcpServers: async () => [],
     getUsage: async () => ({}),
     listSessions: async () => [],
+    getSession: async (id) => ({ id, messages: [{ role: 'user', content: 'Continue the task' }] }),
     startRun: async () => ({ run_id: runId }),
     getRun: async () => ({
+      status: currentRunStatus,
+      session_id: sessionId,
       budgets: { ...currentBudgets },
       initial_budgets: { ...initialBudgets },
       budget_adjustments_enabled: true,
+      approval_requests: [{ approval_id: 'f42c8f33-3b89-4c3b-b21c-1be25a918509', tool: 'write_file', arguments: { path: 'a.txt' } }],
     }),
     changeRunBudgets: async (id, budgets) => {
       budgetRequests.push({ id, budgets });
@@ -718,8 +723,10 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
       };
       yield { type: 'compaction_started', data: { session_id: sessionId, trigger_reason: 'budget' } };
       yield { type: 'compaction_failed', data: { session_id: sessionId, code: 'REQUEST_TIMEOUT' } };
+      currentRunStatus = 'paused';
       yield { type: 'run_paused', data: { session_id: sessionId } };
       await resumeRunEvents;
+      currentRunStatus = 'running';
       yield { type: 'run_budgets_changed', data: { session_id: sessionId, budgets: { ...currentBudgets } } };
       yield {
         type: 'run_policy_changed',
@@ -777,6 +784,13 @@ test('VS Code forwards paused-run budget edits and reports safe-checkpoint activ
   await waitUntil(() => posted.some((message) => message.type === 'initialize'));
   receiveMessage({ type: 'send', prompt: 'Continue the task', mode: 'agent', mcpServers: null });
   await waitUntil(() => posted.some((message) => message.type === 'runBudgetState' && message.enabled));
+  await waitUntil(() => posted.some((message) => message.type === 'runPaused'));
+  receiveMessage({ type: 'webviewReady' });
+  await waitUntil(() => posted.some((message) => message.type === 'runRecovered' && message.status === 'paused'));
+  assert.ok(posted.some((message) => message.type === 'session' && message.session?.id === sessionId));
+  assert.ok(
+    posted.some((message) => message.type === 'approval' && message.approval?.approval_id === 'f42c8f33-3b89-4c3b-b21c-1be25a918509'),
+  );
   receiveMessage({ type: 'changeRunBudgets', budgets: { max_turns: 2 } });
   await waitUntil(() => posted.some((message) => message.type === 'runBudgetQueued'));
   await waitUntil(() => posted.some((message) => message.type === 'runBudgetsChanged'));

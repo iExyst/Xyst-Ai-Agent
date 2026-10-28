@@ -713,6 +713,16 @@
       $('send-direction').disabled = false;
       setBusy(true);
       if (!assistantNode) assistantNode = addMessage('assistant', '');
+    } else if (message.type === 'runRecovered') {
+      runPaused = message.status === 'paused';
+      pauseRequested = false;
+      runBudgetChangePending = false;
+      pendingDirection = null;
+      $('send-direction').disabled = false;
+      setBusy(true);
+      $('pause-run').textContent = runPaused ? 'Resume' : 'Pause';
+      renderRunBudgetControls();
+      if (!assistantNode) assistantNode = addMessage('assistant', 'Reconnected to the active run.');
     } else if (message.type === 'pauseRequested') {
       pauseRequested = true;
       $('pause-run').textContent = 'Cancel pause';
