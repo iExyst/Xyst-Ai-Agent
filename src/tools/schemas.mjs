@@ -429,6 +429,14 @@ function validateValue(schema, value, location) {
     throw new Error(`${location} must match one of the allowed values`);
   if (schema.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${location} must be an object`);
+    const propertyCount = Object.keys(value).length;
+    if (
+      (schema.minProperties !== undefined && propertyCount < schema.minProperties) ||
+      (schema.maxProperties !== undefined && propertyCount > schema.maxProperties)
+    )
+      throw new Error(
+        `${location} must contain between ${schema.minProperties || 0} and ${schema.maxProperties ?? 'unlimited'} properties`,
+      );
     for (const key of schema.required || []) if (!Object.hasOwn(value, key)) throw new Error(`${location}.${key} is required`);
     for (const [key, child] of Object.entries(value))
       if (Object.hasOwn(schema.properties || {}, key)) validateValue(schema.properties[key], child, `${location}.${key}`);
@@ -446,7 +454,9 @@ function validateValue(schema, value, location) {
     if (
       !Number.isInteger(value) ||
       (schema.minimum !== undefined && value < schema.minimum) ||
-      (schema.maximum !== undefined && value > schema.maximum)
+      (schema.maximum !== undefined && value > schema.maximum) ||
+      (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) ||
+      (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum)
     )
       throw new Error(`${location} must be a valid integer`);
   } else if (schema.type === 'number') {
@@ -454,7 +464,9 @@ function validateValue(schema, value, location) {
       typeof value !== 'number' ||
       !Number.isFinite(value) ||
       (schema.minimum !== undefined && value < schema.minimum) ||
-      (schema.maximum !== undefined && value > schema.maximum)
+      (schema.maximum !== undefined && value > schema.maximum) ||
+      (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) ||
+      (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum)
     )
       throw new Error(`${location} must be a valid number`);
   } else if (schema.type === 'boolean') {
@@ -468,8 +480,26 @@ function validateValue(schema, value, location) {
       (schema.maxItems !== undefined && value.length > schema.maxItems)
     )
       throw new Error(`${location} must contain between ${schema.minItems || 0} and ${schema.maxItems ?? 'unlimited'} items`);
+    if (schema.uniqueItems) {
+      const items = new Set();
+      for (const item of value) {
+        const serialized = canonicalJson(item);
+        if (items.has(serialized)) throw new Error(`${location} must contain unique items`);
+        items.add(serialized);
+      }
+    }
     for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`);
   } else throw new Error(`Unsupported tool schema type '${schema.type}'`);
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object')
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  return JSON.stringify(value);
 }
 
 function matchesSchemaType(type, value) {

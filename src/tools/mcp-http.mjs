@@ -1023,6 +1023,11 @@ function normalizeSchema(schema, depth = 0) {
     'maxLength',
     'minItems',
     'maxItems',
+    'minProperties',
+    'maxProperties',
+    'uniqueItems',
+    'exclusiveMinimum',
+    'exclusiveMaximum',
     'x-mcp-header',
     'enum',
     'const',
@@ -1049,27 +1054,33 @@ function normalizeSchema(schema, depth = 0) {
     out.enum = schema.enum;
   }
   if (Object.hasOwn(schema, 'const')) out.const = schema.const;
-  for (const k of ['minimum', 'maximum'])
+  for (const k of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'])
     if (schema[k] !== undefined) {
       if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[k]))
         throw mcpError('MCP numeric bound invalid', 'MCP_INVALID_SCHEMA');
       out[k] = schema[k];
     }
-  for (const k of ['minLength', 'maxLength', 'minItems', 'maxItems'])
+  for (const k of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'])
     if (schema[k] !== undefined) {
       if (
         !Number.isInteger(schema[k]) ||
         schema[k] < 0 ||
         schema[k] > 1_000_000 ||
         (k.endsWith('Length') && !types.includes('string')) ||
-        (k.endsWith('Items') && !types.includes('array'))
+        (k.endsWith('Items') && !types.includes('array')) ||
+        (k.endsWith('Properties') && !types.includes('object'))
       )
         throw mcpError('MCP size bound invalid', 'MCP_INVALID_SCHEMA');
       out[k] = schema[k];
     }
+  if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
+    throw mcpError('MCP uniqueItems invalid', 'MCP_INVALID_SCHEMA');
+  if (schema.uniqueItems !== undefined && !types.includes('array'))
+    throw mcpError('MCP uniqueItems on a non-array type', 'MCP_INVALID_SCHEMA');
+  if (schema.uniqueItems !== undefined) out.uniqueItems = schema.uniqueItems;
   if (types.includes('object')) {
     const props = schema.properties || {};
-    if (!props || typeof props !== 'object' || Array.isArray(props) || Object.keys(props).length > 64 || (depth && !schema.properties))
+    if (!props || typeof props !== 'object' || Array.isArray(props) || Object.keys(props).length > 64)
       throw mcpError('MCP object properties invalid', 'MCP_INVALID_SCHEMA');
     out.properties = Object.fromEntries(
       Object.entries(props).map(([key, value]) => {

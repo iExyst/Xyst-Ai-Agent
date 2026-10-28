@@ -842,6 +842,11 @@ function normalizeSchema(schema, depth) {
     'maxLength',
     'minItems',
     'maxItems',
+    'minProperties',
+    'maxProperties',
+    'uniqueItems',
+    'exclusiveMinimum',
+    'exclusiveMaximum',
     'enum',
     'const',
   ]);
@@ -868,17 +873,21 @@ function normalizeSchema(schema, depth) {
     result.enum = schema.enum;
   }
   if (Object.hasOwn(schema, 'const')) result.const = schema.const;
-  for (const key of ['minimum', 'maximum'])
+  for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'])
     if (schema[key] !== undefined) {
       if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[key]))
         throw mcpError('MCP tool input schema has invalid numeric bounds', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
-  for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems'])
+  for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'])
     if (schema[key] !== undefined) {
       if (!Number.isInteger(schema[key]) || schema[key] < 0 || schema[key] > 1_000_000)
         throw mcpError('MCP tool input schema has invalid size bounds', 'MCP_INVALID_SCHEMA');
-      if ((key.endsWith('Length') && !types.includes('string')) || (key.endsWith('Items') && !types.includes('array')))
+      if (
+        (key.endsWith('Length') && !types.includes('string')) ||
+        (key.endsWith('Items') && !types.includes('array')) ||
+        (key.endsWith('Properties') && !types.includes('object'))
+      )
         throw mcpError('MCP tool input schema has bounds for the wrong type', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
@@ -888,9 +897,12 @@ function normalizeSchema(schema, depth) {
     throw mcpError('MCP tool input schema has inconsistent string bounds', 'MCP_INVALID_SCHEMA');
   if (result.minItems !== undefined && result.maxItems !== undefined && result.minItems > result.maxItems)
     throw mcpError('MCP tool input schema has inconsistent array bounds', 'MCP_INVALID_SCHEMA');
+  if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
+    throw mcpError('MCP tool input schema has invalid uniqueItems', 'MCP_INVALID_SCHEMA');
+  if (schema.uniqueItems !== undefined && !types.includes('array'))
+    throw mcpError('MCP tool input schema has uniqueItems for a non-array type', 'MCP_INVALID_SCHEMA');
+  if (schema.uniqueItems !== undefined) result.uniqueItems = schema.uniqueItems;
   if (types.includes('object')) {
-    if (depth !== 0 && (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)))
-      throw mcpError('Nested MCP objects require explicit properties', 'MCP_INVALID_SCHEMA');
     if (
       schema.properties !== undefined &&
       (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties))
