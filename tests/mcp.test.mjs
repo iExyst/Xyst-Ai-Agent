@@ -63,6 +63,13 @@ const sendMethodResult = (request, result) => {
       ],
       unevaluatedProperties: false,
     };
+    result.tools[0].inputSchema.properties.unevaluated_items = {
+      allOf: [
+        { type: 'array', prefixItems: [{ const: 'head' }] },
+        { type: 'array', contains: { const: 'keep' } },
+      ],
+      unevaluatedItems: false,
+    };
     result.tools[0].inputSchema.$defs = { ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 } };
     result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
     result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
@@ -346,6 +353,14 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
         text: 'hello',
         unevaluated_object: { first: 'ok', second: 2, third: true, fifth: false, extra: true },
       }),
+    /not allowed/,
+  );
+  assert.deepEqual(validateArguments(definition.parameters, { text: 'hello', unevaluated_items: ['head', 'keep'] }).unevaluated_items, [
+    'head',
+    'keep',
+  ]);
+  assert.throws(
+    () => validateArguments(definition.parameters, { text: 'hello', unevaluated_items: ['head', 'keep', 'extra'] }),
     /not allowed/,
   );
   assert.deepEqual(validateArguments(definition.parameters, { text: 'hello', object_choice: { mode: 'fast' } }), {
@@ -1053,6 +1068,13 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
         ],
         unevaluatedProperties: false,
       };
+      result.tools[0].inputSchema.properties.unevaluated_items = {
+        allOf: [
+          { type: 'array', prefixItems: [{ const: 'head' }] },
+          { type: 'array', contains: { const: 'keep' } },
+        ],
+        unevaluatedItems: false,
+      };
       result.tools[0].inputSchema.$defs = {
         ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 },
         Region: { type: 'string', 'x-mcp-header': 'Region' },
@@ -1160,6 +1182,15 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   );
   assert.throws(
     () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', pattern_map: { OTHER: 1 } }),
+    /not allowed/,
+  );
+  assert.deepEqual(
+    validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', unevaluated_items: ['head', 'keep'] })
+      .unevaluated_items,
+    ['head', 'keep'],
+  );
+  assert.throws(
+    () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', unevaluated_items: ['head', 'keep', 'extra'] }),
     /not allowed/,
   );
   assert.deepEqual(

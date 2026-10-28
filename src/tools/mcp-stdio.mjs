@@ -1003,6 +1003,7 @@ function resolveLocalSchemaReference(rootSchema, reference) {
         'unevaluatedProperties',
         'propertyNames',
         'items',
+        'unevaluatedItems',
         'contains',
         'not',
         'if',
@@ -1066,6 +1067,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     'additionalProperties',
     'unevaluatedProperties',
     'items',
+    'unevaluatedItems',
     'prefixItems',
     'contains',
     'minContains',
@@ -1307,9 +1309,11 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   if (
     types.includes('array') ||
     schema.items !== undefined ||
-    (!hasType && ['minItems', 'maxItems', 'uniqueItems', 'contains'].some((key) => schema[key] !== undefined))
+    (!hasType && ['minItems', 'maxItems', 'uniqueItems', 'contains', 'unevaluatedItems'].some((key) => schema[key] !== undefined))
   ) {
     if (schema.items !== undefined) result.items = normalizeSchema(schema.items, depth + 1, budget, rootSchema, refStack);
+    if (schema.unevaluatedItems !== undefined)
+      result.unevaluatedItems = normalizeSchema(schema.unevaluatedItems, depth + 1, budget, rootSchema, refStack);
   }
   return result;
 }

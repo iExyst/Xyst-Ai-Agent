@@ -1245,6 +1245,7 @@ function resolveLocalSchemaReference(rootSchema, reference) {
         'unevaluatedProperties',
         'propertyNames',
         'items',
+        'unevaluatedItems',
         'contains',
         'not',
         'if',
@@ -1308,6 +1309,7 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
     'additionalProperties',
     'unevaluatedProperties',
     'items',
+    'unevaluatedItems',
     'prefixItems',
     'contains',
     'minContains',
@@ -1534,9 +1536,11 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
   if (
     types.includes('array') ||
     schema.items !== undefined ||
-    (!hasType && ['minItems', 'maxItems', 'uniqueItems', 'contains'].some((k) => schema[k] !== undefined))
+    (!hasType && ['minItems', 'maxItems', 'uniqueItems', 'contains', 'unevaluatedItems'].some((k) => schema[k] !== undefined))
   ) {
     if (schema.items !== undefined) out.items = normalizeSchema(schema.items, depth + 1, budget, rootSchema, refStack);
+    if (schema.unevaluatedItems !== undefined)
+      out.unevaluatedItems = normalizeSchema(schema.unevaluatedItems, depth + 1, budget, rootSchema, refStack);
   }
   if (out.minimum > out.maximum || out.minLength > out.maxLength || out.minItems > out.maxItems || out.minContains > out.maxContains)
     throw mcpError('MCP schema bounds are inconsistent', 'MCP_INVALID_SCHEMA');
