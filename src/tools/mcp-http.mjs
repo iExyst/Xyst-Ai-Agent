@@ -928,8 +928,8 @@ export class LegacySseMcpSession extends StreamableHttpMcpSession {
           { timeoutMs: Math.min(timeoutMs, 1_000), protocolVersion, notification: true },
         ).catch(() => {});
       if (signal?.aborted) throw mcpError(`MCP call '${method}' was cancelled`, 'MCP_CANCELLED');
-      if (controller.signal.aborted) throw mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT');
       if (this.closed) throw mcpError(`MCP server '${this.name}' is closed`, 'MCP_SERVER_CLOSED');
+      if (controller.signal.aborted) throw mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT');
       throw mcpError(`MCP transport failed during ${method}`, 'MCP_TRANSPORT_ERROR');
     } finally {
       clearTimeout(timer);
