@@ -445,7 +445,7 @@ export class SubagentTaskStore {
           } catch {
             currentRecord = null;
           }
-          if (!currentRecord || currentRecord.lock_token === lockToken) await fs.rm(this.mutationLock).catch(() => {});
+          if (currentRecord?.lock_token === lockToken) await fs.rm(this.mutationLock).catch(() => {});
         }
       }
     }

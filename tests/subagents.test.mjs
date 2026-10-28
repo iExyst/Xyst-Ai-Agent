@@ -99,6 +99,32 @@ test('subagent slot acquisition failure preserves a replacement lock file', asyn
   assert.equal(JSON.parse(await fs.readFile(lockPath, 'utf8')).lock_token, 'replacement-slot');
 });
 
+test('subagent mutation cleanup preserves a same-identity lock with an unknown record', async (t) => {
+  const root = await createTempDirectory('xyst-subagent-mutation-lock-unknown-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SubagentTaskStore(root);
+  const originalOpen = fs.open;
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] !== store.mutationLock || args[1] !== 'wx') return handle;
+    return {
+      writeFile: (...writeArgs) => handle.writeFile(...writeArgs),
+      sync: async () => {
+        await handle.sync();
+        await fs.writeFile(store.mutationLock, '{}');
+      },
+      stat: () => handle.stat(),
+      close: () => handle.close(),
+    };
+  };
+  try {
+    await store.create({ parentSessionId: randomUUID(), task: 'Preserve a lock whose owner is uncertain' });
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.equal(await fs.readFile(store.mutationLock, 'utf8'), '{}');
+});
+
 test('subagent task history restores one validated replacement backup instead of reporting an empty history', async (t) => {
   const root = await createTempDirectory('xyst-subagent-backup-recovery-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
