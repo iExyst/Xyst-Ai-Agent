@@ -861,7 +861,7 @@ test('MCP current protocol does not resume SSE responses', async (t) => {
         return Response.json({
           jsonrpc: '2.0',
           id: request.id,
-          result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+          result: { resultType: 'complete', supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
         });
       return new Response('id: cursor-1\n\n', { headers: { 'content-type': 'text/event-stream' } });
     },

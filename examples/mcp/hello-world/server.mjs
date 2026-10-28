@@ -42,6 +42,7 @@ input.on('line', (line) => {
   switch (request.method) {
     case 'server/discover':
       respond(request.id, {
+        resultType: 'complete',
         supportedVersions: [PROTOCOL_VERSION],
         capabilities: { tools: {} },
         _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'xyst-hello-world', version: SERVER_VERSION } },
@@ -49,6 +50,7 @@ input.on('line', (line) => {
       break;
     case 'tools/list':
       respond(request.id, {
+        resultType: 'complete',
         tools: [
           {
             name: 'echo',
