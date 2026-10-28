@@ -2707,3 +2707,6 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Added a real child-process regression proving a second semantic-index writer honors an active lock, stops promptly on cancellation, does not start embedding, and preserves the first writer's lock record.
 - The focused Windows subprocess check passes in under one second; Biome and whitespace checks pass. Exact-source Windows/Linux CI is pending.
+
+- MCP arrays now support draft-07 tuple `items` and `additionalItems` on stdio and Streamable HTTP. Tuple length remains capped at 64; omitted `additionalItems` is normalized to an allowing schema, preserving legacy semantics alongside the unevaluated-item validator.
+- Focused transport checks pass 2/2 and changed-file Biome/whitespace checks pass. Exact-source Windows/Linux confirmation is pending.

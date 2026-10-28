@@ -1003,6 +1003,7 @@ function resolveLocalSchemaReference(rootSchema, reference) {
         'unevaluatedProperties',
         'propertyNames',
         'items',
+        'additionalItems',
         'unevaluatedItems',
         'contains',
         'not',
@@ -1014,6 +1015,7 @@ function resolveLocalSchemaReference(rootSchema, reference) {
         if (schema[keyword] !== undefined) pushSchema(schema[keyword]);
       for (const keyword of ['prefixItems', 'allOf', 'anyOf', 'oneOf'])
         if (Array.isArray(schema[keyword])) for (const child of schema[keyword]) pushSchema(child);
+      if (Array.isArray(schema.items)) for (const child of schema.items) pushSchema(child);
     }
     if (!target) throw mcpError('MCP tool input schema $ref target was not found', 'MCP_INVALID_SCHEMA');
     return target;
@@ -1069,6 +1071,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     'additionalProperties',
     'unevaluatedProperties',
     'items',
+    'additionalItems',
     'unevaluatedItems',
     'prefixItems',
     'contains',
@@ -1208,7 +1211,11 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     result.pattern = schema.pattern;
   }
   if (schema.contains !== undefined) result.contains = normalizeSchema(schema.contains, depth + 1, budget, rootSchema, refStack);
-  if (schema.prefixItems !== undefined) {
+  if (Array.isArray(schema.items)) {
+    if (schema.prefixItems !== undefined || schema.items.length > 64)
+      throw mcpError('MCP tuple items invalid or incompatible with prefixItems', 'MCP_INVALID_SCHEMA');
+    result.prefixItems = schema.items.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack));
+  } else if (schema.prefixItems !== undefined) {
     if (!Array.isArray(schema.prefixItems) || schema.prefixItems.length > 64)
       throw mcpError('MCP tool input schema has invalid prefixItems', 'MCP_INVALID_SCHEMA');
     result.prefixItems = schema.prefixItems.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack));
@@ -1357,9 +1364,14 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   if (
     types.includes('array') ||
     schema.items !== undefined ||
+    schema.additionalItems !== undefined ||
     (!hasType && ['minItems', 'maxItems', 'uniqueItems', 'contains', 'unevaluatedItems'].some((key) => schema[key] !== undefined))
   ) {
-    if (schema.items !== undefined) result.items = normalizeSchema(schema.items, depth + 1, budget, rootSchema, refStack);
+    if (Array.isArray(schema.items)) {
+      result.items =
+        schema.additionalItems === undefined ? true : normalizeSchema(schema.additionalItems, depth + 1, budget, rootSchema, refStack);
+    } else if (schema.items !== undefined) result.items = normalizeSchema(schema.items, depth + 1, budget, rootSchema, refStack);
+    else if (schema.additionalItems !== undefined) normalizeSchema(schema.additionalItems, depth + 1, budget, rootSchema, refStack);
     if (schema.unevaluatedItems !== undefined)
       result.unevaluatedItems = normalizeSchema(schema.unevaluatedItems, depth + 1, budget, rootSchema, refStack);
   }
