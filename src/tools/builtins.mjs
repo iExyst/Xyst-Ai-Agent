@@ -286,7 +286,8 @@ async function listDir(root, args, config) {
   );
   while (pending.length && entries.length < maxEntries) {
     const current = pending.shift();
-    for (const item of await fs.readdir(current, { withFileTypes: true })) {
+    const directory = await fs.opendir(current);
+    for await (const item of directory) {
       if (!isUnrestricted(config) && isIgnoredName(item.name)) continue;
       const absolute = path.join(current, item.name);
       const relative = displayToolPath(root, absolute);
