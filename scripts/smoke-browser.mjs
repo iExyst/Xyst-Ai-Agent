@@ -592,52 +592,19 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
         const workspaceHeadingProbe = document.createElement('strong');
         workspaceCopyProbe.append(workspaceHeadingProbe);
         document.body.append(workspaceCopyProbe);
-        const surfaceProbe = document.createElement('div');
-        surfaceProbe.style.backgroundColor = 'var(--surface)';
-        document.body.append(surfaceProbe);
-        const raisedProbe = document.createElement('div');
-        raisedProbe.style.backgroundColor = 'var(--surface-raised)';
-        document.body.append(raisedProbe);
-        const subtleTextProbe = document.createElement('div');
-        subtleTextProbe.style.color = 'var(--text-subtle)';
-        document.body.append(subtleTextProbe);
-        const textProbe = document.createElement('div');
-        textProbe.style.color = 'var(--text)';
-        document.body.append(textProbe);
-        const codeSurfaceProbe = document.createElement('div');
-        codeSurfaceProbe.style.backgroundColor = 'var(--surface-code)';
-        document.body.append(codeSurfaceProbe);
-        const warningSurfaceProbe = document.createElement('div');
-        warningSurfaceProbe.style.backgroundColor = 'var(--warning-surface)';
-        document.body.append(warningSurfaceProbe);
-        const strongTextProbe = document.createElement('div');
-        strongTextProbe.style.color = 'var(--text-strong)';
-        document.body.append(strongTextProbe);
-        const dangerTextProbe = document.createElement('div');
-        dangerTextProbe.style.color = 'var(--danger-strong)';
-        document.body.append(dangerTextProbe);
-        const mintTextProbe = document.createElement('div');
-        mintTextProbe.style.color = 'var(--brand-mint)';
-        document.body.append(mintTextProbe);
-        const mutedTextProbe = document.createElement('div');
-        mutedTextProbe.style.color = 'var(--muted)';
-        document.body.append(mutedTextProbe);
         const inspect = async (theme) => {
           Object.values(probes).forEach((element) => { element.style.transition = 'none'; });
           root.dataset.theme = theme;
           await new Promise((resolve) => requestAnimationFrame(resolve));
           void document.body.offsetWidth;
           const styles = getComputedStyle(root);
-          surfaceProbe.style.backgroundColor = styles.getPropertyValue('--surface').trim();
-          codeSurfaceProbe.style.backgroundColor = styles.getPropertyValue('--surface-code').trim();
-          raisedProbe.style.backgroundColor = styles.getPropertyValue('--surface-raised').trim();
-          textProbe.style.color = styles.getPropertyValue('--text').trim();
-          subtleTextProbe.style.color = styles.getPropertyValue('--text-subtle').trim();
-          strongTextProbe.style.color = styles.getPropertyValue('--text-strong').trim();
-          dangerTextProbe.style.color = styles.getPropertyValue('--danger-strong').trim();
-          mintTextProbe.style.color = styles.getPropertyValue('--brand-mint').trim();
-          mutedTextProbe.style.color = styles.getPropertyValue('--muted').trim();
-          warningSurfaceProbe.style.backgroundColor = styles.getPropertyValue('--warning-surface').trim();
+          const tokenRgb = (name) => {
+            const value = styles.getPropertyValue(name).trim();
+            const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value);
+            if (!match) throw new Error('Theme token is not a supported hex color: ' + name);
+            const hex = match[1].length === 3 ? [...match[1]].map((digit) => digit + digit).join('') : match[1];
+            return 'rgb(' + hex.match(/../g).map((channel) => Number.parseInt(channel, 16)).join(', ') + ')';
+          };
           return {
             canvas: styles.getPropertyValue('--canvas').trim(),
             surface: styles.getPropertyValue('--surface').trim(),
@@ -670,16 +637,16 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
               assistantMeta: getComputedStyle(assistantMeta).color,
             },
             reference: {
-              surface: getComputedStyle(surfaceProbe).backgroundColor,
-              codeSurface: getComputedStyle(codeSurfaceProbe).backgroundColor,
-              raised: getComputedStyle(raisedProbe).backgroundColor,
-              text: getComputedStyle(textProbe).color,
-              subtleText: getComputedStyle(subtleTextProbe).color,
-              strongText: getComputedStyle(strongTextProbe).color,
-              danger: getComputedStyle(dangerTextProbe).color,
-              mint: getComputedStyle(mintTextProbe).color,
-              mutedText: getComputedStyle(mutedTextProbe).color,
-              warningSurface: getComputedStyle(warningSurfaceProbe).backgroundColor,
+              surface: tokenRgb('--surface'),
+              codeSurface: tokenRgb('--surface-code'),
+              raised: tokenRgb('--surface-raised'),
+              text: tokenRgb('--text'),
+              subtleText: tokenRgb('--text-subtle'),
+              strongText: tokenRgb('--text-strong'),
+              danger: tokenRgb('--danger-strong'),
+              mint: tokenRgb('--brand-mint'),
+              mutedText: tokenRgb('--muted'),
+              warningSurface: tokenRgb('--warning-surface'),
             },
           };
         };
@@ -689,16 +656,6 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
         Object.values(probes).forEach((element) => element.remove());
         assistantMessage.remove();
         workspaceCopyProbe.remove();
-        codeSurfaceProbe.remove();
-        warningSurfaceProbe.remove();
-        strongTextProbe.remove();
-        dangerTextProbe.remove();
-        mintTextProbe.remove();
-        mutedTextProbe.remove();
-        surfaceProbe.remove();
-        raisedProbe.remove();
-        subtleTextProbe.remove();
-        textProbe.remove();
         return {
           dark,
           light,
