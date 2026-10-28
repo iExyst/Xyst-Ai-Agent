@@ -124,6 +124,7 @@ test('MCP list results validate tool, resource, template, and prompt definitions
     ['resources/list', { ...cache, resources: [{ name: 'missing uri' }] }],
     ['resources/list', { ...cache, resources: [{ name: 'bad uri', uri: '/relative' }] }],
     ['resources/templates/list', { ...cache, resourceTemplates: [{ name: 'missing template' }] }],
+    ['resources/templates/list', { ...cache, resourceTemplates: [{ name: 'invalid template', uriTemplate: 'file:///docs/{/name' }] }],
     ['prompts/list', { ...cache, prompts: [{ name: 'bad', arguments: [{ name: 'x', required: 'yes' }] }] }],
   ])
     assert.throws(() => validateMcpResultType(result, { ...options, method }), { code: 'MCP_INVALID_RESPONSE' });

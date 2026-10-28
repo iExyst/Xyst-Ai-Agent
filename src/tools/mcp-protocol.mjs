@@ -1,3 +1,5 @@
+import uriTemplates from './vendor/uri-templates.cjs';
+
 const MODERN_PROTOCOL_VERSION = '2026-07-28';
 const CACHEABLE_METHODS = new Set([
   'server/discover',
@@ -240,13 +242,29 @@ function isResourceTemplate(value, modern) {
     isRecord(value) &&
     isOptionalMeta(value._meta, modern) &&
     typeof value.name === 'string' &&
-    typeof value.uriTemplate === 'string' &&
+    isUriTemplate(value.uriTemplate) &&
     isOptionalString(value.title) &&
     isOptionalString(value.description) &&
     isOptionalString(value.mimeType) &&
     isOptionalAnnotations(value.annotations) &&
     isOptionalIcons(value.icons)
   );
+}
+
+function isUriTemplate(value) {
+  if (typeof value !== 'string') return false;
+  let openExpressions = 0;
+  for (const character of value) {
+    if (character === '{') openExpressions += 1;
+    if (character === '}' && --openExpressions < 0) return false;
+  }
+  if (openExpressions !== 0) return false;
+  try {
+    uriTemplates(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isPromptDefinition(value, modern) {

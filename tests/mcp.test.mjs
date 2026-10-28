@@ -238,7 +238,7 @@ test('MCP manager isolates a server that advertises unsupported resource templat
   });
   await manager.initialize();
   assert.equal(manager.serverCatalog[0].connection_state, 'error');
-  assert.equal(manager.serverCatalog[0].error_code, 'MCP_INVALID_RESOURCE_TEMPLATE');
+  assert.equal(manager.serverCatalog[0].error_code, 'MCP_INVALID_RESPONSE');
   assert.deepEqual(manager.definitions, []);
 });
 
