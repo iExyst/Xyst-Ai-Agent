@@ -105,6 +105,7 @@ Start hosted CI and independent security review in parallel as soon as the repos
 - 2026-10-28: semantic-index persistence reads now cap at 32 MiB plus one byte, reject symlink opens where supported, and revalidate the opened file identity after reading. The injected-growth regression passes; broader retrieval overflow soak remains open.
 - 2026-10-28: semantic-index lock release now checks its unique record and, when available, the original file identity before removing the lock path. An injected replacement-writer regression passes; crash recovery and cross-process contention coverage remain open.
 - 2026-10-28: semantic indexing now caps directory traversal at 50,000 directories independently of the file limit and reports when paths were omitted. A bounded synthetic-workspace regression passes; native-ext4 overflow soak remains open.
+- 2026-10-28: semantic indexing now enumerates directory entries incrementally, caps a scan at 50,000 entries, and revalidates directory identity/version after enumeration. Exact-source semantic-index suite passes 18/18, including the outside-reparse-point race; native-ext4 overflow soak remains open.
 - Add only high-value fixes found by security review, acceptance runs, or reproducible user failures; avoid expanding scope with speculative features.
 
 **Exit:** the documented common workflows pass on each supported surface and user-facing setup/troubleshooting docs match the shipped behavior.

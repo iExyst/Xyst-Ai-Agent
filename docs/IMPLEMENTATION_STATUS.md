@@ -2596,3 +2596,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Bounded semantic retrieval directory traversal — 2026-10-28
 
 - Semantic indexing now limits traversal to 50,000 directories independently of file count, supports a smaller validated per-index cap, and marks scans truncated when paths are omitted. The synthetic directory-overflow regression passes; larger native-ext4 overflow soak remains open.
+
+## Streaming semantic-index directory scans — 2026-10-28
+
+- Workspace traversal now uses incremental directory enumeration and caps a scan at 50,000 entries, avoiding an unbounded eaddir array for a single large directory. It validates directory identity/version before and after enumeration and returns a truncated result when the cap is reached. The full semantic-index suite passes 18/18, including outside-reparse-point race coverage; native-ext4 overflow soak remains open.

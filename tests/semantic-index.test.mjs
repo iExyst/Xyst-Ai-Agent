@@ -88,18 +88,28 @@ test('semantic scan caps directory traversal and reports omitted workspace paths
   const root = await createTempDirectory('xyst-semantic-directory-cap-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const realRoot = await fs.realpath(root);
+  const rootStat = await fs.lstat(root, { bigint: true });
   const directoryNames = Array.from({ length: 110 }, (_, index) => `empty-${String(index).padStart(3, '0')}`);
   let directoriesRead = 0;
   const scanFilesystem = new Proxy(fs, {
     get(target, property) {
+      if (property === 'lstat')
+        return async (filePath, options) => (path.resolve(filePath) === path.resolve(root) ? target.lstat(filePath, options) : rootStat);
       if (property === 'realpath')
         return async (filePath) => (path.resolve(filePath) === path.resolve(root) ? realRoot : path.resolve(filePath));
-      if (property === 'readdir')
+      if (property === 'opendir')
         return async (directory) => {
-          if (path.resolve(directory) === path.resolve(root))
-            return directoryNames.map((name) => ({ name, isDirectory: () => true, isFile: () => false }));
-          directoriesRead += 1;
-          return [];
+          const entries =
+            path.resolve(directory) === path.resolve(root)
+              ? directoryNames.map((name) => ({ name, isDirectory: () => true, isFile: () => false }))
+              : [];
+          if (path.resolve(directory) !== path.resolve(root)) directoriesRead += 1;
+          return {
+            async *[Symbol.asyncIterator]() {
+              yield* entries;
+            },
+            async close() {},
+          };
         };
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
@@ -115,6 +125,41 @@ test('semantic scan caps directory traversal and reports omitted workspace paths
   assert.equal(result.truncated, true);
   assert.ok(directoriesRead < 110);
   assert.ok(directoriesRead >= 90);
+});
+
+test('semantic scan stops streaming directory entries at the configured workspace cap', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-entry-cap-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const rootStat = await fs.lstat(root, { bigint: true });
+  let entriesYielded = 0;
+  const scanFilesystem = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'opendir')
+        return async () => ({
+          async *[Symbol.asyncIterator]() {
+            for (let index = 0; index < 100; index += 1) {
+              entriesYielded += 1;
+              yield { name: `dir-${index}`, isDirectory: () => true, isFile: () => false };
+            }
+          },
+          async close() {},
+        });
+      if (property === 'realpath') return async () => root;
+      if (property === 'lstat') return async () => rootStat;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const index = new SemanticWorkspaceIndex(root, {
+    model: 'mock',
+    maxDirectories: 1,
+    maxEntries: 20,
+    scanFilesystem,
+    embed: async (texts) => texts.map(() => [1, 0]),
+  });
+  const result = await index.search('anything');
+  assert.equal(result.truncated, true);
+  assert.equal(entriesYielded, 21, 'the scanner reads one entry past the cap to detect truncation');
 });
 
 test('semantic index reads stop at the size limit plus one byte when it grows during reading', async (t) => {
@@ -429,15 +474,15 @@ test('semantic scanner rejects a workspace directory swapped to an outside repar
   let swapped = false;
   const scanFilesystem = new Proxy(fs, {
     get(target, property) {
-      if (property === 'readdir')
-        return async (directory, options) => {
-          const entries = await target.readdir(directory, options);
+      if (property === 'opendir')
+        return async (directory) => {
+          const opened = await target.opendir(directory);
           if (!swapped && path.resolve(directory) === path.resolve(root)) {
             swapped = true;
             await target.rename(workspaceDirectory, parkedDirectory);
             await target.rename(replacementLink, workspaceDirectory);
           }
-          return entries;
+          return opened;
         };
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;

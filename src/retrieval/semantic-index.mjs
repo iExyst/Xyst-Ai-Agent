@@ -14,6 +14,7 @@ const MAX_CHUNKS = 5_000;
 const MAX_INDEX_BYTES = 32 * 1024 * 1024;
 const MAX_SCAN_BYTES = 64 * 1024 * 1024;
 const MAX_SCAN_DIRECTORIES = 50_000;
+const MAX_SCAN_ENTRIES = 50_000;
 const CACHE_FULL_REFRESH_MS = 30_000;
 const CHUNK_CHARS = 1_800;
 const OVERLAP_CHARS = 240;
@@ -31,6 +32,7 @@ export class SemanticWorkspaceIndex {
       maxFiles = 3_000,
       maxFileBytes = 500_000,
       maxDirectories = MAX_SCAN_DIRECTORIES,
+      maxEntries = MAX_SCAN_ENTRIES,
       scanFilesystem = fs,
       watchWorkspace = false,
       watchFilesystem = watchWorkspace && scanFilesystem === fs ? watchFs : null,
@@ -40,6 +42,8 @@ export class SemanticWorkspaceIndex {
       throw new TypeError('Semantic index needs an embedding callback and model name');
     if (!Number.isInteger(maxDirectories) || maxDirectories < 1 || maxDirectories > MAX_SCAN_DIRECTORIES)
       throw new TypeError(`maxDirectories must be between 1 and ${MAX_SCAN_DIRECTORIES}`);
+    if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > MAX_SCAN_ENTRIES)
+      throw new TypeError(`maxEntries must be between 1 and ${MAX_SCAN_ENTRIES}`);
     this.root = workspaceRoot;
     this.embed = embed;
     this.model = model;
@@ -55,6 +59,7 @@ export class SemanticWorkspaceIndex {
     this.maxFiles = Math.min(10_000, maxFiles);
     this.maxFileBytes = Math.min(1_000_000, maxFileBytes);
     this.maxDirectories = maxDirectories;
+    this.maxEntries = maxEntries;
     this.directory = path.join(workspaceRoot, '.agent', 'retrieval');
     this.file = path.join(this.directory, 'semantic-index.json');
     this.excludeFile = path.join(this.directory, 'excludes.json');
@@ -96,6 +101,7 @@ export class SemanticWorkspaceIndex {
         maxFiles: this.maxFiles,
         maxFileBytes: this.maxFileBytes,
         maxDirectories: this.maxDirectories,
+        maxEntries: this.maxEntries,
         maxBytes: scanMaxBytes,
         signal,
       };
@@ -547,7 +553,7 @@ export function cosineSimilarity(left, right) {
 
 async function readWorkspaceDocuments(
   root,
-  { filesystem = fs, maxFiles, maxFileBytes, maxDirectories, maxBytes = MAX_SCAN_BYTES, signal, documentCache = null },
+  { filesystem = fs, maxFiles, maxFileBytes, maxDirectories, maxEntries, maxBytes = MAX_SCAN_BYTES, signal, documentCache = null },
 ) {
   const ignored = await readIgnoreRules(root);
   const realRoot = await filesystem.realpath(root);
@@ -556,20 +562,43 @@ async function readWorkspaceDocuments(
   const nextCache = new Map();
   let scanned = 0;
   let directoriesScanned = 0;
+  let scannedEntries = 0;
   let bytesRead = 0;
   let truncated = false;
   let stopScan = false;
-  while (pending.length && scanned < maxFiles && directoriesScanned < maxDirectories) {
+  while (pending.length && scanned < maxFiles && directoriesScanned < maxDirectories && !stopScan) {
     if (signal?.aborted) throw signal.reason || Object.assign(new Error('Semantic search cancelled'), { code: 'CANCELLED' });
     const directory = pending.shift();
     directoriesScanned += 1;
     let entries;
     try {
+      const directoryBefore = await filesystem.lstat(directory, { bigint: true });
       const realDirectory = await filesystem.realpath(directory);
-      if (!isPathInside(realRoot, realDirectory)) continue;
-      entries = await filesystem.readdir(directory, { withFileTypes: true });
+      if (!directoryBefore.isDirectory() || directoryBefore.isSymbolicLink() || !isPathInside(realRoot, realDirectory)) continue;
+      const openedDirectory = await filesystem.opendir(directory);
+      entries = [];
+      try {
+        for await (const entry of openedDirectory) {
+          if (scannedEntries >= maxEntries) {
+            truncated = true;
+            stopScan = true;
+            break;
+          }
+          scannedEntries += 1;
+          entries.push(entry);
+        }
+      } finally {
+        await openedDirectory.close().catch(() => {});
+      }
+      const directoryAfter = await filesystem.lstat(directory, { bigint: true });
       const realDirectoryAfterRead = await filesystem.realpath(directory);
-      if (!isPathInside(realRoot, realDirectoryAfterRead)) continue;
+      if (
+        !sameFileSnapshot(directoryBefore, directoryAfter) ||
+        !directoryAfter.isDirectory() ||
+        directoryAfter.isSymbolicLink() ||
+        !isPathInside(realRoot, realDirectoryAfterRead)
+      )
+        continue;
     } catch {
       continue;
     }
