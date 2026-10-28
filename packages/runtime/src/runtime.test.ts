@@ -1148,6 +1148,36 @@ test("completion feedback identifies the exact successful read index omitted fro
   } finally { store.close(); }
 }));
 
+test("command wording after an output filename does not become an exact file-content requirement", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "command-wording-content-inference.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model"); let turn = 0;
+  const source = "export function isWithinRange(value, min, max) { return Number.isFinite(value) && Number.isFinite(min) && Number.isFinite(max) && min <= max && value >= min && value <= max; }\n";
+  const testSource = "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { isWithinRange } from './isWithinRange.mjs';\ntest('inclusive finite range', () => { assert.equal(isWithinRange(5, 1, 10), true); assert.equal(isWithinRange(1, 1, 10), true); assert.equal(isWithinRange(10, 1, 10), true); assert.equal(isWithinRange(NaN, 1, 10), false); });\n";
+  const response = (id: string, name: string, args: Record<string, unknown>) => ({ choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }] });
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return response("range-source-create", "file_create", { path: "isWithinRange.mjs", content: source });
+      if (turn === 2) return response("range-test-create", "file_create", { path: "isWithinRange.test.mjs", content: testSource });
+      if (turn === 3) return response("range-test-run", "run_process", { executable: process.execPath, args: ["-e", "process.stdout.write('COMMAND_OK')"], cwd: root });
+      if (turn === 4) return response("range-source-read", "file_read", { path: "isWithinRange.mjs" });
+      if (turn === 5) return response("range-test-read", "file_read", { path: "isWithinRange.test.mjs" });
+      return response("range-evidence-complete", "task_complete", { evidence_tool_call_indexes: [5, 3, 2, 1] });
+    }
+  };
+  try {
+    const objective = "Implement JavaScript ESM function isWithinRange(value, min, max) in isWithinRange.mjs. Add node:test cases in isWithinRange.test.mjs. Save both files at the current directory root. Run exactly node --test isWithinRange.test.mjs, then read both final files.";
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never }).run(objective, { workspace: root, maxTurns: 6, expectedOutputPaths: ["isWithinRange.mjs", "isWithinRange.test.mjs"] });
+    assert.equal(result.status, "completed", JSON.stringify(store.db.prepare("SELECT name,status,input_json,output_json FROM tool_calls WHERE session_id=? ORDER BY rowid").all(result.sessionId)));
+    assert.equal(turn, 6);
+    const runs = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='run_process' AND status='completed'").all(result.sessionId) as Array<{ output_json: string }>;
+    assert.equal(JSON.parse(runs[0]!.output_json).code, 0);
+    const completion = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='completed'").get(result.sessionId) as { output_json: string };
+    assert.equal(JSON.parse(completion.output_json).verified, true);
+  } finally { store.close(); }
+}));
+
 test("explicit live API requests require evidence from the exact requested URL", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "requested-live-api-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

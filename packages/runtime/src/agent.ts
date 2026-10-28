@@ -111,6 +111,8 @@ function inferExactFileContentRequirements(criteria: string[], outputPaths: stri
       const matchIndex = criterion.toLowerCase().lastIndexOf(fileName.toLowerCase());
       if (matchIndex < 0) continue;
       const tail = criterion.slice(matchIndex + fileName.length);
+      const contentDirective = tail.match(/\b(?:exactly|single\s+line)\b/i);
+      if (!contentDirective || /[.!?\r\n]/.test(tail.slice(0, contentDirective.index))) continue;
       const boundary = String.raw`(?=,?\s+(?:then\b|and\s+(?:then\s+)?(?:use|call|read|verify|confirm|check)\b)|[.!?]|$)`;
       const quotedExact = tail.match(new RegExp(String.raw`\b(?:exactly|single\s+line)\s+(["'\x60])([\s\S]*?)\1`, "i"));
       const singleLine = tail.match(new RegExp(String.raw`\bsingle\s+line\s+(?:containing\s+)?(.+?)${boundary}`, "i"));
