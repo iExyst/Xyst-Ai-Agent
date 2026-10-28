@@ -561,7 +561,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       `(async () => {
         const root = document.documentElement;
         const originalTheme = root.dataset.theme || 'system';
-        const probes = Object.fromEntries(Object.entries({
+        const probeDefinitions = {
           settings: ['div', 'settings-dialog'],
           dataCard: ['div', 'data-card'],
           composer: ['div', 'composer'],
@@ -575,26 +575,27 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
           statusBanner: ['div', 'status-banner'],
           semanticToggle: ['label', 'semantic-toggle'],
           runError: ['span', 'run-error'],
-        }).map(([name, [tag, className]]) => {
-          const element = document.createElement(tag);
-          element.className = className;
-          document.body.append(element);
-          return [name, element];
-        }));
-        const assistantMessage = document.createElement('article');
-        assistantMessage.className = 'message assistant';
-        const assistantMeta = document.createElement('div');
-        assistantMeta.className = 'message-meta';
-        assistantMessage.append(assistantMeta);
-        document.body.append(assistantMessage);
-        const workspaceCopyProbe = document.createElement('div');
-        workspaceCopyProbe.className = 'workspace-copy';
-        const workspaceHeadingProbe = document.createElement('strong');
-        workspaceCopyProbe.append(workspaceHeadingProbe);
-        document.body.append(workspaceCopyProbe);
+        };
         const inspect = async (theme) => {
-          Object.values(probes).forEach((element) => { element.style.transition = 'none'; });
           root.dataset.theme = theme;
+          const probes = Object.fromEntries(Object.entries(probeDefinitions).map(([name, [tag, className]]) => {
+            const element = document.createElement(tag);
+            element.className = className;
+            document.body.append(element);
+            return [name, element];
+          }));
+          const assistantMessage = document.createElement('article');
+          assistantMessage.className = 'message assistant';
+          const assistantMeta = document.createElement('div');
+          assistantMeta.className = 'message-meta';
+          assistantMessage.append(assistantMeta);
+          document.body.append(assistantMessage);
+          const workspaceCopyProbe = document.createElement('div');
+          workspaceCopyProbe.className = 'workspace-copy';
+          const workspaceHeadingProbe = document.createElement('strong');
+          workspaceCopyProbe.append(workspaceHeadingProbe);
+          document.body.append(workspaceCopyProbe);
+          try {
           await new Promise((resolve) => requestAnimationFrame(resolve));
           void document.body.offsetWidth;
           const styles = getComputedStyle(root);
@@ -649,13 +650,15 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
               warningSurface: tokenRgb('--warning-surface'),
             },
           };
+          } finally {
+            Object.values(probes).forEach((element) => element.remove());
+            assistantMessage.remove();
+            workspaceCopyProbe.remove();
+          }
         };
         const dark = await inspect('dark');
         const light = await inspect('light');
         root.dataset.theme = originalTheme;
-        Object.values(probes).forEach((element) => element.remove());
-        assistantMessage.remove();
-        workspaceCopyProbe.remove();
         return {
           dark,
           light,
