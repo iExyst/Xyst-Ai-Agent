@@ -1,4 +1,15 @@
 # Platform support
+
+## Combined PR #72 exact-head Windows/Linux artifacts · 2026-10-28
+
+The combined integration head `697493013b7e9365126a7efb999f9e17fceee3e8` passed all eight hosted Windows/Linux CI and package checks (push/PR Cross-platform CI runs `40733237432` and `40733257866`; push/PR Desktop packages runs `40733237575` and `40733258222`). The Windows package checks passed manifest validation, clean installation, renderer smoke, and live mission-service lifecycle. The Linux package checks verified the AppImage manifest.
+
+The local Windows NSIS installer `Xyst Setup 0.1.0.exe` is 262,669,327 bytes; its update manifest matches SHA-512 Base64 `d40eUXozUKvOOuLz4jhbWpNR1QQn00ZuPLhV2gj4360mBrVTy3/fwx9uZFX7YgL9SjvVl0nD0elejAAzTQd4Vg==`. It passed `scripts/smoke-packaged-windows-gui.mjs`: clean install, runtime ready, 25 controls at 1426×877, keyboard skip-link traversal, larger text (1.15×), high-contrast colors, and reduced-motion suppression.
+
+The Linux x64 AppImage came from PR workflow artifact `xyst-linux` (artifact `12836600909`, PR package run `40733258222`, exact head above). It is 321,160,095 bytes; its update manifest matches SHA-512 Base64 `a2uoxBVNEYZUAG9sZcX1MLxZCvWsHjeHXDwAG2iG1EKntnmxDQ0b8kDnWy/wFOCnQ7tbWRa1mPhS+vBRffOEcQ==`, and its SHA-256 is `50F495F4EEB0E98D7810E8819ED33D7B560418983BEE656EA7699F055BC6A89E`. The exact artifact passed `scripts/smoke-packaged-linux-gui.mjs` under Ubuntu 24.04.5 WSLg: runtime ready, 25 controls at 1440×913, keyboard skip-link traversal, larger text, high contrast, and reduced motion. The clean profiles intentionally used LM Studio port 9; no model-backed inference is claimed. Visually inspected Windows and Linux screenshots are retained in the local `.xyst-live-acceptance/combined-pr72-linux` and `release` folders and are not tracked source files.
+
+These are unsigned pre-release candidates. WSLg is not bare-metal Linux; native Linux desktop, distribution, screen-reader, physical input, signing, production update hosting, and release promotion remain unverified.
+
 ## Final 0.1.0 package candidates · 2026-10-27
 
 The final Windows x64 NSIS installer is Xyst Setup 0.1.0.exe, 264,530,541 bytes, SHA-512 Base64 `QvaQ081/pprlXOP0E5WilJkUSzp9fmUs7XaX0Wzg3inbdG8Sw8Jcsi8eYhvkCYphG258Z7ebmUW3X0ZT+ZMzWg==`. Its generated update manifest matches the artifact. The exact installer passed a clean install and desktop smoke with 25 controls at 1426×877 (screenshot).
