@@ -8,6 +8,7 @@
 ## MCP resource-template result validation — 2026-10-28
 
 - MCP template-list results now reject unmatched RFC 6570 braces as `MCP_INVALID_RESPONSE` before tool registration. Runtime expansion continues to use the vendored RFC 6570 implementation. The focused protocol suite passes 8/8 and template integration regressions pass 2/2. Exact-source hosted confirmation is pending, and full schema parity remains open.
+- RFC 6570 variable-name parsing now accepts legal hyphen and tilde characters. The integration test expands a hyphenated query variable successfully.
 
 ## MCP binary payload validation — 2026-10-28
 

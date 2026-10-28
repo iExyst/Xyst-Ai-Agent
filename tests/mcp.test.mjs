@@ -245,7 +245,7 @@ test('MCP manager isolates a server that advertises unsupported resource templat
 test('MCP resource templates expand RFC 6570 query operators', async (t) => {
   const root = await createTempDirectory('xyst-mcp-query-template-');
   const manager = new StdioMcpManager({
-    config: managerConfig({ resourceTemplate: 'file:///docs{?query}' }),
+    config: managerConfig({ resourceTemplate: 'file:///docs{?search-term}' }),
     workspaceRoot: root,
   });
   t.after(async () => {
@@ -255,8 +255,8 @@ test('MCP resource templates expand RFC 6570 query operators', async (t) => {
   await manager.initialize();
   const templateTool = manager.definitions.find((tool) => tool._mcp.operation === 'resources/templates/read');
   assert.ok(templateTool);
-  const result = await manager.call(templateTool.name, { query: 'two words' });
-  assert.equal(result.contents[0].uri, 'file:///docs?query=two%20words');
+  const result = await manager.call(templateTool.name, { 'search-term': 'two words' });
+  assert.equal(result.contents[0].uri, 'file:///docs?search-term=two%20words');
   const omitted = await manager.call(templateTool.name, {});
   assert.equal(omitted.contents[0].uri, 'file:///docs');
 });

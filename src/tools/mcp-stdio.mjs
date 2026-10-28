@@ -750,7 +750,7 @@ function extractUriTemplateVariables(template, serverName) {
     const parts = expression.replace(/^[+#./;?&]/, '').split(',');
     for (const part of parts) {
       const name = part.replace(/(?:\*|:\d{1,4})$/, '');
-      if (name.length > 64 || !/^(?:[A-Za-z0-9_]|%[\da-fA-F]{2})+(?:\.(?:[A-Za-z0-9_]|%[\da-fA-F]{2})+)*$/.test(name)) throw invalid();
+      if (name.length > 64 || !/^(?:[A-Za-z0-9_.~-]|%[\da-fA-F]{2})+$/.test(name) || name.endsWith('.')) throw invalid();
       if (!variableNames.includes(name)) variableNames.push(name);
     }
     return '';
