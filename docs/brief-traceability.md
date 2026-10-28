@@ -44,3 +44,6 @@ The full two-brief objective is **not complete**. Partial and open areas above a
 ### D2 GitHub pagination follow-up
 
 Deterministic coverage now follows same-origin pagination links and rejects links outside the configured API host/base path before forwarding credentials. Rate limits, revoked access, branch conflicts, live GHES pagination, and varied protection policies remain open.
+### C4 mission input payloads
+
+Mission definitions now accept a bounded JSON `inputs` object. Deterministic coverage verifies size rejection, persistence/export, and delivery to task prompts with an explicit untrusted-data boundary. The inputs feature is local and does not replace attached-file support or broader mission acceptance.
