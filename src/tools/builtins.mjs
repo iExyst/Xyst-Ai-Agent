@@ -51,7 +51,6 @@ export function createBuiltinTools({
     definitions.splice(3, 0, TOOL_DEFINITIONS.delegate_task, TOOL_DEFINITIONS.retry_subagent_task);
   if (config.retrieval?.semantic?.enabled === true && semanticIndex) definitions.splice(3, 0, TOOL_DEFINITIONS.semantic_search);
   if (config.memory?.global_enabled === true && globalMemoryStore) definitions.push(TOOL_DEFINITIONS.propose_global_memory);
-  if (mcpManager) definitions.push(...mcpManager.definitions);
   if (config.skills?.enabled === true && skillLibrary) definitions.push(TOOL_DEFINITIONS.list_skills, TOOL_DEFINITIONS.load_skill);
   if (shellEnabled) definitions.push(TOOL_DEFINITIONS.run_process);
   if (shellEnabled) definitions.push(TOOL_DEFINITIONS.run_shell_script);
@@ -70,6 +69,8 @@ export function createBuiltinTools({
     if (isReadOnlySandbox(config) && !isReadOnlyTool(definition.name)) definitions.splice(index, 1);
     else if (isReadOnlySandbox(config, definition.name) && !isReadOnlyTool(definition.name)) definitions.splice(index, 1);
   }
+
+  const currentDefinitions = () => (mcpManager ? [...definitions, ...mcpManager.definitions] : definitions);
 
   const execute = {
     read_file: async (args) => readFile(workspaceRoot, args, config),
@@ -150,12 +151,14 @@ export function createBuiltinTools({
     load_skill: async (args) => skillLibrary.load(args.name),
   };
   return {
-    definitions,
+    get definitions() {
+      return currentDefinitions();
+    },
     has(name) {
-      return definitions.some((tool) => tool.name === name);
+      return currentDefinitions().some((tool) => tool.name === name);
     },
     async call(name, args, context) {
-      const tool = definitions.find((item) => item.name === name);
+      const tool = currentDefinitions().find((item) => item.name === name);
       if (!tool) throw new Error(`Unknown or disabled tool: ${name}`);
       let result;
       if (execute[name]) result = await execute[name](args, context);
@@ -165,7 +168,7 @@ export function createBuiltinTools({
       return truncate(JSON.stringify(result), toolOutputLimit(config));
     },
     metadata(name) {
-      return definitions.find((tool) => tool.name === name);
+      return currentDefinitions().find((tool) => tool.name === name);
     },
   };
 }

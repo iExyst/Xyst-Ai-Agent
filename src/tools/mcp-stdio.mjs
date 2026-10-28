@@ -36,6 +36,9 @@ export class StdioMcpManager {
     this.installedPackages = installedPackages;
     this.sessions = new Map();
     this.tools = new Map();
+    this.sessionExtensions = new Map();
+    this.refreshingServers = new Map();
+    this.pendingRefreshes = new Set();
     this.serverErrors = new Map();
     this.initialization = null;
     this.closed = false;
@@ -51,6 +54,9 @@ export class StdioMcpManager {
     this.config = config || {};
     this.sessions.clear();
     this.tools.clear();
+    this.sessionExtensions.clear();
+    this.refreshingServers.clear();
+    this.pendingRefreshes.clear();
     this.serverErrors.clear();
     this.initialization = null;
     this.closed = false;
@@ -119,11 +125,14 @@ export class StdioMcpManager {
           throw mcpError('MCP stdio servers require tools.shell_enabled=true in user configuration', 'MCP_PROCESS_DISABLED');
 
         await this.#audit(name, 'started');
+        const onNotification = (method) => {
+          void this.#handleServerNotification(name, method).catch(() => {});
+        };
         session =
           settings.transport === 'sse'
-            ? await LegacySseMcpSession.start({ name, settings, config: this.config, secretStore: this.secretStore })
+            ? await LegacySseMcpSession.start({ name, settings, config: this.config, secretStore: this.secretStore, onNotification })
             : settings.transport === 'streamable_http'
-              ? await StreamableHttpMcpSession.start({ name, settings, config: this.config, secretStore: this.secretStore })
+              ? await StreamableHttpMcpSession.start({ name, settings, config: this.config, secretStore: this.secretStore, onNotification })
               : await McpStdioSession.start({
                   name,
                   settings,
@@ -131,42 +140,13 @@ export class StdioMcpManager {
                   workspaceRoot: this.workspaceRoot,
                   secretStore: this.secretStore,
                   extension,
+                  onNotification,
                 });
         this.sessions.set(name, session);
-        const advertised = await session.listTools();
-        const resources = await session.listResources();
-        const resourceTemplates = await session.listResourceTemplates();
-        const prompts = await session.listPrompts();
-        if (extension) {
-          if (advertised.length && !extension.has('mcp.tools'))
-            throw mcpError(
-              `Signed MCP package '${extension.package_id}' advertised tools without declaring mcp.tools`,
-              'MCP_PACKAGE_CAPABILITY_MISSING',
-            );
-          if ((resources.length || resourceTemplates.length) && !extension.has('mcp.resources'))
-            throw mcpError(
-              `Signed MCP package '${extension.package_id}' advertised resources or resource templates without declaring mcp.resources`,
-              'MCP_PACKAGE_CAPABILITY_MISSING',
-            );
-          if (prompts.length && !extension.has('mcp.prompts'))
-            throw mcpError(
-              `Signed MCP package '${extension.package_id}' advertised prompts without declaring mcp.prompts`,
-              'MCP_PACKAGE_CAPABILITY_MISSING',
-            );
-        }
-        const definitions = [
-          ...advertised,
-          ...resources.map((resource) => normalizeMcpResource(name, resource)),
-          ...resourceTemplates.map((resourceTemplate) => normalizeMcpResourceTemplate(name, resourceTemplate)),
-          ...prompts.map((prompt) => normalizeMcpPrompt(name, prompt)),
-        ];
-        const names = new Set(this.tools.keys());
-        for (const tool of definitions) {
-          if (names.has(tool.name) || names.size >= MAX_TOOLS_TOTAL)
-            throw mcpError('MCP server tool names collided or exceeded the aggregate limit', 'MCP_TOOL_LIMIT');
-          names.add(tool.name);
-        }
-        for (const tool of definitions) this.tools.set(tool.name, { session, definition: tool });
+        this.sessionExtensions.set(name, extension);
+        const definitions = await this.#loadServerDefinitions(name, session, extension);
+        this.#replaceServerDefinitions(name, session, definitions);
+        if (typeof session.listenForChanges === 'function') await session.listenForChanges().catch(() => {});
         this.serverErrors.delete(name);
         await this.#audit(name, 'succeeded');
       } catch (error) {
@@ -181,6 +161,80 @@ export class StdioMcpManager {
         this.serverErrors.set(name, errorCode);
         await this.#audit(name, 'failed', errorCode).catch(() => {});
       }
+    }
+  }
+
+  async #loadServerDefinitions(name, session, extension) {
+    const advertised = await session.listTools();
+    const resources = await session.listResources();
+    const resourceTemplates = await session.listResourceTemplates();
+    const prompts = await session.listPrompts();
+    if (extension) {
+      if (advertised.length && !extension.has('mcp.tools'))
+        throw mcpError(
+          `Signed MCP package '${extension.package_id}' advertised tools without declaring mcp.tools`,
+          'MCP_PACKAGE_CAPABILITY_MISSING',
+        );
+      if ((resources.length || resourceTemplates.length) && !extension.has('mcp.resources'))
+        throw mcpError(
+          `Signed MCP package '${extension.package_id}' advertised resources or resource templates without declaring mcp.resources`,
+          'MCP_PACKAGE_CAPABILITY_MISSING',
+        );
+      if (prompts.length && !extension.has('mcp.prompts'))
+        throw mcpError(
+          `Signed MCP package '${extension.package_id}' advertised prompts without declaring mcp.prompts`,
+          'MCP_PACKAGE_CAPABILITY_MISSING',
+        );
+    }
+    return [
+      ...advertised,
+      ...resources.map((resource) => normalizeMcpResource(name, resource)),
+      ...resourceTemplates.map((resourceTemplate) => normalizeMcpResourceTemplate(name, resourceTemplate)),
+      ...prompts.map((prompt) => normalizeMcpPrompt(name, prompt)),
+    ];
+  }
+
+  #replaceServerDefinitions(name, session, definitions) {
+    const names = new Set([...this.tools].filter(([, entry]) => entry.definition._mcp.server !== name).map(([toolName]) => toolName));
+    for (const tool of definitions) {
+      if (names.has(tool.name) || names.size >= MAX_TOOLS_TOTAL)
+        throw mcpError('MCP server tool names collided or exceeded the aggregate limit', 'MCP_TOOL_LIMIT');
+      names.add(tool.name);
+    }
+    for (const [toolName, entry] of this.tools) if (entry.definition._mcp.server === name) this.tools.delete(toolName);
+    for (const tool of definitions) this.tools.set(tool.name, { session, definition: tool });
+  }
+
+  async #handleServerNotification(name, method) {
+    if (
+      !['notifications/tools/list_changed', 'notifications/resources/list_changed', 'notifications/prompts/list_changed'].includes(method)
+    )
+      return;
+    const session = this.sessions.get(name);
+    if (!session || this.closed) return;
+    const activeRefresh = this.refreshingServers.get(name);
+    if (activeRefresh) {
+      this.pendingRefreshes.add(name);
+      return activeRefresh;
+    }
+    const refresh = (async () => {
+      do {
+        this.pendingRefreshes.delete(name);
+        try {
+          const definitions = await this.#loadServerDefinitions(name, session, this.sessionExtensions.get(name));
+          if (this.sessions.get(name) !== session || this.closed) return;
+          this.#replaceServerDefinitions(name, session, definitions);
+          this.serverErrors.delete(name);
+        } catch (error) {
+          this.serverErrors.set(name, typeof error.code === 'string' ? error.code.slice(0, 100) : 'MCP_REFRESH_FAILED');
+        }
+      } while (this.pendingRefreshes.has(name) && this.sessions.get(name) === session && !this.closed);
+    })();
+    this.refreshingServers.set(name, refresh);
+    try {
+      await refresh;
+    } finally {
+      if (this.refreshingServers.get(name) === refresh) this.refreshingServers.delete(name);
     }
   }
 
@@ -246,6 +300,9 @@ export class StdioMcpManager {
     this.closed = true;
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    this.sessionExtensions.clear();
+    this.refreshingServers.clear();
+    this.pendingRefreshes.clear();
     this.tools.clear();
     await Promise.allSettled(sessions.map((session) => session.close()));
   }
@@ -281,15 +338,17 @@ function sanitizeMcpServerInfo(info) {
 }
 
 class McpStdioSession {
-  constructor({ name, child, protocolVersion, timeoutMs }) {
+  constructor({ name, child, protocolVersion, timeoutMs, onNotification = null }) {
     this.name = name;
     this.child = child;
     this.protocolVersion = protocolVersion;
     this.capabilities = {};
     this.serverInfo = null;
     this.timeoutMs = timeoutMs;
+    this.onNotification = onNotification;
     this.nextId = 0;
     this.pending = new Map();
+    this.subscription = null;
     this.buffer = '';
     this.stderr = '';
     this.closed = false;
@@ -304,7 +363,7 @@ class McpStdioSession {
     child.once('close', () => this.#failAll('MCP server process exited', 'MCP_SERVER_EXITED'));
   }
 
-  static async start({ name, settings, config, workspaceRoot, secretStore, extension = null }) {
+  static async start({ name, settings, config, workspaceRoot, secretStore, extension = null, onNotification = null }) {
     const timeoutMs = resolveToolTimeoutMs({ name: 'mcp_server', execution: { timeout: mcpTimeoutPolicy(name) } }, config);
     const sandboxMode = resolveSandboxMode(config);
     const sandboxRequired = requiresProcessIsolation(sandboxMode);
@@ -406,7 +465,7 @@ class McpStdioSession {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     }
-    const session = new McpStdioSession({ name, child, protocolVersion: null, timeoutMs });
+    const session = new McpStdioSession({ name, child, protocolVersion: null, timeoutMs, onNotification });
     try {
       session.protocolVersion = await session.#negotiate();
       return session;
@@ -445,6 +504,39 @@ class McpStdioSession {
     this.serverInfo = initialized.serverInfo || null;
     this.#notify('notifications/initialized', {});
     return selected;
+  }
+
+  async listenForChanges() {
+    if (this.protocolVersion !== MODERN_VERSION || this.subscription) return false;
+    const notifications = {
+      toolsListChanged: this.capabilities.tools?.listChanged === true,
+      resourcesListChanged: this.capabilities.resources?.listChanged === true,
+      promptsListChanged: this.capabilities.prompts?.listChanged === true,
+    };
+    if (!Object.values(notifications).some(Boolean)) return false;
+    const id = ++this.nextId;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.subscription?.id !== id) return;
+        this.subscription = null;
+        resolve(false);
+      }, this.timeoutMs);
+      this.subscription = { id, notifications, acknowledged: null, timer, resolve };
+      try {
+        this.child.stdin.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id,
+            method: 'subscriptions/listen',
+            params: { _meta: modernMeta(), notifications },
+          })}\n`,
+        );
+      } catch {
+        clearTimeout(timer);
+        this.subscription = null;
+        resolve(false);
+      }
+    });
   }
 
   async listTools() {
@@ -588,6 +680,10 @@ class McpStdioSession {
         return this.#protocolFailure('MCP server emitted invalid JSON-RPC data on stdout');
       }
       if (message?.jsonrpc !== '2.0') return this.#protocolFailure('MCP server emitted an invalid JSON-RPC envelope');
+      if (!Object.hasOwn(message, 'id') && typeof message.method === 'string') {
+        this.#handleServerNotification(message);
+        continue;
+      }
       if (Object.hasOwn(message, 'id') && typeof message.method === 'string') {
         if (message.method === 'ping') this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} })}\n`);
         else
@@ -597,6 +693,13 @@ class McpStdioSession {
         continue;
       }
       if (!Object.hasOwn(message, 'id')) continue;
+      if (this.subscription?.id === message.id && !this.subscription.acknowledged) {
+        const subscription = this.subscription;
+        clearTimeout(subscription.timer);
+        this.subscription = null;
+        subscription.resolve(false);
+        continue;
+      }
       const pending = this.pending.get(message.id);
       if (!pending) continue;
       clearTimeout(pending.timer);
@@ -632,6 +735,39 @@ class McpStdioSession {
     }
   }
 
+  #handleServerNotification(message) {
+    const method = message.method;
+    const params = message.params && typeof message.params === 'object' && !Array.isArray(message.params) ? message.params : {};
+    const subscriptionId = params._meta?.['io.modelcontextprotocol/subscriptionId'];
+    if (method === 'notifications/subscriptions/acknowledged') {
+      const subscription = this.subscription;
+      if (!subscription || subscription.acknowledged !== null || subscriptionId !== subscription.id) return;
+      const accepted = params.notifications;
+      if (!accepted || typeof accepted !== 'object' || Array.isArray(accepted)) return;
+      for (const [key, value] of Object.entries(accepted))
+        if (!Object.hasOwn(subscription.notifications, key) || typeof value !== 'boolean' || (value && !subscription.notifications[key]))
+          return;
+      subscription.acknowledged = accepted;
+      clearTimeout(subscription.timer);
+      subscription.resolve(true);
+      return;
+    }
+    const keys = {
+      'notifications/tools/list_changed': 'toolsListChanged',
+      'notifications/resources/list_changed': 'resourcesListChanged',
+      'notifications/prompts/list_changed': 'promptsListChanged',
+    };
+    const key = keys[method];
+    if (!key || this.protocolVersion !== MODERN_VERSION) {
+      if (key && this.protocolVersion !== MODERN_VERSION && this.capabilities[key.split('List')[0]]?.listChanged === true)
+        this.onNotification?.(method);
+      return;
+    }
+    const subscription = this.subscription;
+    if (subscription?.acknowledged && subscriptionId === subscription.id && subscription.acknowledged[key] === true)
+      this.onNotification?.(method);
+  }
+
   #protocolFailure(reason) {
     this.#failAll(reason, 'MCP_PROTOCOL_ERROR');
     terminateProcessTree(this.child, 'force');
@@ -648,6 +784,13 @@ class McpStdioSession {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    if (this.subscription) {
+      const subscription = this.subscription;
+      this.subscription = null;
+      clearTimeout(subscription.timer);
+      if (subscription.acknowledged) this.#notify('notifications/cancelled', { requestId: subscription.id });
+      subscription.resolve(false);
+    }
     this.#failAll(`MCP server '${this.name}' was closed`, 'MCP_SERVER_CLOSED');
     if (this.child.stdin && !this.child.stdin.destroyed) this.child.stdin.end();
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;

@@ -15,12 +15,13 @@ const SSE_LAST_EVENT_ID = Symbol('sseLastEventId');
 
 /** Request/response Streamable HTTP transport. Redirects are rejected to keep credentials endpoint-bound. */
 export class StreamableHttpMcpSession {
-  constructor({ name, settings, headers, timeoutMs, fetchImpl = fetch }) {
+  constructor({ name, settings, headers, timeoutMs, fetchImpl = fetch, onNotification }) {
     this.name = name;
     this.url = settings.url;
     this.headers = headers;
     this.timeoutMs = timeoutMs;
     this.fetchImpl = fetchImpl;
+    this.onNotification = onNotification;
     this.version = null;
     this.capabilities = {};
     this.serverInfo = null;
@@ -28,18 +29,20 @@ export class StreamableHttpMcpSession {
     this.sessionId = null;
     this.sessionRecovery = null;
     this.closed = false;
+    this.subscriptionController = null;
+    this.subscriptionPromise = null;
   }
 
-  static async start({ name, settings, config, secretStore, fetchImpl = fetch }) {
+  static async start({ name, settings, config, secretStore, fetchImpl = fetch, onNotification }) {
     const { headers, timeoutMs } = await resolveHttpOptions({ name, settings, config, secretStore });
-    const session = new StreamableHttpMcpSession({ name, settings, headers, timeoutMs, fetchImpl });
+    const session = new StreamableHttpMcpSession({ name, settings, headers, timeoutMs, fetchImpl, onNotification });
     try {
       await session.negotiate();
       return session;
     } catch (error) {
       await session.close();
       if (error.code === 'MCP_HTTP_STATUS' && [404, 405].includes(error.status)) {
-        const legacySession = new LegacySseMcpSession({ name, settings, headers, timeoutMs, fetchImpl });
+        const legacySession = new LegacySseMcpSession({ name, settings, headers, timeoutMs, fetchImpl, onNotification });
         try {
           await legacySession.negotiate();
           return legacySession;
@@ -341,6 +344,7 @@ export class StreamableHttpMcpSession {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.subscriptionController?.abort();
     const sessionId = this.sessionId;
     this.sessionId = null;
     if (!sessionId || this.version === VERSION) return;
@@ -361,6 +365,30 @@ export class StreamableHttpMcpSession {
     }
   }
 
+  async listenForChanges() {
+    if (this.version !== VERSION || this.subscriptionController) return false;
+    const notifications = {
+      toolsListChanged: this.capabilities.tools?.listChanged === true,
+      resourcesListChanged: this.capabilities.resources?.listChanged === true,
+      promptsListChanged: this.capabilities.prompts?.listChanged === true,
+    };
+    if (!Object.values(notifications).some(Boolean)) return false;
+
+    const id = ++this.nextId;
+    const controller = new AbortController();
+    this.subscriptionController = controller;
+    const task = pumpHttpSubscription(this, { id, notifications, controller });
+    this.subscriptionPromise = task;
+    try {
+      return await task;
+    } catch (error) {
+      controller.abort();
+      if (this.subscriptionPromise === task) this.subscriptionPromise = null;
+      if (this.subscriptionController === controller) this.subscriptionController = null;
+      throw error;
+    }
+  }
+
   async #recoverLegacySession(signal) {
     if (!this.sessionRecovery) {
       const recovery = this.#initializeLegacy({ signal });
@@ -372,6 +400,151 @@ export class StreamableHttpMcpSession {
     } finally {
       if (this.sessionRecovery === recovery) this.sessionRecovery = null;
     }
+  }
+}
+
+async function pumpHttpSubscription(session, { id, notifications, controller }) {
+  const headers = new Headers({ ...session.headers, Accept: 'text/event-stream', 'Content-Type': 'application/json' });
+  headers.set('MCP-Protocol-Version', VERSION);
+  headers.set('Mcp-Method', 'subscriptions/listen');
+  const body = JSON.stringify({ jsonrpc: '2.0', id, method: 'subscriptions/listen', params: { _meta: modernMeta(), notifications } });
+  const timeout = setTimeout(() => controller.abort(new Error('timeout')), session.timeoutMs);
+  let acknowledged = false;
+  let acceptedFilters = {};
+  let resolveAck;
+  let rejectAck;
+  const ack = new Promise((resolve, reject) => {
+    resolveAck = resolve;
+    rejectAck = reject;
+  });
+  ack.catch(() => {});
+  try {
+    const response = await session.fetchImpl(session.url, { method: 'POST', headers, body, signal: controller.signal, redirect: 'error' });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw mcpError(`MCP subscription returned HTTP ${response.status}`, 'MCP_HTTP_STATUS', { status: response.status });
+    }
+    const contentType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+    if (contentType !== 'text/event-stream' || !response.body) {
+      await response.body?.cancel().catch(() => {});
+      throw mcpError('MCP subscription did not return an event stream', 'MCP_INVALID_RESPONSE');
+    }
+    const reader = response.body.getReader();
+    void readHttpSubscription(reader, (message) => {
+      if (message?.jsonrpc !== '2.0' || typeof message.method !== 'string')
+        throw mcpError('MCP subscription emitted an invalid JSON-RPC notification', 'MCP_INVALID_RESPONSE');
+      const params = message.params && typeof message.params === 'object' && !Array.isArray(message.params) ? message.params : {};
+      const subscriptionId = params._meta?.['io.modelcontextprotocol/subscriptionId'];
+      if (!acknowledged) {
+        if (message.method !== 'notifications/subscriptions/acknowledged' || subscriptionId !== id)
+          throw mcpError('MCP subscription did not begin with a matching acknowledgment', 'MCP_INVALID_RESPONSE');
+        const accepted = params.notifications;
+        if (!accepted || typeof accepted !== 'object' || Array.isArray(accepted))
+          throw mcpError('MCP subscription acknowledgment was invalid', 'MCP_INVALID_RESPONSE');
+        for (const [key, value] of Object.entries(accepted))
+          if (!Object.hasOwn(notifications, key) || typeof value !== 'boolean' || (value && !notifications[key]))
+            throw mcpError('MCP subscription acknowledgment accepted an invalid notification filter', 'MCP_INVALID_RESPONSE');
+        acknowledged = true;
+        acceptedFilters = accepted;
+        clearTimeout(timeout);
+        resolveAck(true);
+        return;
+      }
+      if (subscriptionId !== id) return;
+      const keys = {
+        'notifications/tools/list_changed': 'toolsListChanged',
+        'notifications/resources/list_changed': 'resourcesListChanged',
+        'notifications/prompts/list_changed': 'promptsListChanged',
+      };
+      if (keys[message.method] && acceptedFilters[keys[message.method]] === true) session.onNotification?.(message.method);
+    })
+      .then(() => {
+        if (!acknowledged) rejectAck(mcpError('MCP subscription ended before acknowledgment', 'MCP_INVALID_RESPONSE'));
+        if (session.subscriptionController === controller) {
+          session.subscriptionController = null;
+          session.subscriptionPromise = null;
+        }
+      })
+      .catch((error) => {
+        if (!acknowledged) rejectAck(error);
+        if (session.subscriptionController === controller) {
+          session.subscriptionController = null;
+          session.subscriptionPromise = null;
+        }
+      });
+    return await ack;
+  } catch (error) {
+    if (error.code) throw error;
+    if (controller.signal.aborted) throw mcpError(`MCP server '${session.name}' timed out opening its subscription`, 'MCP_TIMEOUT');
+    throw mcpError(`MCP transport failed opening subscription for '${session.name}'`, 'MCP_TRANSPORT_ERROR');
+  } finally {
+    if (!acknowledged) clearTimeout(timeout);
+  }
+}
+
+async function readHttpSubscription(reader, onMessage) {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let line = '';
+  let data = [];
+  let eventBytes = 0;
+  let pendingCR = false;
+  const dispatch = () => {
+    const current = line;
+    line = '';
+    if (current) {
+      if (current.startsWith(':')) return;
+      const separator = current.indexOf(':');
+      if ((separator < 0 ? current : current.slice(0, separator)) === 'data')
+        data.push(separator < 0 ? '' : current.slice(separator + 1).replace(/^ /, ''));
+      return;
+    }
+    if (data.length) {
+      let message;
+      try {
+        message = JSON.parse(data.join('\n'));
+      } catch {
+        throw mcpError('MCP subscription contained invalid JSON', 'MCP_INVALID_RESPONSE');
+      }
+      onMessage(message);
+    }
+    data = [];
+    eventBytes = 0;
+  };
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        try {
+          decoder.decode();
+        } catch {
+          throw mcpError('MCP subscription contained invalid UTF-8', 'MCP_INVALID_RESPONSE');
+        }
+        return;
+      }
+      let chunk;
+      try {
+        chunk = decoder.decode(value, { stream: true });
+      } catch {
+        throw mcpError('MCP subscription contained invalid UTF-8', 'MCP_INVALID_RESPONSE');
+      }
+      for (const character of chunk) {
+        eventBytes += Buffer.byteLength(character, 'utf8');
+        if (eventBytes > MAX_BODY) throw mcpError('MCP subscription event exceeded the byte limit', 'MCP_RESPONSE_TOO_LARGE');
+        if (pendingCR) {
+          pendingCR = false;
+          if (character === '\n') continue;
+        }
+        if (character === '\r') {
+          dispatch();
+          pendingCR = true;
+        } else if (character === '\n') dispatch();
+        else line += character;
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {}
   }
 }
 
@@ -393,9 +566,9 @@ export class LegacySseMcpSession extends StreamableHttpMcpSession {
     this.pumpPromise = null;
   }
 
-  static async start({ name, settings, config, secretStore, fetchImpl = fetch }) {
+  static async start({ name, settings, config, secretStore, fetchImpl = fetch, onNotification }) {
     const options = await resolveHttpOptions({ name, settings, config, secretStore });
-    const session = new LegacySseMcpSession({ name, settings, ...options, fetchImpl });
+    const session = new LegacySseMcpSession({ name, settings, ...options, fetchImpl, onNotification });
     try {
       await session.negotiate();
       return session;
@@ -565,7 +738,16 @@ export class LegacySseMcpSession extends StreamableHttpMcpSession {
     }
     if (message?.jsonrpc !== '2.0') throw mcpError('MCP SSE message was not valid JSON-RPC', 'MCP_INVALID_RESPONSE');
     this.resumeAttempts = 0;
-    if (!Object.hasOwn(message, 'id')) return;
+    if (!Object.hasOwn(message, 'id')) {
+      const listMethods = {
+        'notifications/tools/list_changed': 'tools',
+        'notifications/resources/list_changed': 'resources',
+        'notifications/prompts/list_changed': 'prompts',
+      };
+      const capability = listMethods[message.method];
+      if (capability && this.capabilities[capability]?.listChanged === true) this.onNotification?.(message.method);
+      return;
+    }
     if (!(typeof message.id === 'string' || Number.isSafeInteger(message.id)))
       throw mcpError('MCP SSE message used an invalid JSON-RPC ID', 'MCP_INVALID_RESPONSE');
     this.pending.get(String(message.id))?.resolve(message);

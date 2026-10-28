@@ -2663,3 +2663,9 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Stdio and Streamable HTTP now accept advertised JSON Schema output objects whose root validates a scalar, such as a string. Previously, Xyst incorrectly required the output schema root to declare `type: object`, despite the protocol allowing any JSON Schema for output.
 - Focused MCP regressions pass on both transports for accepted scalar structured output and rejected output that violates the schema. Changed-file Biome and whitespace checks pass; exact-source hosted CI is pending.
+
+## MCP list-change subscriptions — 2026-10-28
+
+- Modern stdio and Streamable HTTP sessions subscribe only to advertised tools/resources/prompts list-change capabilities. Subscription acknowledgements and IDs are checked, and notifications trigger a reload of the server's definitions. Legacy SSE list-change messages are accepted only for capabilities the server advertised.
+- Rapid notifications during a definition reload are coalesced into another reload so the final advertised state is not lost. Built-in MCP tool discovery reads live definitions after refresh.
+- Focused stdio, Streamable HTTP, scalar output-schema, and schema-validation regressions pass (4/4); changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
