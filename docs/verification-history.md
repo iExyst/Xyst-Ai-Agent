@@ -1807,6 +1807,10 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 - A new regression forced migration 15 to fail after its `session_compactions` table was created but before its index was added. SQLite rolled back the table creation, left `schema_migrations` at 14, preserved the saved session message, and passed `PRAGMA integrity_check`; after removing the deliberate conflicting index, reopening the runtime applied migration 15 successfully and preserved the message. `XystStore` now closes its database handle if initialization or a migration throws.
 - The focused migration test passed 1/1; full Windows runtime suite passed 191 tests with 2 host-specific skips and 0 failures. Workspace `npm run typecheck` and `git diff --check` passed. This verifies one bounded failed-statement rollback/retry case, not process-kill interruption or every historical starting version; E7 remains partial.
 
+## SQLite migration process-termination recovery · 2026-10-28
+
+- A separate Node process was terminated after migration 15 executed its `session_compactions` table and index DDL inside the SQLite transaction, but before the migration-version row was inserted or the transaction committed. Reopening the database showed schema version 14, no `session_compactions` table, the original saved message, and `PRAGMA integrity_check = ok`; retrying through `XystStore` applied version 15 and preserved the message and integrity.
+- The focused process-crash test passed 1/1 on Windows. Cross-platform hosted checks will verify the same case on Windows and Linux. Other historical starting versions, production-sized databases, and other interruption boundaries remain open under E7.
 ## Mission scheduler missed-run policy · 2026-10-28
 
 - Added deterministic restart coverage for two due schedules: `run_once` executes the mission once with the exact persisted `next_run_at` timestamp, then advances the next run; `skip` emits no mission run for stale work.

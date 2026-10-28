@@ -779,6 +779,80 @@ test("failed multi-statement migration rolls back cleanly and can be retried", a
   } finally { recovered.close(); }
 }));
 
+test("process killed after migration DDL leaves an intact database that can retry", { timeout: 20_000 }, async () => withTemp(async (root) => {
+  const path = join(root, "migration-process-crash.sqlite");
+  const initial = new XystStore(path);
+  const sessions = new SessionStore(initial);
+  const sessionId = sessions.create("Preserve across killed migration");
+  sessions.addMessage(sessionId, "user", "Keep this message through process termination");
+  initial.db.exec("DROP TABLE session_compactions; DELETE FROM schema_migrations WHERE version=15");
+  initial.close();
+
+  const readyPath = join(root, "migration-ddl-applied.marker");
+  const storageUrl = new URL("./storage.ts", import.meta.url).href;
+  const childSource = `
+    import Database from "better-sqlite3";
+    import { writeFileSync } from "node:fs";
+    const { XystStore } = await import(${JSON.stringify(storageUrl)});
+    const originalExec = Database.prototype.exec;
+    Database.prototype.exec = function(sql) {
+      const result = originalExec.call(this, sql);
+      if (sql.includes("CREATE TABLE session_compactions")) {
+        writeFileSync(process.argv[2], "migration DDL applied; transaction not committed");
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+      }
+      return result;
+    };
+    const store = new XystStore(process.argv[1]);
+    store.close();
+  `;
+  const child = spawn(process.execPath, ["--import", "tsx/esm", "--input-type=module", "-e", childSource, path, readyPath], {
+    cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"]
+  });
+  child.stderr.setEncoding("utf8");
+  let stderr = "";
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  const childClosed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+
+  try {
+    const readyDeadline = Date.now() + 10_000;
+    while (!existsSync(readyPath) && child.exitCode === null && child.signalCode === null && Date.now() < readyDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(existsSync(readyPath), `migration worker did not reach the uncommitted DDL boundary: ${stderr}`);
+    assert.equal(child.kill("SIGKILL"), true, "migration worker should still be paused inside the transaction");
+    let closeTimer: NodeJS.Timeout | undefined;
+    const exit = await Promise.race([
+      childClosed,
+      new Promise<undefined>((resolve) => { closeTimer = setTimeout(() => resolve(undefined), 5_000); })
+    ]);
+    if (closeTimer) clearTimeout(closeTimer);
+    assert.ok(exit, "migration worker did not exit after termination");
+    assert.ok(exit.code !== 0 || exit.signal !== null, `terminated migration worker must not report success: ${JSON.stringify(exit)}`);
+
+    const afterCrash = new Database(path);
+    try {
+      assert.equal((afterCrash.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 14);
+      assert.equal(afterCrash.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_compactions'").get(), undefined);
+      assert.equal((afterCrash.prepare("SELECT content FROM messages WHERE session_id=?").get(sessionId) as { content: string }).content, "Keep this message through process termination");
+      assert.equal((afterCrash.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
+    } finally { afterCrash.close(); }
+
+    const recovered = new XystStore(path);
+    try {
+      assert.equal((recovered.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 15);
+      assert.notEqual(recovered.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_compactions'").get(), undefined);
+      assert.equal((new SessionStore(recovered).messages(sessionId) as Array<{ content: string }>)[0]?.content, "Keep this message through process termination");
+      assert.equal((recovered.db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
+    } finally { recovered.close(); }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) { child.kill(); await childClosed.catch(() => undefined); }
+  }
+}));
+
 test("job inspection aggregates persisted trigger, mission-run, and model-download records", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "jobs.sqlite")); const jobs = new JobStore(store); const now = new Date().toISOString();
   const missionId = randomUUID(); const runId = randomUUID(); const triggerId = randomUUID(); const downloadId = randomUUID(); const lmJobId = "lm-job-17";
