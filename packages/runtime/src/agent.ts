@@ -429,6 +429,9 @@ export class AgentRunner {
       const requestedInstance = key === candidate.key ? undefined : candidate.loaded_instances.find((instance) => instance.id === key);
       if (key !== candidate.key && !requestedInstance) throw new Error(`Loaded LM Studio model instance ${key} is no longer available`);
       const availableInstances = requestedInstance ? [requestedInstance] : candidate.loaded_instances;
+      const resolveInferenceModel = (instanceId: string) => instanceId === candidate.key || typeof provider.resolveInferenceModelId !== "function"
+        ? Promise.resolve(instanceId)
+        : provider.resolveInferenceModelId(instanceId, candidate.key, { allowBaseModelFallback: !requestedInstance && candidate.loaded_instances.length === 1 }, options.signal);
       // Token estimates include small template/serialization overhead. Leave a
       // small margin so a model that is effectively at the requested limit is
       // not rejected for a handful of estimated tokens.
@@ -436,17 +439,17 @@ export class AgentRunner {
       const adequateInstance = availableInstances.map((instance) => ({ instance, contextLength: instanceContextLength(instance, candidate.max_context_length) }))
         .filter((item): item is { instance: LMStudioModel["loaded_instances"][number]; contextLength: number } => typeof item.contextLength === "number" && item.contextLength + contextTolerance >= requiredContextTokens)
         .sort((left, right) => left.contextLength - right.contextLength)[0];
-      if (adequateInstance) return { modelKey: candidate.key, inferenceModel: adequateInstance.instance.id };
+      if (adequateInstance) return { modelKey: candidate.key, inferenceModel: await resolveInferenceModel(adequateInstance.instance.id) };
       const loadedContexts = availableInstances.map((instance) => instanceContextLength(instance)).filter((value): value is number => typeof value === "number");
       const currentContext = loadedContexts.length ? Math.max(...loadedContexts) : candidate.max_context_length;
       if (requestedInstance && typeof currentContext === "number") throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model instance ${key} provides ${currentContext}. Choose a loaded instance with a larger context.`);
       if (!isLocalServer) {
         if (typeof currentContext === "number" && currentContext < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${candidate.key} provides ${currentContext}. Increase its LM Studio context or choose a model with a larger context.`);
-        return { modelKey: candidate.key, inferenceModel: candidate.key };
+        return { modelKey: candidate.key, inferenceModel: await resolveInferenceModel(candidate.key) };
       }
       if (provider !== this.deps.provider) {
         if (typeof candidate.max_context_length === "number" && candidate.max_context_length + contextTolerance < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${candidate.key} provides ${candidate.max_context_length}. Choose a model with a larger declared context.`);
-        return { modelKey: candidate.key, inferenceModel: candidate.key };
+        return { modelKey: candidate.key, inferenceModel: await resolveInferenceModel(candidate.key) };
       }
       if (candidate.loaded_instances.length === 0 && !automaticLoading) throw new Error(`Model ${candidate.key} is not loaded and automatic model loading is off. Load it in LM Studio or enable Xyst automatic model loading.`);
       if (typeof candidate.max_context_length === "number" && candidate.max_context_length < requiredContextTokens) throw new Error(`The conversation now needs an estimated ${requiredContextTokens} context tokens, but selected model ${candidate.key} provides ${candidate.max_context_length}. Choose a model with a larger declared context.`);
@@ -458,8 +461,8 @@ export class AgentRunner {
         // explicit smaller context was reported; the real LM Studio provider
         // always exposes load() and enforces the applied context below.
         if (requestedInstance) throw new Error(`LM Studio does not support loading ${candidate.key} with the ${requiredContextTokens}-token context this task needs`);
-        if (typeof currentContext !== "number" || currentContext + contextTolerance >= requiredContextTokens) return { modelKey: candidate.key, inferenceModel: candidate.loaded_instances[0]?.id ?? candidate.key };
-        if (typeof candidate.max_context_length !== "number" || candidate.max_context_length + contextTolerance >= requiredContextTokens) return { modelKey: candidate.key, inferenceModel: candidate.loaded_instances[0]?.id ?? candidate.key };
+        if (typeof currentContext !== "number" || currentContext + contextTolerance >= requiredContextTokens) return { modelKey: candidate.key, inferenceModel: await resolveInferenceModel(candidate.loaded_instances[0]?.id ?? candidate.key) };
+        if (typeof candidate.max_context_length !== "number" || candidate.max_context_length + contextTolerance >= requiredContextTokens) return { modelKey: candidate.key, inferenceModel: await resolveInferenceModel(candidate.loaded_instances[0]?.id ?? candidate.key) };
         throw new Error(`LM Studio does not support loading ${candidate.key} with the ${requiredContextTokens}-token context this task needs`);
       }
       const supportsLocalCli = typeof provider.supportsLocalCliModelLifecycle === "function" ? provider.supportsLocalCliModelLifecycle() : isLocalServer;
@@ -490,7 +493,7 @@ export class AgentRunner {
         const appliedContext = appliedContexts.length ? Math.max(...appliedContexts) : undefined;
         throw new Error(`LM Studio did not provide ${candidate.key} with the estimated ${requiredContextTokens}-token context required for this task${appliedContext ? ` (largest reported instance: ${appliedContext})` : ""}. Increase the model context or choose another model.`);
       }
-      return { modelKey: candidate.key, inferenceModel: loadedWithEnoughContext.instance.id };
+      return { modelKey: candidate.key, inferenceModel: await resolveInferenceModel(loadedWithEnoughContext.instance.id) };
     };
     const initialModel = await prepareModel(model);
     let selected = initialModel.modelKey;
