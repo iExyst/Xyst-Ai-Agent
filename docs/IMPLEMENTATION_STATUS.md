@@ -2718,7 +2718,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 ## MCP JSON Schema identifiers and dynamic anchors — 2026-10-28
 
-- Both transports preserve an absolute root `$id` and resolve static local-fragment references to `$dynamicAnchor` declarations. Nested `$id` scopes, `$dynamicRef`, and external references remain rejected because dynamic resource-scope resolution is not implemented.
+- Both transports preserve an absolute root `$id`, resolve static local-fragment references to `$dynamicAnchor` declarations, and resolve same-document `$dynamicRef` targets within the supported single-resource scope. Focused regressions cover recursive dynamic-anchor trees over stdio and Streamable HTTP. Nested `$id` scopes and external references remain rejected.
 - The focused stdio and Streamable HTTP tests accept a schema using both features and validate referenced values; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
 
 ## MCP JSON Schema enum conformance — 2026-10-28

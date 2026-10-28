@@ -76,7 +76,16 @@ const sendMethodResult = (request, result) => {
     result.tools[0].inputSchema.$defs = { ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 }, TreeNode: { type: 'object', properties: { value: { type: 'integer' }, children: { type: 'array', items: { $ref: '#/$defs/TreeNode' } } }, required: ['value'], additionalProperties: false } };
     result.tools[0].inputSchema.$id = 'https://schemas.example.test/echo';
     result.tools[0].inputSchema.$defs.DynamicText = { $dynamicAnchor: 'DynamicText', type: 'string', minLength: 2 };
+    result.tools[0].inputSchema.$defs.DynamicNode = {
+      $dynamicAnchor: 'DynamicNode',
+      type: 'object',
+      properties: { value: { type: 'integer' }, children: { type: 'array', items: { $dynamicRef: '#DynamicNode' } } },
+      required: ['value'],
+      additionalProperties: false,
+    };
     result.tools[0].inputSchema.properties.dynamic_anchor_text = { $ref: '#DynamicText' };
+    result.tools[0].inputSchema.properties.dynamic_ref_text = { $dynamicRef: '#DynamicText' };
+    result.tools[0].inputSchema.properties.dynamic_ref_tree = { $dynamicRef: '#DynamicNode' };
     result.tools[0].inputSchema.properties.recursive_tree = { $ref: '#/$defs/TreeNode' };
     result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
     result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
@@ -377,6 +386,16 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'x' }), /characters/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', dynamic_anchor_text: 'ok' }).dynamic_anchor_text, 'ok');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', dynamic_anchor_text: 'x' }), /characters/);
+  assert.equal(validateArguments(definition.parameters, { text: 'hello', dynamic_ref_text: 'ok' }).dynamic_ref_text, 'ok');
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', dynamic_ref_text: 'x' }), /characters/);
+  assert.deepEqual(
+    validateArguments(definition.parameters, { text: 'hello', dynamic_ref_tree: { value: 1, children: [{ value: 2 }] } }).dynamic_ref_tree,
+    { value: 1, children: [{ value: 2 }] },
+  );
+  assert.throws(
+    () => validateArguments(definition.parameters, { text: 'hello', dynamic_ref_tree: { value: 1, children: [{}] } }),
+    /value is required/,
+  );
   assert.deepEqual(
     validateArguments(definition.parameters, { text: 'hello', legacy_dependencies: { card: 1, billing: 2, member: 1, id: 'x' } })
       .legacy_dependencies,
@@ -1051,6 +1070,8 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                     properties: {
                       text: { type: 'string' },
                       dynamic_anchor_text: { $ref: '#DynamicText' },
+                      dynamic_ref_text: { $dynamicRef: '#DynamicText' },
+                      dynamic_ref_tree: { $dynamicRef: '#DynamicNode' },
                       format_metadata: {
                         type: 'string',
                         format: 'email',
@@ -1145,16 +1166,24 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
       result.tools[0].inputSchema.$defs = {
         ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 },
         DynamicText: { $dynamicAnchor: 'DynamicText', type: 'string', minLength: 2 },
+        DynamicNode: {
+          $dynamicAnchor: 'DynamicNode',
+          type: 'object',
+          properties: { value: { type: 'integer' }, children: { type: 'array', items: { $dynamicRef: '#DynamicNode' } } },
+          required: ['value'],
+          additionalProperties: false,
+        },
         TreeNode: {
           type: 'object',
           properties: { value: { type: 'integer' }, children: { type: 'array', items: { $ref: '#/$defs/TreeNode' } } },
           required: ['value'],
           additionalProperties: false,
         },
-        Region: { type: 'string', 'x-mcp-header': 'Region' },
+        Region: { $dynamicAnchor: 'Region', type: 'string', 'x-mcp-header': 'Region' },
       };
       result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
-      result.tools[0].inputSchema.properties.region = { $ref: '#/$defs/Region' };
+      result.tools[0].inputSchema.properties.region = { $dynamicRef: '#Region' };
+      result.tools[0].inputSchema.properties.dynamic_ref_tree = { $dynamicRef: '#DynamicNode' };
       result.tools[0].inputSchema.properties.recursive_tree = { $ref: '#/$defs/TreeNode' };
       result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
       result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
@@ -1343,6 +1372,23 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
     }).recursive_tree,
     { value: 1, children: [{ value: 2 }] },
   );
+  assert.deepEqual(
+    validateArguments(definitions[0].parameters, {
+      text: 'hello',
+      region: 'Québec',
+      dynamic_ref_tree: { value: 1, children: [{ value: 2 }] },
+    }).dynamic_ref_tree,
+    { value: 1, children: [{ value: 2 }] },
+  );
+  assert.throws(
+    () =>
+      validateArguments(definitions[0].parameters, {
+        text: 'hello',
+        region: 'Québec',
+        dynamic_ref_tree: { value: 1, children: [{}] },
+      }),
+    /value is required/,
+  );
   assert.throws(
     () =>
       validateArguments(definitions[0].parameters, {
@@ -1363,6 +1409,14 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   );
   assert.throws(
     () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', dynamic_anchor_text: 'x' }),
+    /characters/,
+  );
+  assert.equal(
+    validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', dynamic_ref_text: 'ok' }).dynamic_ref_text,
+    'ok',
+  );
+  assert.throws(
+    () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', dynamic_ref_text: 'x' }),
     /characters/,
   );
   assert.equal(

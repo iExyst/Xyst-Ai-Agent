@@ -7,7 +7,14 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { resolveToolPath } from '../platform/paths.mjs';
 import { safeProcessEnvironment, terminateProcessTree } from '../platform/process.mjs';
-import { deepFreeze, MCP_SCHEMA_REF, resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, validateMcpToolOutput } from './schemas.mjs';
+import {
+  deepFreeze,
+  MCP_SCHEMA_DYNAMIC_REF,
+  MCP_SCHEMA_REF,
+  resolveToolTimeoutMs,
+  TOOL_SCHEMA_VERSION,
+  validateMcpToolOutput,
+} from './schemas.mjs';
 import { LegacySseMcpSession, StreamableHttpMcpSession } from './mcp-http.mjs';
 import { getActiveInstalledMcpPackages } from '../extensions/package-registry.mjs';
 import { buildBubblewrapArgs, bubblewrapLauncherEnvironment, findBubblewrap, validateBubblewrapWorkspace } from '../platform/sandbox.mjs';
@@ -1051,6 +1058,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     '$comment',
     '$anchor',
     '$dynamicAnchor',
+    '$dynamicRef',
     '$defs',
     'definitions',
     '$ref',
@@ -1124,6 +1132,11 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     if (typeof schema.$ref !== 'string') throw mcpError('MCP schema has an invalid $ref', 'MCP_INVALID_SCHEMA');
     const target = resolveLocalSchemaReference(rootSchema, schema.$ref);
     result[MCP_SCHEMA_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
+  }
+  if (schema.$dynamicRef !== undefined) {
+    if (typeof schema.$dynamicRef !== 'string') throw mcpError('MCP schema has an invalid $dynamicRef', 'MCP_INVALID_SCHEMA');
+    const target = resolveLocalSchemaReference(rootSchema, schema.$dynamicRef);
+    result[MCP_SCHEMA_DYNAMIC_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
   }
   if (schema.$id !== undefined) {
     let identifier;

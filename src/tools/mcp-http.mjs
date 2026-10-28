@@ -1,4 +1,11 @@
-import { resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, MCP_SCHEMA_REF, deepFreeze, validateMcpToolOutput } from './schemas.mjs';
+import {
+  resolveToolTimeoutMs,
+  TOOL_SCHEMA_VERSION,
+  MCP_SCHEMA_DYNAMIC_REF,
+  MCP_SCHEMA_REF,
+  deepFreeze,
+  validateMcpToolOutput,
+} from './schemas.mjs';
 import { validateMcpInitializeResult, validateMcpJsonRpcResponse, validateMcpResultType } from './mcp-protocol.mjs';
 
 const VERSION = '2026-07-28';
@@ -1172,12 +1179,13 @@ function findHeaderParameters(schema) {
   const rootSchema = schema;
   const visit = (node, path = [], inArray = false, refStack = new Set()) => {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return;
-    if (typeof node.$ref === 'string') {
-      if (refStack.has(node.$ref)) return;
-      const nextRefStack = new Set(refStack);
-      nextRefStack.add(node.$ref);
-      visit(resolveLocalSchemaReference(rootSchema, node.$ref), path, inArray, nextRefStack);
-    }
+    for (const reference of [node.$ref, node.$dynamicRef])
+      if (typeof reference === 'string') {
+        if (refStack.has(reference)) continue;
+        const nextRefStack = new Set(refStack);
+        nextRefStack.add(reference);
+        visit(resolveLocalSchemaReference(rootSchema, reference), path, inArray, nextRefStack);
+      }
     if (Object.hasOwn(node, 'x-mcp-header')) {
       const value = node['x-mcp-header'];
       if (
@@ -1293,6 +1301,7 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
     '$comment',
     '$anchor',
     '$dynamicAnchor',
+    '$dynamicRef',
     '$defs',
     'definitions',
     '$ref',
@@ -1367,6 +1376,11 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
     if (typeof schema.$ref !== 'string') throw mcpError('MCP schema has an invalid $ref', 'MCP_INVALID_SCHEMA');
     const target = resolveLocalSchemaReference(rootSchema, schema.$ref);
     out[MCP_SCHEMA_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
+  }
+  if (schema.$dynamicRef !== undefined) {
+    if (typeof schema.$dynamicRef !== 'string') throw mcpError('MCP schema has an invalid $dynamicRef', 'MCP_INVALID_SCHEMA');
+    const target = resolveLocalSchemaReference(rootSchema, schema.$dynamicRef);
+    out[MCP_SCHEMA_DYNAMIC_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
   }
   if (schema.$id !== undefined) {
     let identifier;

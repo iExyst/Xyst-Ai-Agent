@@ -9,6 +9,7 @@ import vm from 'node:vm';
 
 export const TOOL_SCHEMA_VERSION = 1;
 export const MCP_SCHEMA_REF = Symbol('mcpSchemaRef');
+export const MCP_SCHEMA_DYNAMIC_REF = Symbol('mcpSchemaDynamicRef');
 
 const PLATFORM_TIMEOUT = Object.freeze({ kind: 'platform_operation' });
 const DEFAULT_EXECUTION_POLICY = Object.freeze({ timeout: PLATFORM_TIMEOUT, sandbox: 'not_applicable' });
@@ -437,6 +438,18 @@ function validateValue(schema, value, location, state) {
     }
     try {
       mergeEvaluated(evaluated, validateValue(schema[MCP_SCHEMA_REF], value, location, state));
+    } finally {
+      state.referenceDepth -= 1;
+    }
+  }
+  if (schema[MCP_SCHEMA_DYNAMIC_REF] !== undefined) {
+    state.referenceDepth += 1;
+    if (state.referenceDepth > 128) {
+      state.referenceDepth -= 1;
+      throw Object.assign(new Error(`${location} exceeds the recursive MCP schema depth limit`), { code: 'MCP_SCHEMA_EVALUATION_LIMIT' });
+    }
+    try {
+      mergeEvaluated(evaluated, validateValue(schema[MCP_SCHEMA_DYNAMIC_REF], value, location, state));
     } finally {
       state.referenceDepth -= 1;
     }
