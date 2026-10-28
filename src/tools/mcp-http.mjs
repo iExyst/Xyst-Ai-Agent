@@ -958,11 +958,8 @@ function normalizeTool(server, tool) {
   if (name.length > 64) throw mcpError('MCP tool name exceeds provider limit', 'MCP_INVALID_TOOL');
   const parameters = normalizeSchema(tool.inputSchema);
   const headerParameters = findHeaderParameters(tool.inputSchema);
-  if (
-    tool.outputSchema !== undefined &&
-    (!tool.outputSchema || typeof tool.outputSchema !== 'object' || Array.isArray(tool.outputSchema) || tool.outputSchema.type !== 'object')
-  )
-    throw mcpError(`MCP server '${server}' tool output schema must have type object`, 'MCP_INVALID_SCHEMA');
+  if (tool.outputSchema !== undefined && (!tool.outputSchema || typeof tool.outputSchema !== 'object' || Array.isArray(tool.outputSchema)))
+    throw mcpError(`MCP server '${server}' tool output schema must be a JSON Schema object`, 'MCP_INVALID_SCHEMA');
   const outputSchema = tool.outputSchema === undefined ? undefined : normalizeSchema(tool.outputSchema);
   return deepFreeze({
     schema_version: TOOL_SCHEMA_VERSION,

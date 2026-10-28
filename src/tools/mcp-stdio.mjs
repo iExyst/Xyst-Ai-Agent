@@ -667,11 +667,8 @@ function normalizeMcpTool(serverName, tool) {
   if (exposedName.length > 64)
     throw mcpError(`MCP server '${serverName}' advertised a tool name that exceeds the provider limit`, 'MCP_INVALID_TOOL');
   const parameters = normalizeSchema(tool.inputSchema, 0);
-  if (
-    tool.outputSchema !== undefined &&
-    (!tool.outputSchema || typeof tool.outputSchema !== 'object' || Array.isArray(tool.outputSchema) || tool.outputSchema.type !== 'object')
-  )
-    throw mcpError(`MCP server '${serverName}' tool output schema must have type object`, 'MCP_INVALID_SCHEMA');
+  if (tool.outputSchema !== undefined && (!tool.outputSchema || typeof tool.outputSchema !== 'object' || Array.isArray(tool.outputSchema)))
+    throw mcpError(`MCP server '${serverName}' tool output schema must be a JSON Schema object`, 'MCP_INVALID_SCHEMA');
   const outputSchema = tool.outputSchema === undefined ? undefined : normalizeSchema(tool.outputSchema, 0);
   const note = typeof tool.description === 'string' ? ` Untrusted server description: ${tool.description.slice(0, 1200)}` : '';
   return deepFreeze({

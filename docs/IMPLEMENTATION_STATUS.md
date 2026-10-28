@@ -2658,3 +2658,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - Windows x64 NSIS packaging completed from commit `afd9d5fe6dc5f48483ad67e848a899eebd7ea04d`; the installer is 28.19 MiB.
 - Ubuntu 24.04 x86-64 DEB packaging completed from the same source commit. Building under WSL initially exceeded memory, so the successful retry used two Rust build jobs. The AppImage packaging step was stopped because scanning the generated 441 MiB AppDir on the Windows-mounted workspace was taking several minutes; AppImage is optional and the DEB is the primary Linux installer.
 - Local artifact hashes are in `dist/dev/local-afd9d5f/SHA256SUMS.txt`. These local packages have not received installer lifecycle smoke, current-source hosted CI, or native Ubuntu Desktop/Wayland acceptance and remain development artifacts.
+
+## MCP scalar output schemas — 2026-10-28
+
+- Stdio and Streamable HTTP now accept advertised JSON Schema output objects whose root validates a scalar, such as a string. Previously, Xyst incorrectly required the output schema root to declare `type: object`, despite the protocol allowing any JSON Schema for output.
+- Focused MCP regressions pass on both transports for accepted scalar structured output and rejected output that violates the schema. Changed-file Biome and whitespace checks pass; exact-source hosted CI is pending.
