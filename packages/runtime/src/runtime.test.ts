@@ -468,6 +468,26 @@ test("agent uses the configured embedding model for semantic memory", async () =
   } finally { store.close(); }
 }));
 
+test("desktop automation setting controls which native tools reach the agent", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "desktop-automation-setting.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "desktop.automation.enabled", false);
+  const toolSnapshots: unknown[][] = [];
+  const provider = {
+    redact: (value: string) => value,
+    models: async () => [{ type: "llm" as const, publisher: "test", key: "loaded-chat", display_name: "Chat", size_bytes: 20, loaded_instances: [{ id: "loaded-chat", config: { context_length: 8192 } }], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }],
+    streamChatWithTools: async (request: { tools: unknown[] }) => { toolSnapshots.push(request.tools); return { choices: [{ message: { role: "assistant", content: "Hello!" } }] }; }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  const hasDesktopTools = (tools: unknown[]) => tools.some((tool) => String((tool as { function?: { name?: string } }).function?.name ?? "").startsWith("desktop_"));
+  try {
+    await agent.run("Say hello in one sentence.", { workspace: root, model: "loaded-chat", maxTurns: 1 });
+    assert.equal(hasDesktopTools(toolSnapshots[0]!), false);
+    config.set("global", "desktop.automation.enabled", true);
+    await agent.run("Say hello in one sentence.", { workspace: root, model: "loaded-chat", maxTurns: 1 });
+    assert.equal(hasDesktopTools(toolSnapshots[1]!), true);
+  } finally { store.close(); }
+}));
+
 test("automatic selection deprioritizes a model with observed zero task completions when an eligible model is unmeasured", () => {
   const models = [
     { type: "llm" as const, publisher: "test", key: "observed-failures", display_name: "Observed Failures", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
