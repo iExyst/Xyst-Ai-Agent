@@ -1,5 +1,12 @@
 # Xyst development build status — 2026-10-28
 
+## Release-readiness security review — 2026-10-28
+
+- The active Codex Security Standard review targets release-branch revision `b4439e3706eeef92c2d1dc99af1f43b8d0d095ba`. Focused static reviews now cover 44 of 506 tracked files; none has produced a validated vulnerability in the reviewed scope. Coverage remains partial, no full-repository conclusion is available, and the in-repository review does not replace the independent third-party audit required by the release plan.
+- Focused review receipts cover MCP HTTP/SSE and stdio, MCP configuration, core permission/approval/grant flows, desktop/API/UI trust boundaries, extension registry and revocation handling, and the previously recorded baseline security paths. A potential Tauri local-IPC follow-up remains open: `loopback-session-state.json` grants two session-selection commands to a wildcard loopback-port origin; no user-reachable attacker navigation path was established. A registry activation record may remain marked active when cached revocation makes runtime loading refuse use; no execution bypass was identified.
+- The exact-source hosted run [40765634681](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40765634681) remains the passing Windows/Linux CI evidence for source revision `61d9df0`. Current tip `b4439e3` changes only build-plan/status documentation and intentionally skipped CI. Native Windows UI inspection confirmed the installed v0.1.2 app opens, reports a connected local runtime, and exposes labeled controls through Windows UI Automation; the installed binary's exact source revision was not verified, and this inspection does not close native platform acceptance. The WSLg Wayland/AT-SPI smoke is supplemental, not native Ubuntu Desktop acceptance.
+- Release operations remain unconfigured: no independent reviewer, native Ubuntu Desktop host, protected signing-key custodian, HTTPS update/revocation feed, or named release owner is recorded. The artifacts remain unsigned development builds; no production release is qualified.
+
 ## MCP discovery negotiation parity — 2026-10-28
 
 - The shared MCP response validator now rejects malformed or oversized advertised protocol-version lists on both transports. Streamable HTTP falls back to legacy initialization when discovery validly advertises legacy versions but not `2026-07-28`, matching stdio negotiation. Focused stdio, HTTP, and protocol checks pass (5/5 selected tests); changed-file Biome checks pass. Exact-source hosted confirmation is pending.
