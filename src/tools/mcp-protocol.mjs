@@ -167,7 +167,7 @@ function isResourceContents(value, modern) {
   )
     return false;
   return (
-    (typeof value.text === 'string' || typeof value.blob === 'string') &&
+    (typeof value.text === 'string') !== (typeof value.blob === 'string') &&
     isOptionalString(value.text) &&
     (value.blob === undefined || isBase64String(value.blob))
   );

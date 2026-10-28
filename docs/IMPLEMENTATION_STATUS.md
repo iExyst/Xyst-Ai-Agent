@@ -2576,3 +2576,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## VS Code recovered-run status — 2026-10-28
 
 - Restored VS Code runs now show their active model and running/paused status in the status bar. Focused recovery regression, Biome checks, and git diff --check pass; exact-source hosted CI run 40669673612 is in progress.
+
+## MCP resource content one-of validation — 2026-10-28
+
+- Resource contents now reject responses that provide both text and blob representations. The focused MCP protocol suite passes 8/8 and changed-file lint/format checks pass.
