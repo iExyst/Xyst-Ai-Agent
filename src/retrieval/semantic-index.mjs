@@ -13,6 +13,7 @@ const VERSION = 1;
 const MAX_CHUNKS = 5_000;
 const MAX_INDEX_BYTES = 32 * 1024 * 1024;
 const MAX_SCAN_BYTES = 64 * 1024 * 1024;
+const MAX_SCAN_DIRECTORIES = 50_000;
 const CACHE_FULL_REFRESH_MS = 30_000;
 const CHUNK_CHARS = 1_800;
 const OVERLAP_CHARS = 240;
@@ -29,6 +30,7 @@ export class SemanticWorkspaceIndex {
       usageLimits = {},
       maxFiles = 3_000,
       maxFileBytes = 500_000,
+      maxDirectories = MAX_SCAN_DIRECTORIES,
       scanFilesystem = fs,
       watchWorkspace = false,
       watchFilesystem = watchWorkspace && scanFilesystem === fs ? watchFs : null,
@@ -36,6 +38,8 @@ export class SemanticWorkspaceIndex {
   ) {
     if (typeof embed !== 'function' || typeof model !== 'string' || !model)
       throw new TypeError('Semantic index needs an embedding callback and model name');
+    if (!Number.isInteger(maxDirectories) || maxDirectories < 1 || maxDirectories > MAX_SCAN_DIRECTORIES)
+      throw new TypeError(`maxDirectories must be between 1 and ${MAX_SCAN_DIRECTORIES}`);
     this.root = workspaceRoot;
     this.embed = embed;
     this.model = model;
@@ -50,6 +54,7 @@ export class SemanticWorkspaceIndex {
     this.workspaceChangeGeneration = 0;
     this.maxFiles = Math.min(10_000, maxFiles);
     this.maxFileBytes = Math.min(1_000_000, maxFileBytes);
+    this.maxDirectories = maxDirectories;
     this.directory = path.join(workspaceRoot, '.agent', 'retrieval');
     this.file = path.join(this.directory, 'semantic-index.json');
     this.excludeFile = path.join(this.directory, 'excludes.json');
@@ -90,6 +95,7 @@ export class SemanticWorkspaceIndex {
         filesystem: this.scanFilesystem,
         maxFiles: this.maxFiles,
         maxFileBytes: this.maxFileBytes,
+        maxDirectories: this.maxDirectories,
         maxBytes: scanMaxBytes,
         signal,
       };
@@ -541,7 +547,7 @@ export function cosineSimilarity(left, right) {
 
 async function readWorkspaceDocuments(
   root,
-  { filesystem = fs, maxFiles, maxFileBytes, maxBytes = MAX_SCAN_BYTES, signal, documentCache = null },
+  { filesystem = fs, maxFiles, maxFileBytes, maxDirectories, maxBytes = MAX_SCAN_BYTES, signal, documentCache = null },
 ) {
   const ignored = await readIgnoreRules(root);
   const realRoot = await filesystem.realpath(root);
@@ -549,11 +555,14 @@ async function readWorkspaceDocuments(
   const result = [];
   const nextCache = new Map();
   let scanned = 0;
+  let directoriesScanned = 0;
   let bytesRead = 0;
   let truncated = false;
-  while (pending.length && scanned < maxFiles) {
+  let stopScan = false;
+  while (pending.length && scanned < maxFiles && directoriesScanned < maxDirectories) {
     if (signal?.aborted) throw signal.reason || Object.assign(new Error('Semantic search cancelled'), { code: 'CANCELLED' });
     const directory = pending.shift();
+    directoriesScanned += 1;
     let entries;
     try {
       const realDirectory = await filesystem.realpath(directory);
@@ -572,6 +581,10 @@ async function readWorkspaceDocuments(
       if (isSensitivePath(relative) || isIgnoredPath(relative)) continue;
       if (ignored(relative, entry.isDirectory())) continue;
       if (entry.isDirectory()) {
+        if (directoriesScanned + pending.length >= maxDirectories) {
+          truncated = true;
+          continue;
+        }
         pending.push(absolute);
         continue;
       }
@@ -588,6 +601,7 @@ async function readWorkspaceDocuments(
         if (!isPathInside(realRoot, realFile)) continue;
         if (bytesRead + Number(stat.size) > maxBytes) {
           truncated = true;
+          stopScan = true;
           break;
         }
         const cached = documentCache?.get(relative);
@@ -631,7 +645,7 @@ async function readWorkspaceDocuments(
         break;
       }
     }
-    if (truncated) break;
+    if (stopScan) break;
   }
   if (pending.length) truncated = true;
   return { documents: result, truncated, documentCache: nextCache };

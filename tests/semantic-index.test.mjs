@@ -84,6 +84,39 @@ test('semantic scan reports bounded partial indexing rather than consuming an un
   assert.equal(result.truncated, true);
 });
 
+test('semantic scan caps directory traversal and reports omitted workspace paths', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-directory-cap-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const realRoot = await fs.realpath(root);
+  const directoryNames = Array.from({ length: 110 }, (_, index) => `empty-${String(index).padStart(3, '0')}`);
+  let directoriesRead = 0;
+  const scanFilesystem = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'realpath')
+        return async (filePath) => (path.resolve(filePath) === path.resolve(root) ? realRoot : path.resolve(filePath));
+      if (property === 'readdir')
+        return async (directory) => {
+          if (path.resolve(directory) === path.resolve(root))
+            return directoryNames.map((name) => ({ name, isDirectory: () => true, isFile: () => false }));
+          directoriesRead += 1;
+          return [];
+        };
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const index = new SemanticWorkspaceIndex(root, {
+    model: 'mock',
+    maxDirectories: 100,
+    scanFilesystem,
+    embed: async (texts) => texts.map(() => [1, 0]),
+  });
+  const result = await index.search('anything');
+  assert.equal(result.truncated, true);
+  assert.ok(directoriesRead < 110);
+  assert.ok(directoriesRead >= 90);
+});
+
 test('semantic index reads stop at the size limit plus one byte when it grows during reading', async (t) => {
   const root = await createTempDirectory('xyst-semantic-index-bounded-read-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

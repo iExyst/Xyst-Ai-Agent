@@ -2592,3 +2592,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Semantic-index replacement-lock protection — 2026-10-28
 
 - Index lock release now removes only its own uniquely identified record and compares file identity when the platform supplies it. A regression that replaces the lock during embedding confirms the other writer's lock remains. Full process-contention and crash-recovery coverage remains open.
+
+## Bounded semantic retrieval directory traversal — 2026-10-28
+
+- Semantic indexing now limits traversal to 50,000 directories independently of file count, supports a smaller validated per-index cap, and marks scans truncated when paths are omitted. The synthetic directory-overflow regression passes; larger native-ext4 overflow soak remains open.
