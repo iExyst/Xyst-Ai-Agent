@@ -846,6 +846,12 @@ async function reconnectActiveBrowserRun() {
         activeRunModel = data.to_model;
         ensureModelPickerOption(activeRunModel);
         elements.model_picker.value = activeRunModel;
+        currentRoutingDecision = {
+          ...(currentRoutingDecision || {}),
+          model: activeRunModel,
+          ...(typeof data.reason === 'string' ? { reason: data.reason } : {}),
+        };
+        renderRunInspector();
         renderRunModelControl();
         appendActivity(formatModelFallbackActivity(data), 'warning');
       }
@@ -1436,6 +1442,12 @@ async function submitPrompt(prompt) {
         activeRunModel = data.to_model;
         ensureModelPickerOption(activeRunModel);
         elements.model_picker.value = activeRunModel;
+        currentRoutingDecision = {
+          ...(currentRoutingDecision || {}),
+          model: activeRunModel,
+          ...(typeof data.reason === 'string' ? { reason: data.reason } : {}),
+        };
+        renderRunInspector();
         renderRunModelControl();
         appendActivity(formatModelFallbackActivity(data), 'warning');
       }
