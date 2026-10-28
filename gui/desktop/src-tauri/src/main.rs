@@ -56,6 +56,7 @@ struct LastWorkspace {
 }
 
 const MAX_WORKSPACE_STATE_BYTES: u64 = 32 * 1024;
+const MAX_SESSION_STATE_BYTES: u64 = 1024;
 const TEST_APP_DIRECTORIES_ROOT_ENV: &str = "XYST_TEST_APP_DIRECTORIES_ROOT";
 
 impl WindowBounds {
@@ -121,11 +122,56 @@ fn valid_session_id(id: &str) -> bool {
             .all(|(i, b)| [8, 13, 18, 23].contains(&i) || b.is_ascii_hexdigit())
 }
 
-#[tauri::command]
-fn get_last_session(app: tauri::AppHandle) -> Option<String> {
-    let bytes = std::fs::read(last_session_path(&app)?).ok()?;
+fn restore_last_session(state_path: &Path) -> Option<String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(state_path).ok()?;
+    let opened = file.metadata().ok()?;
+    if !opened.is_file() || opened.len() > MAX_SESSION_STATE_BYTES {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if opened.nlink() != 1 {
+            return None;
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        if opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || windows_link_count(&file)? != 1
+        {
+            return None;
+        }
+    }
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    file.take(MAX_SESSION_STATE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 != opened.len() || bytes.len() as u64 > MAX_SESSION_STATE_BYTES {
+        return None;
+    }
     let state = serde_json::from_slice::<LastSession>(&bytes).ok()?;
     valid_session_id(&state.id).then_some(state.id)
+}
+
+#[tauri::command]
+fn get_last_session(app: tauri::AppHandle) -> Option<String> {
+    restore_last_session(&last_session_path(&app)?)
 }
 
 #[tauri::command]
@@ -973,9 +1019,10 @@ fn validate_bootstrap(line: String) -> Result<Url, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        combined_proxy_bypass, restore_last_workspace, save_last_workspace, service_proxy_bypass,
-        test_app_directories_root, write_window_bounds, OsString, WindowBounds,
-        MAX_WORKSPACE_STATE_BYTES, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
+        combined_proxy_bypass, restore_last_session, restore_last_workspace, save_last_workspace,
+        service_proxy_bypass, test_app_directories_root, write_window_bounds, LastSession,
+        OsString, WindowBounds, MAX_SESSION_STATE_BYTES, MAX_WORKSPACE_STATE_BYTES,
+        MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
     };
     use std::path::PathBuf;
 
@@ -1141,6 +1188,27 @@ mod tests {
         }
 
         std::fs::remove_dir_all(root).expect("remove workspace history fixture");
+    }
+
+    #[test]
+    fn last_session_state_is_uuid_validated_and_bounded() {
+        let root = temporary_directory("session-history");
+        let state = root.join("last-session.json");
+        std::fs::create_dir_all(&root).expect("create session history fixture");
+        let id = "550e8400-e29b-41d4-a716-446655440000";
+        std::fs::write(
+            &state,
+            serde_json::to_vec(&LastSession { id: id.to_owned() })
+                .expect("encode selected session"),
+        )
+        .expect("write selected session state");
+        assert_eq!(restore_last_session(&state).as_deref(), Some(id));
+        std::fs::write(&state, br#"{"id":"not-a-uuid"}"#).expect("write invalid session state");
+        assert_eq!(restore_last_session(&state), None);
+        std::fs::write(&state, vec![b'x'; MAX_SESSION_STATE_BYTES as usize + 1])
+            .expect("write oversized session state");
+        assert_eq!(restore_last_session(&state), None);
+        std::fs::remove_dir_all(root).expect("remove session history fixture");
     }
 
     #[test]
