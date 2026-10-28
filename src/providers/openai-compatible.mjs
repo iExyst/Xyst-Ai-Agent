@@ -124,7 +124,7 @@ export class OpenAICompatibleProvider {
     const decoder = new TextDecoder();
     let buffer = '';
     let responseBytes = 0;
-    const state = { content: '', calls: new Map(), usage: null, finishReason: null, sawEvent: false };
+    const state = { content: '', refusal: '', calls: new Map(), usage: null, finishReason: null, sawEvent: false };
     try {
       for await (const chunk of response.body) {
         responseBytes += chunk.byteLength;
@@ -153,6 +153,10 @@ export class OpenAICompatibleProvider {
             if (typeof delta?.content === 'string' && delta.content) {
               state.content += delta.content;
               yield { type: 'text', text: delta.content };
+            }
+            if (typeof delta?.refusal === 'string' && delta.refusal) {
+              state.refusal += delta.refusal;
+              yield { type: 'text', text: delta.refusal };
             }
             for (const call of delta?.tool_calls || []) {
               const current = state.calls.get(call.index) || { id: '', type: 'function', function: { name: '', arguments: '' } };
@@ -184,6 +188,10 @@ export class OpenAICompatibleProvider {
         if (typeof delta?.content === 'string' && delta.content) {
           state.content += delta.content;
           yield { type: 'text', text: delta.content };
+        }
+        if (typeof delta?.refusal === 'string' && delta.refusal) {
+          state.refusal += delta.refusal;
+          yield { type: 'text', text: delta.refusal };
         }
         for (const call of delta?.tool_calls || []) {
           const current = state.calls.get(call.index) || { id: '', type: 'function', function: { name: '', arguments: '' } };
@@ -313,6 +321,8 @@ function normalizeResponse(message, usage, finishReason = null) {
     throw new ProviderError('Provider returned an invalid assistant message', { code: 'INVALID_RESPONSE' });
   if (message.content !== undefined && message.content !== null && typeof message.content !== 'string')
     throw new ProviderError('Provider returned invalid assistant content', { code: 'INVALID_RESPONSE' });
+  if (message.refusal !== undefined && message.refusal !== null && typeof message.refusal !== 'string')
+    throw new ProviderError('Provider returned invalid assistant refusal', { code: 'INVALID_RESPONSE' });
   const rawToolCalls = message.tool_calls ?? [];
   if (!Array.isArray(rawToolCalls)) throw new ProviderError('Provider returned an invalid tool call list', { code: 'INVALID_RESPONSE' });
   if (rawToolCalls.some((call) => !call || typeof call !== 'object' || Array.isArray(call)))
@@ -339,7 +349,7 @@ function normalizeResponse(message, usage, finishReason = null) {
     throw new ProviderError('Provider returned an incomplete tool call', { code: 'INVALID_RESPONSE' });
   }
   const normalized = {
-    content: typeof message.content === 'string' ? message.content : '',
+    content: `${message.content || ''}${message.refusal || ''}`,
     toolCalls,
     usage: normalizeUsage(usage),
     finishReason,
@@ -361,7 +371,7 @@ function finishStream(state) {
   if (toolCalls.some((call) => !call.name))
     throw new ProviderError('Provider stream returned an incomplete tool call', { code: 'INVALID_STREAM' });
   const normalized = {
-    content: state.content,
+    content: `${state.content}${state.refusal}`,
     toolCalls,
     usage: normalizeUsage(state.usage),
     finishReason: state.finishReason,
@@ -460,6 +470,8 @@ function validateStreamEvent(event, state) {
       throw new ProviderError('Provider returned an invalid delta in its stream', { code: 'INVALID_STREAM' });
     if (choice.delta?.content !== undefined && choice.delta.content !== null && typeof choice.delta.content !== 'string')
       throw new ProviderError('Provider returned invalid content in its stream', { code: 'INVALID_STREAM' });
+    if (choice.delta?.refusal !== undefined && choice.delta.refusal !== null && typeof choice.delta.refusal !== 'string')
+      throw new ProviderError('Provider returned an invalid refusal in its stream', { code: 'INVALID_STREAM' });
     if (choice.delta?.tool_calls !== undefined && !Array.isArray(choice.delta.tool_calls))
       throw new ProviderError('Provider returned an invalid tool call list in its stream', { code: 'INVALID_STREAM' });
     for (const call of choice.delta?.tool_calls || []) {

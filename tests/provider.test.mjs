@@ -225,6 +225,40 @@ test('provider sends auth, maps model list and normalizes chat response', async 
   assert.equal(calls[1].url, 'http://localhost:1234/v1/chat/completions');
 });
 
+test('provider preserves OpenAI-compatible refusal text in chat and streamed responses', async () => {
+  const refusal = 'I cannot help with that request.';
+  const chatProvider = new OpenAICompatibleProvider({
+    baseUrl: 'http://localhost/v1',
+    model: 'x',
+    fetchImpl: async () => Response.json({ choices: [{ message: { role: 'assistant', content: null, refusal }, finish_reason: 'stop' }] }),
+  });
+  assert.equal((await chatProvider.chat([{ role: 'user', content: 'hi' }])).content, refusal);
+
+  const frames = [
+    { choices: [{ delta: { refusal: 'I cannot ' } }] },
+    { choices: [{ delta: { refusal: 'help with that request.' } }] },
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+  ];
+  const streamProvider = new OpenAICompatibleProvider({
+    baseUrl: 'http://localhost/v1',
+    model: 'x',
+    fetchImpl: async () =>
+      new Response(`${frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join('')}data: [DONE]\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+  });
+  const events = [];
+  for await (const event of streamProvider.stream([{ role: 'user', content: 'hi' }])) events.push(event);
+  assert.equal(
+    events
+      .filter((event) => event.type === 'text')
+      .map((event) => event.text)
+      .join(''),
+    refusal,
+  );
+  assert.equal(events.find((event) => event.type === 'done').response.content, refusal);
+});
+
 test('prompt cache controls are omitted by default and sent only after profile opt-in', async () => {
   const calls = [];
   const fetchImpl = async (_url, options) => {
@@ -294,6 +328,7 @@ test('provider rejects malformed assistant message and tool-call payload shapes'
   const responses = [
     { choices: [{ message: [] }] },
     { choices: [{ message: { content: 42 } }] },
+    { choices: [{ message: { content: null, refusal: {} } }] },
     { choices: [{ message: { tool_calls: [null] } }] },
     { choices: [{ message: { tool_calls: [{ id: 'call-1' }] } }] },
     { choices: [{ message: { tool_calls: [{ id: 'call-1', function: { name: 'read_file', arguments: {} } }] } }] },
@@ -1252,6 +1287,7 @@ test('provider rejects malformed streamed choices and tool-call fragments before
     { choices: [null] },
     { choices: [{ delta: 42 }] },
     { choices: [{ delta: { content: 42 } }] },
+    { choices: [{ delta: { refusal: {} } }] },
     { choices: [{ delta: { tool_calls: {} } }] },
     { choices: [{ delta: { tool_calls: [{ index: '0', function: { name: 'read_file' } }] } }] },
     { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: {} } }] } }] },
