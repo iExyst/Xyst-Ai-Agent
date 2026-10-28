@@ -86,9 +86,12 @@ export class GitHubProvider {
   private async error(response: Response): Promise<GitHubError> {
     const body = await response.text().catch(() => ""); let detail = body;
     try { const parsed = JSON.parse(body) as { message?: string }; detail = parsed.message ?? body; } catch { /* keep response text */ }
+    if (response.status === 401) { this.authenticatedUser = undefined; this.appAccess = undefined; }
     const accepted = response.headers.get("X-Accepted-GitHub-Permissions") ?? undefined;
     const rate = response.status === 403 && response.headers.get("X-RateLimit-Remaining") === "0" ? " (GitHub API rate limit reached)" : "";
-    return new GitHubError(redactSecrets(`GitHub API HTTP ${response.status}${rate}: ${detail.slice(0, 1000)}${accepted ? `; required permissions: ${accepted}` : ""}`), response.status, accepted);
+    const authentication = response.status === 401 ? " (GitHub rejected authentication; the token may be invalid, expired, or revoked. Check `xyst github auth status`; replace a personal token with `xyst credential set github personal-token`, or verify the GitHub App credentials.)" : "";
+    const inaccessible = response.status === 404 ? " (The resource may not exist, or it may be private and inaccessible to this account; check authentication and repository permissions.)" : "";
+    return new GitHubError(redactSecrets(`GitHub API HTTP ${response.status}${rate}${authentication}${inaccessible}: ${detail.slice(0, 1000)}${accepted ? `; required permissions: ${accepted}` : ""}`), response.status, accepted);
   }
   async request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
     const token = await this.token(signal);

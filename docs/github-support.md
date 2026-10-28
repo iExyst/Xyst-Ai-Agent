@@ -10,6 +10,7 @@ GitHub Enterprise Server is supported by setting `integrations.github.apiBaseUrl
 - GitHub App installation token: store `app-id`, `installation-id`, and `private-key` under service `github-app`. Xyst signs a short-lived app JWT and requests an installation token; the installation token is cached only in memory until shortly before expiry.
 - `xyst github auth status` checks the authenticated user or App identity. Public repository reads can work without authentication, subject to GitHub rate limits.
 - Token permission and organization policy are authoritative. For fine-grained personal access tokens, start with repository metadata and the specific `Issues`, `Pull requests`, `Contents`, `Checks`, or `Actions` permissions needed for the requested operation. Workflow dispatch needs Actions write access; creating a PR needs Pull requests write plus repository/branch access.
+- An HTTP 401 invalidates Xyst's cached GitHub identity and App installation token, then explains how to check authentication and replace or verify credentials. Requests are not automatically replayed. GitHub may return HTTP 404 when a private resource is not accessible to the current account; Xyst tells the user to check both existence and repository access rather than claiming the resource is absent.
 
 ## Supported operations
 
