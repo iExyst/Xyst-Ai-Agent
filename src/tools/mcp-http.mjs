@@ -1006,6 +1006,7 @@ function encodeHeaderValue(value) {
 }
 
 function normalizeSchema(schema, depth = 0) {
+  if (typeof schema === 'boolean') return schema;
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || depth > 8)
     throw mcpError('MCP schema invalid or too deeply nested', 'MCP_INVALID_SCHEMA');
   const allowed = new Set([
@@ -1038,17 +1039,7 @@ function normalizeSchema(schema, depth = 0) {
       out[k] = k === 'description' && depth ? `Untrusted server-provided schema note: ${schema[k]}` : schema[k];
     }
   if (schema.enum !== undefined) {
-    if (
-      !Array.isArray(schema.enum) ||
-      schema.enum.length > 100 ||
-      schema.enum.some((x) => !['string', 'number', 'boolean'].includes(typeof x) && x !== null) ||
-      type === 'object' ||
-      type === 'array' ||
-      schema.enum.some((x) =>
-        type === 'null' ? x !== null : x === null || (type === 'integer' ? !Number.isInteger(x) : typeof x !== type),
-      )
-    )
-      throw mcpError('MCP enum invalid', 'MCP_INVALID_SCHEMA');
+    if (!Array.isArray(schema.enum) || schema.enum.length > 100) throw mcpError('MCP enum invalid', 'MCP_INVALID_SCHEMA');
     out.enum = schema.enum;
   }
   for (const k of ['minimum', 'maximum'])
@@ -1086,12 +1077,15 @@ function normalizeSchema(schema, depth = 0) {
       throw mcpError('MCP required properties invalid', 'MCP_INVALID_SCHEMA');
     if (schema.required) out.required = [...new Set(schema.required)];
     if (schema.additionalProperties !== undefined) {
-      if (typeof schema.additionalProperties !== 'boolean')
-        throw mcpError('MCP additionalProperties must be boolean', 'MCP_INVALID_SCHEMA');
-      out.additionalProperties = schema.additionalProperties;
+      if (
+        typeof schema.additionalProperties !== 'boolean' &&
+        (!schema.additionalProperties || typeof schema.additionalProperties !== 'object')
+      )
+        throw mcpError('MCP additionalProperties invalid', 'MCP_INVALID_SCHEMA');
+      out.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1);
     }
   } else if (type === 'array') {
-    if (!schema.items) throw mcpError('MCP array items required', 'MCP_INVALID_SCHEMA');
+    if (schema.items === undefined) throw mcpError('MCP array items required', 'MCP_INVALID_SCHEMA');
     out.items = normalizeSchema(schema.items, depth + 1);
   } else if (['properties', 'required', 'items', 'additionalProperties'].some((k) => schema[k] !== undefined))
     throw mcpError('MCP scalar contains object keywords', 'MCP_INVALID_SCHEMA');

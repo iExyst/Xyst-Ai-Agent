@@ -4,6 +4,8 @@ const string = { type: 'string' };
 const integer = { type: 'integer', minimum: 1 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+import { isDeepStrictEqual } from 'node:util';
+
 export const TOOL_SCHEMA_VERSION = 1;
 
 const PLATFORM_TIMEOUT = Object.freeze({ kind: 'platform_operation' });
@@ -406,14 +408,17 @@ export function validateArguments(schema, input) {
 }
 
 function validateValue(schema, value, location) {
+  if (schema === true) return;
+  if (schema === false) throw new Error(`${location} is not allowed`);
+  if (schema.enum && !schema.enum.some((candidate) => isDeepStrictEqual(candidate, value)))
+    throw new Error(`${location} must match one of the allowed values`);
   if (schema.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${location} must be an object`);
     for (const key of schema.required || []) if (!Object.hasOwn(value, key)) throw new Error(`${location}.${key} is required`);
-    if (schema.additionalProperties === false)
-      for (const key of Object.keys(value))
-        if (!Object.hasOwn(schema.properties, key)) throw new Error(`${location}.${key} is not allowed`);
-    for (const [key, child] of Object.entries(schema.properties || {}))
-      if (Object.hasOwn(value, key)) validateValue(child, value[key], `${location}.${key}`);
+    for (const [key, child] of Object.entries(value))
+      if (Object.hasOwn(schema.properties || {}, key)) validateValue(schema.properties[key], child, `${location}.${key}`);
+      else if (schema.additionalProperties === false) throw new Error(`${location}.${key} is not allowed`);
+      else if (schema.additionalProperties !== undefined) validateValue(schema.additionalProperties, child, `${location}.${key}`);
   } else if (schema.type === 'string') {
     if (typeof value !== 'string') throw new Error(`${location} must be a string`);
     if (
@@ -423,14 +428,12 @@ function validateValue(schema, value, location) {
       throw new Error(`${location} must be between ${schema.minLength || 0} and ${schema.maxLength ?? 'unlimited'} characters`);
     if (schema.maxBytes !== undefined && Buffer.byteLength(value) > schema.maxBytes)
       throw new Error(`${location} must be no larger than ${schema.maxBytes} UTF-8 bytes`);
-    if (schema.enum && !schema.enum.includes(value)) throw new Error(`${location} must match one of the allowed values`);
     if (schema.format === 'uuid' && !UUID_PATTERN.test(value)) throw new Error(`${location} must be a valid UUID`);
   } else if (schema.type === 'integer') {
     if (
       !Number.isInteger(value) ||
       (schema.minimum !== undefined && value < schema.minimum) ||
-      (schema.maximum !== undefined && value > schema.maximum) ||
-      (schema.enum && !schema.enum.includes(value))
+      (schema.maximum !== undefined && value > schema.maximum)
     )
       throw new Error(`${location} must be a valid integer`);
   } else if (schema.type === 'number') {
@@ -438,14 +441,13 @@ function validateValue(schema, value, location) {
       typeof value !== 'number' ||
       !Number.isFinite(value) ||
       (schema.minimum !== undefined && value < schema.minimum) ||
-      (schema.maximum !== undefined && value > schema.maximum) ||
-      (schema.enum && !schema.enum.includes(value))
+      (schema.maximum !== undefined && value > schema.maximum)
     )
       throw new Error(`${location} must be a valid number`);
   } else if (schema.type === 'boolean') {
-    if (typeof value !== 'boolean' || (schema.enum && !schema.enum.includes(value))) throw new Error(`${location} must be a boolean`);
+    if (typeof value !== 'boolean') throw new Error(`${location} must be a boolean`);
   } else if (schema.type === 'null') {
-    if (value !== null || (schema.enum && !schema.enum.includes(value))) throw new Error(`${location} must be null`);
+    if (value !== null) throw new Error(`${location} must be null`);
   } else if (schema.type === 'array') {
     if (!Array.isArray(value)) throw new Error(`${location} must be an array`);
     if (

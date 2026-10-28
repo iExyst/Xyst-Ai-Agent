@@ -825,6 +825,7 @@ function mcpTimeoutPolicy(serverName) {
 }
 
 function normalizeSchema(schema, depth) {
+  if (typeof schema === 'boolean') return schema;
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || depth > 8)
     throw mcpError('MCP tool input schema is invalid or too deeply nested', 'MCP_INVALID_SCHEMA');
   const allowed = new Set([
@@ -856,20 +857,8 @@ function normalizeSchema(schema, depth) {
       result[key] = key === 'description' && depth > 0 ? `Untrusted server-provided schema note: ${schema[key]}` : schema[key];
     }
   if (schema.enum !== undefined) {
-    if (
-      !Array.isArray(schema.enum) ||
-      schema.enum.length > 100 ||
-      schema.enum.some((item) => !['string', 'number', 'boolean'].includes(typeof item) && item !== null)
-    )
+    if (!Array.isArray(schema.enum) || schema.enum.length > 100)
       throw mcpError('MCP tool input schema has an invalid enum', 'MCP_INVALID_SCHEMA');
-    if (
-      type === 'object' ||
-      type === 'array' ||
-      schema.enum.some((item) =>
-        type === 'null' ? item !== null : item === null || (type === 'integer' ? !Number.isInteger(item) : typeof item !== type),
-      )
-    )
-      throw mcpError('MCP tool enum values must match their scalar schema type', 'MCP_INVALID_SCHEMA');
     result.enum = schema.enum;
   }
   for (const key of ['minimum', 'maximum'])
@@ -895,6 +884,11 @@ function normalizeSchema(schema, depth) {
   if (type === 'object') {
     if (depth !== 0 && (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)))
       throw mcpError('Nested MCP objects require explicit properties', 'MCP_INVALID_SCHEMA');
+    if (
+      schema.properties !== undefined &&
+      (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties))
+    )
+      throw mcpError('MCP tool input schema has invalid properties', 'MCP_INVALID_SCHEMA');
     const properties = schema.properties || {};
     if (Object.keys(properties).length > 64) throw mcpError('MCP object schema exceeds the property limit', 'MCP_INVALID_SCHEMA');
     result.properties = Object.fromEntries(
@@ -909,11 +903,16 @@ function normalizeSchema(schema, depth) {
     )
       throw mcpError('MCP tool input schema has invalid required properties', 'MCP_INVALID_SCHEMA');
     if (schema.required) result.required = [...new Set(schema.required)];
-    if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean')
-      throw mcpError('MCP object schema must use boolean additionalProperties', 'MCP_INVALID_SCHEMA');
-    if (schema.additionalProperties !== undefined) result.additionalProperties = schema.additionalProperties;
+    if (schema.additionalProperties !== undefined) {
+      if (
+        typeof schema.additionalProperties !== 'boolean' &&
+        (!schema.additionalProperties || typeof schema.additionalProperties !== 'object')
+      )
+        throw mcpError('MCP object schema has invalid additionalProperties', 'MCP_INVALID_SCHEMA');
+      result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1);
+    }
   } else if (type === 'array') {
-    if (!schema.items) throw mcpError('MCP array schema requires an items schema', 'MCP_INVALID_SCHEMA');
+    if (schema.items === undefined) throw mcpError('MCP array schema requires an items schema', 'MCP_INVALID_SCHEMA');
     result.items = normalizeSchema(schema.items, depth + 1);
   } else if (
     schema.properties !== undefined ||
