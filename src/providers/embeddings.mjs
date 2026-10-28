@@ -55,12 +55,12 @@ export class OpenAICompatibleEmbeddingProvider {
       } catch {
         throw Object.assign(new Error('Embedding provider returned invalid JSON'), { code: 'INVALID_RESPONSE' });
       }
-      if (!Array.isArray(data.data) || data.data.length !== texts.length)
+      if (!isRecord(data) || !Array.isArray(data.data) || data.data.length !== texts.length)
         throw Object.assign(new Error('Embedding provider returned an unexpected vector count'), { code: 'INVALID_RESPONSE' });
       const vectors = new Array(texts.length);
       let dimensions = null;
       for (const item of data.data) {
-        if (!Number.isInteger(item.index) || item.index < 0 || item.index >= texts.length || vectors[item.index])
+        if (!isRecord(item) || !Number.isInteger(item.index) || item.index < 0 || item.index >= texts.length || vectors[item.index])
           throw Object.assign(new Error('Embedding response contains an invalid index'), { code: 'INVALID_RESPONSE' });
         const vector = item.embedding;
         if (
@@ -102,6 +102,10 @@ export function embeddingIdentity(model, dimensions) {
   return createHash('sha256').update(`${model}\0${dimensions}`).digest('hex');
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 async function readBounded(response, maxBytes) {
   if (!response.body) return '';
   const reader = response.body.getReader();
@@ -127,5 +131,9 @@ async function readBounded(response, maxBytes) {
     all.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder('utf-8', { fatal: true }).decode(all);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(all);
+  } catch (cause) {
+    throw Object.assign(new Error('Embedding provider returned invalid UTF-8 JSON', { cause }), { code: 'INVALID_RESPONSE' });
+  }
 }

@@ -1,9 +1,9 @@
 # Xyst development build status — 2026-10-28
 
-## OpenAI-compatible malformed root responses — 2026-10-28
+## OpenAI-compatible malformed response shapes — 2026-10-28
 
-- Model-list and non-streaming chat endpoints now check that a decoded JSON response root is an object with the expected array before reading fields. Valid JSON scalars, `null`, and arrays return the stable `INVALID_RESPONSE` provider error instead of leaking a raw JavaScript `TypeError`.
-- The focused regression covers `null`, array, and string roots for both endpoints and passes 1/1. Changed-file Biome checks pass. Hosted confirmation is pending.
+- Model-list, non-streaming chat, and embedding endpoints validate the decoded JSON root before reading response fields. Valid JSON scalars, `null`, arrays, and null embedding entries return the stable `INVALID_RESPONSE` provider error instead of leaking a raw JavaScript `TypeError`; invalid UTF-8 embeddings also use that error code.
+- Focused malformed-root regressions pass for chat/model-list (1/1) and embedding responses (1/1). Changed-file Biome checks pass. Hosted confirmation is pending.
 
 ## Windows development installer rebuild — 2026-10-28
 

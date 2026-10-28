@@ -41,6 +41,24 @@ test('embedding adapter rejects oversized, missing, inconsistent, and non-finite
   );
 });
 
+test('embedding adapter rejects malformed JSON roots and null vector entries with a stable error code', async () => {
+  for (const payload of [null, [], 'unexpected', { data: [null] }]) {
+    const provider = new OpenAICompatibleEmbeddingProvider({
+      baseUrl: 'http://localhost/v1',
+      model: 'embed',
+      fetchImpl: async () => Response.json(payload),
+    });
+    await assert.rejects(provider.embed(['x']), (error) => error.code === 'INVALID_RESPONSE');
+  }
+
+  const invalidUtf8 = new OpenAICompatibleEmbeddingProvider({
+    baseUrl: 'http://localhost/v1',
+    model: 'embed',
+    fetchImpl: async () => new Response(Uint8Array.of(0xff)),
+  });
+  await assert.rejects(invalidUtf8.embed(['x']), (error) => error.code === 'INVALID_RESPONSE');
+});
+
 test('embedding adapter reports provider usage and falls back to a bounded token estimate', async () => {
   const usage = [];
   const provider = new OpenAICompatibleEmbeddingProvider({
