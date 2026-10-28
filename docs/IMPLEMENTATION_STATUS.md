@@ -2726,6 +2726,11 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - The extension now follows active runs with the shared API client's replaying event stream. Transient disconnects resume after the last received sequence, avoiding a stale running status or missed approval events when VS Code temporarily loses the local API connection.
 - The focused extension integration check passes; the API client's reconnect cursor/replay cases remain the underlying retry coverage.
 
+## Cross-platform CI reliability — 2026-10-28
+
+- The application-update signing regression now keeps issue/expiry times aligned to the current clock, preventing its generated one-hour feed from aging past the seven-day policy window in later CI runs.
+- The browser smoke gives the local UI and headless Chrome DevTools endpoint up to 10 seconds to respond on loaded Windows runners. The full local Edge workflow smoke passes.
+
 ## MCP JSON Schema enum conformance — 2026-10-28
 
 - MCP tool discovery now rejects empty `enum` arrays on stdio and Streamable HTTP, as JSON Schema requires. Focused transport regressions and changed-file Biome/whitespace checks pass; the running hosted CI revision predates this change.

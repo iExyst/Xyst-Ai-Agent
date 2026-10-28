@@ -37,7 +37,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     service = await startService(workspace, environment, mockProvider.url);
     const appUrl = new URL('/app', service.url).href;
     progress('checking local UI route');
-    const appResponse = await fetch(appUrl, { signal: AbortSignal.timeout(2_000) });
+    const appResponse = await fetch(appUrl, { signal: AbortSignal.timeout(10_000) });
     assert.equal(appResponse.status, 200, 'Local UI route did not return a successful response');
     assert.match(appResponse.headers.get('content-type') || '', /^text\/html\b/i, 'Local UI route did not return HTML');
     const appHtml = await appResponse.text();
@@ -76,7 +76,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     });
     if (useWebSocket) {
       const port = await waitForDevtoolsPort(profile, browserDiagnostics);
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2_000) });
+      const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(10_000) });
       assert.equal(response.ok, true, 'Headless browser did not expose its DevTools version endpoint');
       const version = await response.json();
       browserProtocol = await connectDevtoolsWebSocket(version.webSocketDebuggerUrl);

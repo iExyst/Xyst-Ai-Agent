@@ -24,7 +24,8 @@ function signedFeed({
   channel = 'stable',
   sequence = 7,
   notes = 'Bug fixes and reliability improvements.',
-  expiresAt = NOW + 60 * 60_000,
+  createdAt = NOW,
+  expiresAt = createdAt + 60 * 60_000,
 } = {}) {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const statement = {
@@ -32,7 +33,7 @@ function signedFeed({
     sequence,
     key_id: 'xyst-release-2026',
     channel,
-    issued_at: new Date(NOW - 1000).toISOString(),
+    issued_at: new Date(createdAt - 1000).toISOString(),
     expires_at: new Date(expiresAt).toISOString(),
     releases: [
       {
@@ -40,7 +41,7 @@ function signedFeed({
         arch,
         channel,
         version,
-        published_at: new Date(NOW - 2000).toISOString(),
+        published_at: new Date(createdAt - 2000).toISOString(),
         download_url: 'https://releases.example.test/xyst-setup.exe',
         sha256: 'a'.repeat(64),
         size_bytes: 1024,
@@ -489,7 +490,8 @@ test('application update checks require an explicit enabled mode and trusted Ed2
 
 test('release signing command validates its statement, emits a verifiable feed, and never overwrites output', async () => {
   const root = await createTempDirectory('xyst-app-update-sign-');
-  const { publicKey, privateKey, feed } = signedFeed({ expiresAt: Date.now() + 60 * 60_000 });
+  const createdAt = Date.now();
+  const { publicKey, privateKey, feed } = signedFeed({ createdAt, expiresAt: createdAt + 60 * 60_000 });
   const statementPath = path.join(root, 'statement.json');
   const keyPath = path.join(root, 'offline-key.pem');
   const outputPath = path.join(root, 'releases.json');
