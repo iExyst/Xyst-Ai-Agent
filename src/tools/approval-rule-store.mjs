@@ -184,6 +184,7 @@ export class ApprovalRuleStore {
   async #withLock(operation) {
     const directory = await this.#ensureDirectory();
     const lockFile = path.join(directory.path, 'rules.lock');
+    const lockToken = randomUUID();
     const deadline = Date.now() + this.lockWaitMs;
     let handle;
     let lockIdentity;
@@ -222,7 +223,9 @@ export class ApprovalRuleStore {
       }
     }
     try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, hostname: os.hostname(), started_at: new Date().toISOString() }));
+      await handle.writeFile(
+        JSON.stringify({ lock_token: lockToken, pid: process.pid, hostname: os.hostname(), started_at: new Date().toISOString() }),
+      );
       await handle.sync();
       await this.#assertDirectoryChain(directory);
       await restoreAtomicWriteBackup(path.join(directory.path, 'rules.json'), {
@@ -247,7 +250,10 @@ export class ApprovalRuleStore {
           await this.#assertDirectoryChain(directory);
           const current = await fs.lstat(lockFile);
           assertRuleFile(current, 'Approval rule lock must be a regular single-link file', MAX_APPROVAL_LOCK_BYTES);
-          if (sameFileIdentity(lockIdentity, current)) await fs.unlink(lockFile);
+          if (sameFileIdentity(lockIdentity, current)) {
+            const record = JSON.parse(await fs.readFile(lockFile, 'utf8'));
+            if (record.lock_token === lockToken) await fs.unlink(lockFile);
+          }
         } catch {
           // A replaced or unsafe lock path is left for explicit operator recovery.
         }

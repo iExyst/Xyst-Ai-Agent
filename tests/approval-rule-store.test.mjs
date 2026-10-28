@@ -130,6 +130,32 @@ test('approval rule store refuses oversized lock files before waiting on them', 
   );
 });
 
+test('approval rule store preserves a replaced lock record with the same file identity', async (t) => {
+  const root = await createTempDirectory('xyst-approval-lock-replacement-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new ApprovalRuleStore(root);
+  const originalOpen = fs.open;
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] !== store.lockFile || args[1] !== 'wx') return handle;
+    return {
+      writeFile: (...writeArgs) => handle.writeFile(...writeArgs),
+      sync: async () => {
+        await handle.sync();
+        await fs.writeFile(store.lockFile, JSON.stringify({ lock_token: 'replacement-lock' }));
+      },
+      stat: () => handle.stat(),
+      close: () => handle.close(),
+    };
+  };
+  try {
+    await store.add({ tool: 'read_file', scope: 'tool', durationMs: 60_000 });
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.equal(JSON.parse(await fs.readFile(store.lockFile, 'utf8')).lock_token, 'replacement-lock');
+});
+
 test('approval rule store applies scoped allow/deny rules, expiry, and revocation', async (t) => {
   const root = await createTempDirectory('xyst-approval-store-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

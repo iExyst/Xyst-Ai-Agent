@@ -88,6 +88,7 @@
 - Goal lock cleanup now survives an injected `EIO` during lock metadata inspection: the acquired lock record is removed and a retry can save the goal. The focused regression passes; other persistence-boundary fault injection remains open.
 - Worktree lease and subagent slot acquisition failures now verify the acquired file identity and random lock token before cleanup, preserving replacement lock files. Focused fault-injection regressions pass for both paths.
 - Shared application-update and extension-feed cache locks now verify a random lock token as well as file identity before cleanup. A focused replacement-lock regression passes.
+- Persistent approval-rule locks now carry random ownership tokens; cleanup verifies the token and file identity. A focused same-identity replacement regression passes.
 
 ## Bounded session record reads — 2026-10-28
 
