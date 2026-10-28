@@ -637,6 +637,35 @@ test("version-one database upgrades through every migration without losing saved
   } finally { upgraded.close(); }
 }));
 
+test("failed multi-statement migration rolls back cleanly and can be retried", async () => withTemp(async (root) => {
+  const path = join(root, "migration-rollback.sqlite");
+  const initial = new XystStore(path);
+  const saved = new SessionStore(initial);
+  const sessionId = saved.create("Preserve across failed migration");
+  saved.addMessage(sessionId, "user", "Keep this message during recovery");
+  initial.db.exec("DROP TABLE session_compactions; DELETE FROM schema_migrations WHERE version=15; CREATE INDEX session_compactions_recent ON sessions(updated_at)");
+  initial.close();
+
+  assert.throws(() => new XystStore(path), /index session_compactions_recent already exists/i);
+
+  const failed = new Database(path);
+  try {
+    assert.equal((failed.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 14);
+    assert.equal(failed.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_compactions'").get(), undefined);
+    assert.equal((failed.prepare("SELECT content FROM messages WHERE session_id=?").get(sessionId) as { content: string }).content, "Keep this message during recovery");
+    assert.equal((failed.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
+    failed.exec("DROP INDEX session_compactions_recent");
+  } finally { failed.close(); }
+
+  const recovered = new XystStore(path);
+  try {
+    assert.equal((recovered.db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version, 15);
+    assert.notEqual(recovered.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_compactions'").get(), undefined);
+    assert.equal((new SessionStore(recovered).messages(sessionId) as Array<{ content: string }>)[0]?.content, "Keep this message during recovery");
+    assert.equal((recovered.db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
+  } finally { recovered.close(); }
+}));
+
 test("job inspection aggregates persisted trigger, mission-run, and model-download records", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "jobs.sqlite")); const jobs = new JobStore(store); const now = new Date().toISOString();
   const missionId = randomUUID(); const runId = randomUUID(); const triggerId = randomUUID(); const downloadId = randomUUID(); const lmJobId = "lm-job-17";

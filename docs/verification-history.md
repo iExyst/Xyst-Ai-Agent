@@ -1802,6 +1802,11 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 - Built a clean legacy v1 SQLite profile with the original session/message/tool, mission, agent, job, artifact, usage, and settings schema plus a saved user message. Opening it with the current runtime applied migrations 2 through 15, preserved the exact historical message, and returned `PRAGMA integrity_check = ok`.
 - Focused migration regression passed 1/1. Full `npm test` passed (runtime 185 passed / 2 host-specific skips, CLI 26/26, release checks 5/5), workspace `npm run typecheck` passed, and `git diff --check` passed. This verifies a clean version-one upgrade path only; other starting versions, large production-sized databases, and crash interruption remain open under E7.
 
+## SQLite migration rollback and retry · 2026-10-28
+
+- A new regression forced migration 15 to fail after its `session_compactions` table was created but before its index was added. SQLite rolled back the table creation, left `schema_migrations` at 14, preserved the saved session message, and passed `PRAGMA integrity_check`; after removing the deliberate conflicting index, reopening the runtime applied migration 15 successfully and preserved the message. `XystStore` now closes its database handle if initialization or a migration throws.
+- The focused migration test passed 1/1; full Windows runtime suite passed 191 tests with 2 host-specific skips and 0 failures. Workspace `npm run typecheck` and `git diff --check` passed. This verifies one bounded failed-statement rollback/retry case, not process-kill interruption or every historical starting version; E7 remains partial.
+
 ## Mission scheduler missed-run policy · 2026-10-28
 
 - Added deterministic restart coverage for two due schedules: `run_once` executes the mission once with the exact persisted `next_run_at` timestamp, then advances the next run; `skip` emits no mission run for stale work.

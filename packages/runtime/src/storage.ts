@@ -87,10 +87,15 @@ export class XystStore {
     const absolute = resolve(path);
     mkdirSync(dirname(absolute), { recursive: true });
     this.db = new Database(absolute);
-    this.db.pragma("busy_timeout = 10000");
-    this.setJournalModeWithRetry();
-    this.db.pragma("foreign_keys = ON");
-    this.migrate();
+    try {
+      this.db.pragma("busy_timeout = 10000");
+      this.setJournalModeWithRetry();
+      this.db.pragma("foreign_keys = ON");
+      this.migrate();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
 
   private setJournalModeWithRetry(): void {
