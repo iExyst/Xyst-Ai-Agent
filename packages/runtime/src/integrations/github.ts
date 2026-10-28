@@ -100,13 +100,26 @@ export class GitHubProvider {
     return await response.json() as T;
   }
   async paginate<T>(path: string, maxPages = 5, signal?: AbortSignal): Promise<T[]> {
-    const output: T[] = []; let next: string | undefined = `${this.apiBase}${path}`; const token = await this.token(signal);
+    const output: T[] = []; const apiBase = new URL(this.apiBase); const apiPathPrefix = apiBase.pathname.replace(/\/+$/, "");
+    let next: string | undefined = `${this.apiBase}${path}`; const token = await this.token(signal);
     for (let page = 0; page < Math.max(1, Math.min(maxPages, 10)) && next; page++) {
       let response: Response;
-      try { response = await fetch(next, { headers: this.headers(token), ...(signal ? { signal } : {}) }); } catch (error) { throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
+      try { response = await fetch(next, { headers: this.headers(token), redirect: "error", ...(signal ? { signal } : {}) }); } catch (error) { throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
       if (!response.ok) throw await this.error(response);
       const body = await response.json() as T[]; output.push(...body);
-      const link = response.headers.get("link"); next = link?.split(",").map((part) => part.trim()).find((part) => part.endsWith('rel="next"'))?.match(/<([^>]+)>/)?.[1];
+      const link = response.headers.get("link"); const candidate = link?.split(",").map((part) => part.trim()).find((part) => {
+        const relations = part.match(/;\s*rel\s*=\s*"?([^";,]+)"?/i)?.[1]?.split(/\s+/) ?? [];
+        return relations.includes("next");
+      })?.match(/<([^>]+)>/)?.[1];
+      if (!candidate) { next = undefined; continue; }
+      let nextUrl: URL;
+      try { nextUrl = new URL(candidate, apiBase); }
+      catch { throw new GitHubError("GitHub pagination returned an invalid next-page URL"); }
+      const pathIsInApi = !apiPathPrefix || nextUrl.pathname === apiPathPrefix || nextUrl.pathname.startsWith(`${apiPathPrefix}/`);
+      if (nextUrl.origin !== apiBase.origin || !pathIsInApi || nextUrl.username || nextUrl.password) {
+        throw new GitHubError("GitHub pagination next-page URL must remain on the configured API host and path");
+      }
+      next = nextUrl.href;
     }
     return output;
   }
