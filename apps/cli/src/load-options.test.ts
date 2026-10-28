@@ -213,3 +213,41 @@ test("Linux mission service install, status, and removal manage only the request
     assert.deepEqual(commands.slice(0, 3), ["systemctl --user daemon-reload", "systemctl --user enable --now xyst-mission-daemon", "systemctl --user show xyst-mission-daemon --property=LoadState --property=ActiveState --property=SubState"]);
   } finally { await rm(configHome, { recursive: true, force: true }); }
 });
+
+test("Windows mission service install, status, and removal use Task Scheduler safely", async () => {
+  const scripts: string[] = [];
+  const run = async (command: string, args: string[]): Promise<ProcessResult> => {
+    assert.equal(command, "powershell.exe");
+    assert.deepEqual(args.slice(0, 3), ["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
+    const script = Buffer.from(args[3]!, "base64").toString("utf16le");
+    scripts.push(script);
+    const stdout = script.includes("Get-ScheduledTaskInfo") ? '{"installed":true,"state":"Running","lastTaskResult":0}' : "";
+    return { code: 0, signal: null, stdout, stderr: "", durationMs: 1 };
+  };
+  const spec = {
+    executable: "C:\\Program Files\\Xyst\\node.exe",
+    cliEntry: "C:\\Users\\Operator\\Xyst Agent\\cli.js",
+    workingDirectory: "C:\\Users\\Operator\\Project",
+    daemonArguments: ["--webhook-path", "/github/webhook", "--webhook-host", "127.0.0.1", "--webhook-port", "8787"]
+  };
+
+  const installed = await installMissionService("win32", spec, run);
+  assert.deepEqual([installed.installed, installed.manager, installed.trigger, installed.started], [true, "task-scheduler", "at-logon", true]);
+  assert.match(scripts[0]!, /New-ScheduledTaskAction/);
+  assert.match(scripts[0]!, /New-ScheduledTaskTrigger -AtLogOn/);
+  assert.match(scripts[0]!, /-LogonType Interactive -RunLevel Limited/);
+  assert.match(scripts[0]!, /-MultipleInstances IgnoreNew/);
+  assert.match(scripts[0]!, /Register-ScheduledTask/);
+  assert.match(scripts[0]!, /Start-ScheduledTask/);
+  assert.match(scripts[0]!, /--webhook-path/);
+  assert.ok(scripts[0]!.includes('"C:\\Users\\Operator\\Xyst Agent\\cli.js" "mission" "daemon"'));
+
+  const status = await missionServiceStatus("win32", run);
+  assert.deepEqual([status.installed, status.state, status.lastTaskResult], [true, "Running", 0]);
+  assert.match(scripts[1]!, /Get-ScheduledTaskInfo/);
+
+  const removed = await uninstallMissionService("win32", run);
+  assert.deepEqual([removed.installed, removed.manager], [false, "task-scheduler"]);
+  assert.match(scripts[2]!, /Stop-ScheduledTask/);
+  assert.match(scripts[2]!, /Unregister-ScheduledTask/);
+});

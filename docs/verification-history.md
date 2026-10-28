@@ -1826,3 +1826,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added a second process-level regression: the original process holds mission work, its persisted lease expires, and a separate Node process resumes that same run. The old process aborts and returns without finalizing the successor's active state; then the successor completes the run, and persisted run/task/mission state is completed exactly once.
 - Focused takeover test passed 1/1 on Windows. This proves one bounded expired-lease handoff; long-duration contention/restart stress remains open under C4.
+
+## Windows mission service lifecycle command-boundary regression · 2026-10-28
+
+- Added a Windows Task Scheduler lifecycle regression that runs the CLI's injectable PowerShell boundary for install, status, and uninstall. It decodes the actual UTF-16LE `-EncodedCommand`, checks quoted executable/CLI arguments, webhook options, at-logon trigger, limited interactive principal, single-instance/restart settings, status JSON parsing, and stop/unregister commands.
+- `npm run test --workspace @xyst/cli` passed 27/27 and workspace `npm run typecheck` passed on Windows. A separate `scripts/smoke-windows-mission-service.mjs` now installs the daemon through the real CLI on the disposable hosted Windows package runner, waits for Task Scheduler to report `Running`, then uninstalls and confirms the task is absent. It refuses to replace a preexisting task and cleans up after failures; this live smoke has not passed on the current [PR #55](https://github.com/iExyst/Xyst-Ai-Agent-PC/pull/55) head yet. No Windows Task Scheduler task has been registered on the user's PC. This covers one ephemeral runner session, not logoff/reboot recovery or long-term service behavior.

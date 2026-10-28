@@ -32,6 +32,9 @@ jobs:
       - name: Smoke test clean Windows install and renderer
         if: runner.os == 'Windows'
         run: node scripts/smoke-packaged-windows-gui.mjs
+      - name: Smoke test live Windows mission service lifecycle
+        if: runner.os == 'Windows'
+        run: node scripts/smoke-windows-mission-service.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
