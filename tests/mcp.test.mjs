@@ -357,6 +357,11 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
     () => validateArguments(definition.parameters, { text: 'hello', recursive_tree: { value: 1, children: [{ value: 'bad' }] } }),
     /valid integer/,
   );
+  let deepTree = { value: 0 };
+  for (let depth = 0; depth < 130; depth++) deepTree = { value: depth, children: [deepTree] };
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', recursive_tree: deepTree }), {
+    code: 'MCP_SCHEMA_EVALUATION_LIMIT',
+  });
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_text: 'x' }), /characters/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_tight: 'abc' }).ref_tight, 'abc');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_tight: 'longer' }), /characters/);

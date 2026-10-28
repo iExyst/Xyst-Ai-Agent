@@ -2649,7 +2649,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - String `pattern`, object `patternProperties`, `propertyNames`, `dependentRequired`, and `dependentSchemas` are checked for both transports. Type-free subschemas apply their assertions to matching JSON value types; `required` names need not also appear in `properties`. Pattern source, pattern count, object size under pattern validation, and total regex checks are bounded; each regex runs in a VM context with a 10 ms limit to contain catastrophic backtracking.
 - Array `contains`, `minContains`, and `maxContains` count matching items and cap validation at 10,000 elements.
 - Array `prefixItems` validates positional schemas; `items` applies only to entries after the prefix. Prefix schemas are capped at 64.
-- Local JSON Pointer `$ref`s resolve against the root schema and `$defs`; sibling constraints are applied conjunctively. Recursive, external, and dangling references fail closed and remain unsupported.
+- Local JSON Pointer `$ref`s resolve against the root schema and `$defs`; sibling constraints are applied conjunctively. Same-document recursive references now support nested instances with a runtime evaluation-depth limit; external and dangling references fail closed.
 - The focused stdio and Streamable HTTP regressions pass (2/2), including pattern match/mismatch, object key constraints and dependencies, type-free assertions, and a catastrophic-pattern case; changed-file Biome checks and `git diff --check` pass. Other JSON Schema keywords remain open.
 - MCP tools' bounded object `outputSchema` is now retained for both stdio and HTTP transports. Successful calls must include `structuredContent` matching the advertised schema; malformed output fails with `MCP_INVALID_RESULT`, while server-declared error results pass through. Focused stdio-manager and Streamable HTTP regressions verify valid and invalid output on both paths; changed-file Biome/whitespace checks pass.
 - Streamable HTTP `x-mcp-header` extraction now follows local `$ref`s and bounded composition branches, so valid annotations in `$defs` still populate their request header. The focused HTTP integration regression verifies the referenced value reaches the server.
@@ -2714,7 +2714,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Recursive MCP JSON Schema references — 2026-10-28
 
 - Stdio and Streamable HTTP now preserve same-document recursive `$ref` links so schemas can validate nested data such as tree-shaped objects. Reference evaluation has a 128-step runtime limit; external references remain rejected.
-- Both transports cover a valid nested tree and an invalid child value. `node --test tests/mcp.test.mjs` passes 37 tests with one expected Linux Bubblewrap capability skip; changed-file Biome and whitespace checks pass. Exact-source hosted Windows/Linux CI is pending.
+- Both transports cover valid nested trees and invalid child values; the stdio case also verifies that excessive recursive depth is rejected. `node --test tests/mcp.test.mjs` passed 37 tests with one expected Linux Bubblewrap capability skip; the additional depth regression passes locally. Changed-file Biome and whitespace checks pass. Exact-source hosted Windows/Linux CI is pending.
 
 ## CI runner throughput — 2026-10-28
 
