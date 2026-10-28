@@ -94,7 +94,7 @@ export class GitHubProvider {
     const token = await this.token(signal);
     let response: Response;
     try { response = await fetch(`${this.apiBase}${path}`, { ...init, headers: this.headers(token), ...(signal ? { signal } : {}) }); }
-    catch (error) { throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
     if (!response.ok) throw await this.error(response);
     if (response.status === 204) return undefined as T;
     return await response.json() as T;
@@ -104,7 +104,8 @@ export class GitHubProvider {
     let next: string | undefined = `${this.apiBase}${path}`; const token = await this.token(signal);
     for (let page = 0; page < Math.max(1, Math.min(maxPages, 10)) && next; page++) {
       let response: Response;
-      try { response = await fetch(next, { headers: this.headers(token), redirect: "error", ...(signal ? { signal } : {}) }); } catch (error) { throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
+      try { response = await fetch(next, { headers: this.headers(token), redirect: "error", ...(signal ? { signal } : {}) }); } catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
+      try { response = await fetch(next, { headers: this.headers(token), ...(signal ? { signal } : {}) }); } catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
       if (!response.ok) throw await this.error(response);
       const body = await response.json() as T[]; output.push(...body);
       const link = response.headers.get("link"); const candidate = link?.split(",").map((part) => part.trim()).find((part) => {
@@ -138,7 +139,7 @@ export class GitHubProvider {
     if (!appId || !privateKey) return { authenticated: false, message: "GitHub App credentials are incomplete" };
     let response: Response;
     try { response = await fetch(`${this.apiBase}/app`, { headers: this.headers(signAppJwt(appId, privateKey)), ...(signal ? { signal } : {}) }); }
-    catch (error) { throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
     if (!response.ok) throw await this.error(response);
     const app = await response.json() as { slug: string; html_url: string };
     const login = `${app.slug}[bot]`; this.authenticatedUser = { login, url: app.html_url, type: "App", expiresAt: Date.now() + 5 * 60_000 };
@@ -179,7 +180,7 @@ export class GitHubProvider {
     const token = await this.token(signal);
     let response: Response;
     try { response = await fetch(`${this.apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}/logs`, { headers: this.headers(token), ...(signal ? { signal } : {}) }); }
-    catch (error) { throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
     if (!response.ok) throw await this.error(response);
     const declaredSize = Number(response.headers.get("content-length") ?? 0);
     if (declaredSize > 25 * 1024 * 1024) throw new GitHubError("Workflow logs archive exceeds the 25 MiB download limit");
@@ -217,7 +218,7 @@ export class GitHubProvider {
     const token = await this.token(signal); const headers = this.headers(token); headers.set("Accept", "application/octet-stream");
     let response: Response;
     try { response = await fetch(`${this.apiBase}${path}`, { headers, ...(signal ? { signal } : {}) }); }
-    catch (error) { throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed: ${error instanceof Error ? error.message : String(error)}`); }
     if (!response.ok) throw await this.error(response);
     const declaredSize = Number(response.headers.get("content-length") ?? 0);
     if (declaredSize > 100 * 1024 * 1024) throw new GitHubError("GitHub archive exceeds the 100 MiB download limit");

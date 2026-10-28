@@ -2476,11 +2476,18 @@ test("GitHub API tools pass agent cancellation through to HTTP requests", async 
   const server = createServer(() => undefined);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const controller = new AbortController();
   const provider = new GitHubProvider({ get: async () => undefined } as never, { apiBase: `http://127.0.0.1:${address.port}` });
-  const request = provider.repository("example", "repo", controller.signal);
-  setTimeout(() => controller.abort(), 50);
-  try { await assert.rejects(request, /GitHub connection failed/); }
+  const assertAbort = async (request: Promise<unknown>) => assert.rejects(request, (error: unknown) => error instanceof Error && error.name === "AbortError");
+  const abort = (request: (signal: AbortSignal) => Promise<unknown>) => {
+    const controller = new AbortController();
+    const pending = request(controller.signal);
+    setTimeout(() => controller.abort(), 50);
+    return pending;
+  };
+  try {
+    await assertAbort(abort((signal) => provider.repository("example", "repo", signal)));
+    await assertAbort(abort((signal) => provider.paginate("/repos/example/repo/issues", 2, signal)));
+  }
   finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
 });
 
