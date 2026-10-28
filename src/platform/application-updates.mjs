@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWriteJson, restoreAtomicWriteBackup } from './files.mjs';
+import { atomicWriteJson, readBoundedFileHandle, restoreAtomicWriteBackup } from './files.mjs';
 import { canonicalJson } from '../extensions/signed-packages.mjs';
 import { withFeedCacheLock } from '../extensions/feed-cache-lock.mjs';
 
@@ -256,8 +256,8 @@ async function readSequenceState(filePath) {
     const opened = await handle.stat();
     if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== info.dev || opened.ino !== info.ino || opened.size !== info.size)
       throw updateError('Application update sequence cache changed while reading', 'APP_UPDATE_CACHE_INVALID');
-    const bytes = await handle.readFile();
-    if (bytes.length > 4096 || bytes.length !== info.size)
+    const bytes = await readBoundedFileHandle(handle, 4096);
+    if (bytes === null || bytes.length !== info.size)
       throw updateError('Application update sequence cache exceeds its limit', 'APP_UPDATE_CACHE_INVALID');
     const state = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     if (

@@ -343,6 +343,41 @@ test('application update metadata cannot roll back or equivocate after a signed 
   assert.ok((await fs.stat(path.join(cacheDirectory, 'application-updates-stable.json'))).isFile());
 });
 
+test('application update sequence cache reads stop at its byte limit during concurrent growth', async (t) => {
+  const cacheDirectory = await createTempDirectory('xyst-app-update-bounded-cache-');
+  t.after(() => fs.rm(cacheDirectory, { recursive: true, force: true }));
+  const first = signedFeed({ sequence: 7 });
+  const options = {
+    settings: settings(first.publicKey),
+    currentVersion: '0.1.0',
+    platform: 'win32',
+    arch: 'x64',
+    now: NOW,
+    cacheDirectory,
+    fetchImpl: async () => Response.json(first.feed),
+  };
+  await checkApplicationUpdates(options);
+
+  const filePath = path.join(cacheDirectory, 'application-updates-stable.json');
+  const probe = await fs.open(filePath, 'r');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const read = fileHandlePrototype.read;
+  const requests = [];
+  fileHandlePrototype.read = async (buffer, offset, length, _position) => {
+    requests.push(length);
+    buffer.fill(0, offset, offset + length);
+    return { bytesRead: length, buffer };
+  };
+  try {
+    await assert.rejects(checkApplicationUpdates(options), { code: 'APP_UPDATE_CACHE_INVALID' });
+    assert.deepEqual(requests, [4097]);
+  } finally {
+    fileHandlePrototype.read = read;
+  }
+  assert.ok((await fs.stat(filePath)).isFile());
+});
+
 test('application update refresh restores an interrupted cache before checking replay sequence', async (t) => {
   const cacheDirectory = await createTempDirectory('xyst-app-update-recovery-');
   t.after(() => fs.rm(cacheDirectory, { recursive: true, force: true }));

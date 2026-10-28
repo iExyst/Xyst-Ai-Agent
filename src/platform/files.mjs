@@ -251,7 +251,7 @@ export async function restoreAtomicWriteBackup(destination, { maxBytes, decode, 
   return record;
 }
 
-async function readBoundedFileHandle(handle, maxBytes) {
+export async function readBoundedFileHandle(handle, maxBytes) {
   const chunks = [];
   let totalBytes = 0;
   while (totalBytes <= maxBytes) {

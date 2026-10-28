@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## Bounded application update replay-cache reads — 2026-10-28
+
+- The signed application-update sequence cache now uses the shared bounded file-handle reader, so a cache that grows after its metadata check cannot trigger an unbounded allocation while anti-replay state is being verified. Oversized or changed cache contents fail closed as `APP_UPDATE_CACHE_INVALID`.
+- The focused application-update and platform-file suites pass 20 tests with two expected Windows-only skips; an injected-growth regression verifies reads stop at 4,097 bytes. Changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+
 ## Bounded atomic-backup recovery reads — 2026-10-28
 
 - Atomic-backup recovery now reads in fixed-size chunks and stops at `maxBytes + 1`, preventing a backup that grows after its metadata check from causing an unbounded allocation. Oversized content is rejected while the recovery backup is preserved.
