@@ -815,6 +815,39 @@ test('session lock timeout reports contention without changing the session', asy
   assert.equal((await store.load(session.id)).title, undefined);
 });
 
+test('session lock cleanup preserves a replacement lock owned by another writer', async (t) => {
+  const root = await createTempDirectory('xyst-session-lock-replacement-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore(root);
+  const session = store.create();
+  const lockPath = path.join(store.lockDirectory, `${session.id}.lock`);
+  const rename = fs.rename;
+  let replaced = false;
+  let unavailable;
+  fs.rename = async (source, destination) => {
+    const result = await rename(source, destination);
+    if (!replaced && path.resolve(destination) === path.resolve(path.join(store.directory, `${session.id}.json`))) {
+      try {
+        await fs.rm(lockPath);
+        await fs.writeFile(lockPath, 'replacement session writer lock');
+        replaced = true;
+      } catch (error) {
+        if (process.platform === 'win32' && ['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) unavailable = error.code;
+        else throw error;
+      }
+    }
+    return result;
+  };
+  try {
+    await store.save(session);
+  } finally {
+    fs.rename = rename;
+  }
+  if (unavailable) return t.skip(`Open lock replacement is unavailable: ${unavailable}`);
+  assert.equal(replaced, true);
+  assert.equal(await fs.readFile(lockPath, 'utf8'), 'replacement session writer lock');
+});
+
 test('session grants match only the exact tool arguments, expire, revoke, and do not fork', async (t) => {
   const root = await createTempDirectory('xyst-session-grants-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

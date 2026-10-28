@@ -687,12 +687,31 @@ export class SessionStore {
         await new Promise((resolve) => setTimeout(resolve, Math.min(20, Math.max(1, deadline - Date.now()))));
       }
     }
+    const lockRecord = JSON.stringify({
+      lock_id: randomUUID(),
+      pid: process.pid,
+      hostname: os.hostname(),
+      started_at: new Date().toISOString(),
+    });
+    let lockIdentity;
     try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, hostname: os.hostname(), started_at: new Date().toISOString() }));
+      lockIdentity = await handle.stat();
+      await handle.writeFile(lockRecord);
       return await operation();
     } finally {
       await handle.close().catch(() => {});
-      await fs.rm(lockPath, { force: true }).catch(() => {});
+      if (lockIdentity) {
+        const current = await fs.lstat(lockPath).catch(() => null);
+        const stableIdentity = Number.isFinite(lockIdentity.ino) && lockIdentity.ino !== 0;
+        if (
+          current?.isFile() &&
+          !current.isSymbolicLink() &&
+          (!stableIdentity || (current.dev === lockIdentity.dev && current.ino === lockIdentity.ino))
+        ) {
+          const currentRecord = await fs.readFile(lockPath, 'utf8').catch(() => null);
+          if (currentRecord === lockRecord) await fs.rm(lockPath, { force: true }).catch(() => {});
+        }
+      }
     }
   }
 }

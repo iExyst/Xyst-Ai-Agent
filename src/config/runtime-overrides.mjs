@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
-import { createPublicKey } from 'node:crypto';
+import { createPublicKey, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { atomicWriteJson, hasAtomicWriteBackup, readBoundedFileHandle, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { isValidUiShortcut } from '../core/keybindings.mjs';
@@ -533,8 +533,11 @@ export async function updateRuntimeOverrides(filePath, patch, { lockWaitMs = 10_
     throw Object.assign(new Error('Timed out waiting for the runtime settings lock; inspect the adjacent .lock file before recovery'), {
       code: 'SETTINGS_LOCKED',
     });
+  const lockRecord = JSON.stringify({ lock_id: randomUUID(), pid: process.pid, started_at: new Date().toISOString() });
+  let lockIdentity;
   try {
-    await lockHandle.writeFile(JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+    lockIdentity = await lockHandle.stat();
+    await lockHandle.writeFile(lockRecord);
     await restoreAtomicWriteBackup(filePath, {
       maxBytes: MAX_OVERRIDE_BYTES,
       decode: (serialized) => validateRuntimeOverrides(JSON.parse(serialized)),
@@ -545,7 +548,18 @@ export async function updateRuntimeOverrides(filePath, patch, { lockWaitMs = 10_
     return merged;
   } finally {
     await lockHandle.close().catch(() => {});
-    await fs.rm(lockPath, { force: true }).catch(() => {});
+    if (lockIdentity) {
+      const current = await fs.lstat(lockPath).catch(() => null);
+      const stableIdentity = Number.isFinite(lockIdentity.ino) && lockIdentity.ino !== 0;
+      if (
+        current?.isFile() &&
+        !current.isSymbolicLink() &&
+        (!stableIdentity || (current.dev === lockIdentity.dev && current.ino === lockIdentity.ino))
+      ) {
+        const currentRecord = await fs.readFile(lockPath, 'utf8').catch(() => null);
+        if (currentRecord === lockRecord) await fs.rm(lockPath, { force: true }).catch(() => {});
+      }
+    }
   }
 }
 

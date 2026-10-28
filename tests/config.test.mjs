@@ -5,7 +5,40 @@ import path from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
 import { parseToml } from '../src/config/toml.mjs';
 import { loadConfig, defaultConfigPath, validateConfig } from '../src/config/load.mjs';
+import { updateRuntimeOverrides } from '../src/config/runtime-overrides.mjs';
 import { createTempDirectory } from './helpers.mjs';
+
+test('runtime settings lock cleanup preserves a replacement lock owned by another writer', async (t) => {
+  const root = await createTempDirectory('xyst-runtime-lock-replacement-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'settings.json');
+  const lockPath = `${filePath}.lock`;
+  const rename = fs.rename;
+  let replaced = false;
+  let unavailable;
+  fs.rename = async (source, destination) => {
+    const result = await rename(source, destination);
+    if (!replaced && path.resolve(destination) === path.resolve(filePath)) {
+      try {
+        await fs.rm(lockPath);
+        await fs.writeFile(lockPath, 'replacement settings writer lock');
+        replaced = true;
+      } catch (error) {
+        if (process.platform === 'win32' && ['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) unavailable = error.code;
+        else throw error;
+      }
+    }
+    return result;
+  };
+  try {
+    await updateRuntimeOverrides(filePath, { routing: { enabled: false } });
+  } finally {
+    fs.rename = rename;
+  }
+  if (unavailable) return t.skip(`Open lock replacement is unavailable: ${unavailable}`);
+  assert.equal(replaced, true);
+  assert.equal(await fs.readFile(lockPath, 'utf8'), 'replacement settings writer lock');
+});
 
 test('TOML subset parses nested tables, dotted keys, arrays, comments and strings', () => {
   const config = parseToml(`default_model = "local # 1" # trailing comment
