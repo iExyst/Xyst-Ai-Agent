@@ -109,8 +109,15 @@ export async function buildReleaseArchive({ outputDirectory = path.join(ROOT, 'd
   await fs.mkdir(outputDirectory, { recursive: true });
   const destination = path.join(outputDirectory, archiveName);
   const temporary = `${destination}.${randomUUID()}.tmp`;
+  let ownsTemporary = false;
   try {
-    await fs.writeFile(temporary, archive, { flag: 'wx' });
+    const handle = await fs.open(temporary, 'wx');
+    ownsTemporary = true;
+    try {
+      await handle.writeFile(archive);
+    } finally {
+      await handle.close();
+    }
     try {
       await fs.rename(temporary, destination);
     } catch (error) {
@@ -118,7 +125,7 @@ export async function buildReleaseArchive({ outputDirectory = path.join(ROOT, 'd
       await replaceExisting(temporary, destination);
     }
   } catch (error) {
-    await fs.rm(temporary, { force: true }).catch(() => {});
+    if (ownsTemporary) await fs.rm(temporary, { force: true }).catch(() => {});
     throw error;
   }
   return {

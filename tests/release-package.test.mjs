@@ -100,6 +100,32 @@ test('release archive is reproducible and contains verified source files without
   assert.ok(![...entries.keys()].some((name) => /(^|\/)(\.git|\.agent|\.test-tmp|node_modules|target)(\/|$)/.test(name)));
 });
 
+test('release archive generation preserves a temporary-path collision', async (t) => {
+  const scratchRoot = path.join(process.cwd(), '.test-tmp');
+  await fs.mkdir(scratchRoot, { recursive: true });
+  const root = await fs.mkdtemp(path.join(scratchRoot, 'xyst-release-temp-collision-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const outputDirectory = path.join(root, 'output');
+  const open = fs.open;
+  let collisionPath;
+  fs.open = async (filePath, flags, ...args) => {
+    if (filePath.includes('xyst-ai-assistant-v0.1.2-source.tar.gz.') && filePath.endsWith('.tmp') && flags === 'wx') {
+      collisionPath = filePath;
+      const collision = await open(filePath, 'wx', ...args);
+      await collision.writeFile('pre-existing release temp');
+      await collision.close();
+      throw Object.assign(new Error('simulated exclusive-create collision'), { code: 'EEXIST' });
+    }
+    return open(filePath, flags, ...args);
+  };
+  try {
+    await assert.rejects(buildReleaseArchive({ outputDirectory }), { code: 'EEXIST' });
+    assert.equal(await fs.readFile(collisionPath, 'utf8'), 'pre-existing release temp');
+  } finally {
+    fs.open = open;
+  }
+});
+
 function unpackTar(tar) {
   const entries = new Map();
   let offset = 0;
