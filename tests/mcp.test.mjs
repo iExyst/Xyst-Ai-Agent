@@ -30,6 +30,11 @@ const readline = require('node:readline');
 const lines = readline.createInterface({ input: process.stdin });
 const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
 const sendMethodResult = (request, result) => {
+  if (request.method === 'tools/list' && result.tools?.[0]?.inputSchema) {
+    result.tools[0].inputSchema.$defs = { ShortText: { type: 'string', minLength: 2 } };
+    result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
+    result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
+  }
   if (${legacy ? 'false' : 'true'}) {
     result.resultType ||= 'complete';
     if (['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(request.method)) {
@@ -265,6 +270,10 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   ]);
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', tuple_values: ['name', 'wrong'] }), /valid integer/);
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', tuple_values: ['name', 2, 'wrong'] }), /boolean/);
+  assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_text: 'short' }).ref_text, 'short');
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_text: 'x' }), /characters/);
+  assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_tight: 'abc' }).ref_tight, 'abc');
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_tight: 'longer' }), /characters/);
   assert.deepEqual(validateArguments(definition.parameters, { text: 'hello', object_choice: { mode: 'fast' } }), {
     text: 'hello',
     object_choice: { mode: 'fast' },
@@ -880,6 +889,11 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                         resultType: callResultType || 'complete',
                       };
     result.resultType ||= 'complete';
+    if (request.method === 'tools/list') {
+      result.tools[0].inputSchema.$defs = { ShortText: { type: 'string', minLength: 2 } };
+      result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
+      result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
+    }
     if (
       ['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(
         request.method,
@@ -1028,6 +1042,10 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
     () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', tuple_values: ['name', 2, 'wrong'] }),
     /boolean/,
   );
+  assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_text: 'short' }).ref_text, 'short');
+  assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_text: 'x' }), /characters/);
+  assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_tight: 'abc' }).ref_tight, 'abc');
+  assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_tight: 'longer' }), /characters/);
   assert.deepEqual(
     validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', any_value: 42, extension_field: 'accepted' }),
     { text: 'hello', region: 'Québec', any_value: 42, extension_field: 'accepted' },
