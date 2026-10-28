@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## Bounded runtime settings reads — 2026-10-28
+
+- Runtime settings now use the shared capped file-handle reader, stop at 64 KiB plus one byte, and revalidate identity/version before decoding. Concurrent growth or replacement is rejected rather than causing an unbounded read or applying stale preferences.
+- Focused settings recovery and injected-growth regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+
 ## Bounded usage-budget ledger reads — 2026-10-28
 
 - The shared token/cost ledger now reads through the capped file-handle helper, stops at 4 MiB plus one byte, and verifies that the opened record and current path retain the same file version before decoding. Concurrent growth or replacement fails closed instead of risking unbounded allocation or stale limit accounting.

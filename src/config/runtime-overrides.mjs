@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { createPublicKey } from 'node:crypto';
 import { isIP } from 'node:net';
-import { atomicWriteJson, hasAtomicWriteBackup, restoreAtomicWriteBackup } from '../platform/files.mjs';
+import { atomicWriteJson, hasAtomicWriteBackup, readBoundedFileHandle, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { isValidUiShortcut } from '../core/keybindings.mjs';
 import { RUN_BUDGET_FIELDS } from '../core/budgets.mjs';
 import { normalizeSandboxMode, SANDBOX_MODES, SANDBOX_PROCESS_TOOLS } from '../platform/sandbox-modes.mjs';
@@ -462,7 +463,7 @@ export async function loadRuntimeOverrides(filePath) {
   if (!filePath) return {};
   let info;
   try {
-    info = await fs.lstat(filePath);
+    info = await fs.lstat(filePath, { bigint: true });
   } catch (error) {
     if (error.code === 'ENOENT') {
       if (await hasAtomicWriteBackup(filePath))
@@ -473,10 +474,38 @@ export async function loadRuntimeOverrides(filePath) {
     }
     throw error;
   }
-  if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_OVERRIDE_BYTES)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink > 1n || info.size > BigInt(MAX_OVERRIDE_BYTES))
     throw new Error('Runtime settings file must be a bounded regular file');
-  const parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
+  const handle = await fs.open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+  let bytes;
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || opened.nlink > 1n || opened.dev !== info.dev || opened.ino !== info.ino || opened.size !== info.size)
+      throw new Error('Runtime settings file changed while it was being opened');
+    if (opened.size > BigInt(MAX_OVERRIDE_BYTES)) throw new Error('Runtime settings file must be a bounded regular file');
+    bytes = await readBoundedFileHandle(handle, MAX_OVERRIDE_BYTES);
+    if (bytes === null) throw new Error('Runtime settings file must be a bounded regular file');
+    const [after, current] = await Promise.all([handle.stat({ bigint: true }), fs.lstat(filePath, { bigint: true })]);
+    if (!sameRuntimeSettingsVersion(opened, after) || !sameRuntimeSettingsVersion(opened, current))
+      throw new Error('Runtime settings file changed while it was being read');
+  } finally {
+    await handle.close();
+  }
+  const parsed = JSON.parse(bytes.toString('utf8'));
   return validateRuntimeOverrides(parsed);
+}
+
+function sameRuntimeSettingsVersion(first, second) {
+  return (
+    second.isFile() &&
+    !second.isSymbolicLink() &&
+    second.nlink <= 1n &&
+    second.dev === first.dev &&
+    second.ino === first.ino &&
+    second.size === first.size &&
+    second.mtimeNs === first.mtimeNs &&
+    second.ctimeNs === first.ctimeNs
+  );
 }
 
 export async function updateRuntimeOverrides(filePath, patch, { lockWaitMs = 10_000 } = {}) {

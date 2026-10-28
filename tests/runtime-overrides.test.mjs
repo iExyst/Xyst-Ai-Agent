@@ -316,6 +316,30 @@ test('runtime settings update recovers an interrupted replacement without hiding
   await assert.rejects(fs.stat(backup), { code: 'ENOENT' });
 });
 
+test('runtime settings reads stop at the configured size limit plus one byte during concurrent growth', async (t) => {
+  const root = await createTempDirectory('xyst-runtime-bounded-read-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'config.toml.runtime.json');
+  await updateRuntimeOverrides(file, { ui: { theme: 'dark' } });
+
+  const probe = await fs.open(file, 'r');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const read = fileHandlePrototype.read;
+  let bytesRead = 0;
+  fileHandlePrototype.read = async (buffer, offset, length) => {
+    buffer.fill(0, offset, offset + length);
+    bytesRead += length;
+    return { bytesRead: length, buffer };
+  };
+  try {
+    await assert.rejects(loadRuntimeOverrides(file), /Runtime settings file must be a bounded regular file/);
+    assert.equal(bytesRead, 64 * 1024 + 1);
+  } finally {
+    fileHandlePrototype.read = read;
+  }
+});
+
 test('runtime shortcut updates merge per action and restore defaults on null', async (t) => {
   const root = await createTempDirectory('xyst-runtime-shortcuts-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
