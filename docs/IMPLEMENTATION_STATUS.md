@@ -3,7 +3,8 @@
 ## MCP binary payload validation — 2026-10-28
 
 - MCP image/audio data and blob resource contents enforce canonical base64 byte strings from the pinned `2026-07-28` schema. Malformed characters, padding, and pad bits are rejected before the result is passed to tool or resource handling. Exact-source run [40657161271](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40657161271) passed these protocol regressions on Windows and Ubuntu under Node 22/24.
-- Modern MCP metadata now validates the schema's prefix/name grammar at the result, tool, resource, prompt, and content levels. Legacy metadata remains compatible. The focused MCP protocol suite passes 8/8; changed-file Biome and whitespace checks pass. Exact-source hosted confirmation for this metadata change is pending; broader MCP schema conformance remains open.
+- Modern MCP metadata now validates the schema's prefix/name grammar at the result, tool, resource, prompt, and content levels. Legacy metadata remains compatible. Exact-source run [40659509862](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40659509862) completed the metadata protocol checks on Windows and Ubuntu under Node 22/24. Security and both desktop package lifecycle jobs passed; independent acceptance checks passed on all four lanes. Required Node matrices remain red on the hosted ConPTY initialization (`0xC0000142`) and Bubblewrap loopback (`RTM_NEWADDR: Operation not permitted`) capability limits.
+- MCP resource-template expansion now follows RFC 6570, including query and reserved-character operators, instead of rejecting valid templates and disconnecting the server. Template variable count/name lengths and expanded URI size are bounded. The focused MCP integration suite passes 30 tests with one expected Linux sandbox capability skip; exact-source hosted confirmation is pending.
 
 ## Cross-platform source archive line endings and browser theme smoke — 2026-10-28
 
@@ -57,7 +58,7 @@
 ## Hosted desktop runtime download reliability — 2026-10-28
 
 - Exact-source run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108) on `9b7b393` passed the security job and both Windows/Linux desktop build and lifecycle jobs. The runtime fetch retries transient interruptions up to three times, times out each attempt after five minutes, and validates the pinned checksum before cache installation.
-- `dist/dev/SHA256SUMS.txt` records hashes for the Windows NSIS, Linux DEB, Linux AppImage, and reproducible source archive. The three packages are from exact-source hosted run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108); the source archive is generated from the current branch contents. The broader test matrix is still red only on the Windows ConPTY initialization (`0xC0000142`) and Ubuntu Bubblewrap loopback setup (`RTM_NEWADDR: Operation not permitted`) with its dependent signed-MCP test. Independent security review and native Ubuntu Desktop/Wayland acceptance remain open.
+- `dist/dev/SHA256SUMS.txt` records hashes for the Windows NSIS, Linux DEB, Linux AppImage, and reproducible source archive. The three packages are from exact-source hosted run [40659509862](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40659509862) on `0b5d9b5`; the source archive is generated from the current branch contents. Security and both desktop lifecycle jobs passed. The broader test matrix is still red on Windows ConPTY initialization (`0xC0000142`) and Ubuntu Bubblewrap loopback setup (`RTM_NEWADDR: Operation not permitted`) with its dependent signed-MCP test. Independent security review and native Ubuntu Desktop/Wayland acceptance remain open.
 
 ## Bounded application update replay-cache reads — 2026-10-28
 

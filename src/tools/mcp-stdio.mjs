@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import uriTemplates from 'uri-templates';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
@@ -707,13 +708,7 @@ function normalizeMcpResourceTemplate(serverName, resourceTemplate) {
   )
     throw mcpError(`MCP server '${serverName}' advertised an invalid resource template`, 'MCP_INVALID_RESOURCE_TEMPLATE');
 
-  const variableNames = [];
-  const remainder = resourceTemplate.uriTemplate.replace(/\{([A-Za-z_][A-Za-z0-9_]{0,63})\}/g, (_match, name) => {
-    if (!variableNames.includes(name)) variableNames.push(name);
-    return '';
-  });
-  if (/[{}]/.test(remainder) || variableNames.length > 64)
-    throw mcpError(`MCP server '${serverName}' advertised an unsupported resource URI template`, 'MCP_INVALID_RESOURCE_TEMPLATE');
+  const variableNames = extractUriTemplateVariables(resourceTemplate.uriTemplate, serverName);
 
   const properties = Object.fromEntries(variableNames.map((name) => [name, { type: 'string', maxLength: 2048 }]));
   const uriTemplate = resourceTemplate.uriTemplate;
@@ -725,7 +720,7 @@ function normalizeMcpResourceTemplate(serverName, resourceTemplate) {
     execution: { timeout: mcpTimeoutPolicy(serverName), sandbox: 'unsupported' },
     name,
     description: `Read a resource matching the configured MCP template '${resourceTemplate.name}'.${note}`.slice(0, 1600),
-    parameters: { type: 'object', properties, ...(variableNames.length ? { required: variableNames } : {}), additionalProperties: false },
+    parameters: { type: 'object', properties, additionalProperties: false },
     approval: 'ask',
     destructive: true,
     _mcp: { server: serverName, operation: 'resources/templates/read', uriTemplate, variableNames },
@@ -736,18 +731,37 @@ function expandResourceTemplate(metadata, args) {
   if (!args || typeof args !== 'object' || Array.isArray(args))
     throw mcpError('MCP resource template arguments must be an object', 'MCP_INVALID_ARGUMENTS');
   const allowed = new Set(metadata.variableNames);
-  if (Object.keys(args).some((key) => !allowed.has(key)) || metadata.variableNames.some((key) => !Object.hasOwn(args, key)))
+  if (Object.keys(args).some((key) => !allowed.has(key)))
     throw mcpError('MCP resource template arguments do not match its URI variables', 'MCP_INVALID_ARGUMENTS');
-  for (const key of metadata.variableNames) {
+  for (const key of Object.keys(args)) {
     if (typeof args[key] !== 'string' || args[key].length > 2048)
       throw mcpError('MCP resource template values must be strings of at most 2048 characters', 'MCP_INVALID_ARGUMENTS');
   }
 
-  const uri = metadata.uriTemplate.replace(/\{([A-Za-z_][A-Za-z0-9_]{0,63})\}/g, (_match, name) =>
-    encodeURIComponent(args[name]).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`),
-  );
+  const uri = uriTemplates(metadata.uriTemplate).fill(args);
   if (uri.length > 4096) throw mcpError('Expanded MCP resource URI exceeds 4096 characters', 'MCP_INVALID_ARGUMENTS');
   return uri;
+}
+
+function extractUriTemplateVariables(template, serverName) {
+  const invalid = () => mcpError(`MCP server '${serverName}' advertised an invalid resource URI template`, 'MCP_INVALID_RESOURCE_TEMPLATE');
+  const variableNames = [];
+  const remainder = template.replace(/\{([^{}]+)\}/g, (_expression, expression) => {
+    const parts = expression.replace(/^[+#./;?&]/, '').split(',');
+    for (const part of parts) {
+      const name = part.replace(/(?:\*|:\d{1,4})$/, '');
+      if (name.length > 64 || !/^(?:[A-Za-z0-9_]|%[\da-fA-F]{2})+(?:\.(?:[A-Za-z0-9_]|%[\da-fA-F]{2})+)*$/.test(name)) throw invalid();
+      if (!variableNames.includes(name)) variableNames.push(name);
+    }
+    return '';
+  });
+  if (/[{}]/.test(remainder) || variableNames.length > 64) throw invalid();
+  try {
+    uriTemplates(template);
+  } catch {
+    throw invalid();
+  }
+  return variableNames;
 }
 
 function normalizeMcpPrompt(serverName, prompt) {
