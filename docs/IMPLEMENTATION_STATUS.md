@@ -1,5 +1,11 @@
 # Xyst development build status — 2026-10-28
 
+## Exact-head CI and current Linux desktop artifacts — 2026-10-28
+
+- Hosted run [40641570096](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40641570096) ran against `e1e8dd969f0fae1123b576522f6d5954c4496ec9`. Security passed, and the Ubuntu desktop job passed the DEB lifecycle, rollback, AppImage Xvfb smoke, native desktop checks, and Rust formatting. It uploaded `xyst-linux-deb` and `xyst-linux-appimage` artifacts from this exact head. The Windows desktop job was still building the NSIS installer at 2026-10-28 06:32 UTC; its current-head package result is pending.
+- Windows Node 22 and 24 each passed 949/971 tests with 21 skips and one known hosted ConPTY initialization failure (`0xC0000142`). Ubuntu Node 22 and 24 each passed 963/971 with six skips and two known environment failures: Bubblewrap cannot configure loopback (`RTM_NEWADDR: Operation not permitted`), which also blocks the dependent signed-MCP isolation test. Session/settings/ledger backup recovery, bounded reads, and file-tool recovery regressions passed in all four matrix jobs.
+- This confirms exact-head code behavior except for the named runner capabilities and the still-running Windows package job. The separate independent security review, physical Ubuntu Desktop/Wayland checks, capable ConPTY/network-namespace runners, signing and revocation governance, and named release owners remain open. No production release is qualified.
+
 ## MCP metadata and URI validation — 2026-10-28
 
 - Modern MCP results now validate the result-specific `serverInfo` metadata shape; tool input/output schema `$schema` fields must be strings when present; resource, embedded-resource, resource-link, icon, and implementation website URI fields must be absolute, whitespace-free URIs. Legacy result metadata remains compatible.
