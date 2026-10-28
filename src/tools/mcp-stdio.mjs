@@ -610,19 +610,19 @@ class McpStdioSession {
     throw mcpError(`MCP server '${this.name}' exceeded the ${field} pagination limit`, 'MCP_TOOL_LIMIT');
   }
 
-  async readResource(uri) {
+  async readResource(uri, { signal } = {}) {
     const params = { uri };
     if (this.protocolVersion === MODERN_VERSION) params._meta = modernMeta();
-    const result = await this.#request('resources/read', params);
+    const result = await this.#request('resources/read', params, this.timeoutMs, this.protocolVersion, { signal });
     if (!Array.isArray(result?.contents) || result.contents.length > MAX_TOOLS_PER_SERVER)
       throw mcpError(`MCP server '${this.name}' returned an invalid resource result`, 'MCP_INVALID_RESPONSE');
     return result;
   }
 
-  async getPrompt(name, args) {
+  async getPrompt(name, args, { signal } = {}) {
     const params = { name, ...(Object.keys(args || {}).length ? { arguments: args } : {}) };
     if (this.protocolVersion === MODERN_VERSION) params._meta = modernMeta();
-    const result = await this.#request('prompts/get', params);
+    const result = await this.#request('prompts/get', params, this.timeoutMs, this.protocolVersion, { signal });
     if (!Array.isArray(result?.messages) || result.messages.length > MAX_TOOLS_PER_SERVER)
       throw mcpError(`MCP server '${this.name}' returned an invalid prompt result`, 'MCP_INVALID_RESPONSE');
     return result;

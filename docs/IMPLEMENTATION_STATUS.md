@@ -2753,5 +2753,5 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 ## MCP stdio cancellation — 2026-10-28
 
-- Tool-call abort signals now send `notifications/cancelled` with the original request ID to the stdio MCP server. The local pending promise rejects with `MCP_CANCELLED` and releases its timer and abort listener; timed-out calls also notify the server. A focused follow-up call confirms the server observed cancellation. The regression and changed-file checks pass locally; hosted Windows/Linux confirmation is pending.
+- Tool, resource, and prompt abort signals now send `notifications/cancelled` with the original request ID to the stdio MCP server. The local pending promise rejects with `MCP_CANCELLED` and releases its timer and abort listener; timed-out calls also notify the server. A focused follow-up call confirms the server observed cancellation. The regression and changed-file checks pass locally; hosted Windows/Linux confirmation is pending.
 - Streamable HTTP and legacy SSE now send the same cancellation notification when a call is interrupted or times out. A focused regression checks request-ID propagation on both transports; changed-file checks pass and exact-source hosted confirmation is pending.
