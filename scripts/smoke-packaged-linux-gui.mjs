@@ -41,7 +41,7 @@ async function waitForTarget(timeoutMs = 60_000) {
   throw new Error(`Packaged Xyst renderer did not expose its debug target: ${String(lastError ?? "no page target")}`);
 }
 
-async function evaluate(page, expression, id) {
+async function cdpCommand(page, method, params, id) {
   const socket = new WebSocket(page.webSocketDebuggerUrl);
   try {
     await new Promise((resolveOpen, rejectOpen) => {
@@ -60,11 +60,33 @@ async function evaluate(page, expression, id) {
       };
       socket.addEventListener("message", onMessage);
     });
-    socket.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, returnByValue: true } }));
-    const result = await response;
-    if (result?.result?.exceptionDetails) throw new Error(result.result.exceptionDetails.text ?? "Renderer evaluation failed");
-    return result?.result?.value;
+    socket.send(JSON.stringify({ id, method, params }));
+    return await response;
   } finally { socket.close(); }
+}
+
+async function evaluate(page, expression, id) {
+  const result = await cdpCommand(page, "Runtime.evaluate", { expression, returnByValue: true }, id);
+  if (result?.result?.exceptionDetails) throw new Error(result.result.exceptionDetails.text ?? "Renderer evaluation failed");
+  return result?.result?.value;
+}
+
+async function pressKey(page, key, virtualKeyCode, id) {
+  const params = { key, code: key, windowsVirtualKeyCode: virtualKeyCode, nativeVirtualKeyCode: virtualKeyCode };
+  await cdpCommand(page, "Input.dispatchKeyEvent", { ...params, type: "keyDown" }, id);
+  await cdpCommand(page, "Input.dispatchKeyEvent", { ...params, type: "keyUp" }, id + 1);
+}
+
+async function verifyKeyboardSkipLink(page) {
+  await evaluate(page, "if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur()", 29);
+  await pressKey(page, "Tab", 9, 30);
+  const focusedLink = JSON.parse(await evaluate(page, "JSON.stringify({ text: document.activeElement?.textContent?.trim(), top: document.activeElement?.getBoundingClientRect().top })", 32));
+  assert.equal(focusedLink.text, "Skip to main content", `Expected Tab to focus the skip link, got ${JSON.stringify(focusedLink)}`);
+  assert.ok(focusedLink.top >= 0, `The keyboard-focused skip link should be visible: ${JSON.stringify(focusedLink)}`);
+  await pressKey(page, "Enter", 13, 33);
+  const targetId = await evaluate(page, "document.activeElement?.id ?? ''", 35);
+  assert.equal(targetId, "main-content", `Expected Enter on the skip link to focus main content, got ${targetId}`);
+  return { firstTabTarget: focusedLink.text, enterTarget: targetId };
 }
 
 try {
@@ -89,6 +111,7 @@ try {
   assert.equal(snapshot?.title, "Xyst Control Room");
   assert.ok(snapshot.buttons >= 10, `Expected the control room UI; got ${JSON.stringify(snapshot)}`);
   assert.ok(snapshot.body.includes("RUNTIME READY"), `Packaged runtime did not become ready: ${snapshot.body}`);
+  const keyboard = await verifyKeyboardSkipLink(page);
   const socket = new WebSocket(page.webSocketDebuggerUrl);
   try {
     await new Promise((resolveOpen, rejectOpen) => { socket.addEventListener("open", resolveOpen, { once: true }); socket.addEventListener("error", rejectOpen, { once: true }); });
@@ -101,7 +124,7 @@ try {
     assert.ok(image, "Packaged renderer did not return a screenshot");
     await writeFile(join(packageDir, "linux-gui-smoke.png"), Buffer.from(image, "base64"));
   } finally { socket.close(); }
-  process.stdout.write(`Linux AppImage renderer smoke passed: ${JSON.stringify({ title: snapshot.title, buttons: snapshot.buttons, width: snapshot.width, height: snapshot.height, screenshot: join(packageDir, "linux-gui-smoke.png") })}\n`);
+  process.stdout.write(`Linux AppImage renderer smoke passed: ${JSON.stringify({ title: snapshot.title, buttons: snapshot.buttons, width: snapshot.width, height: snapshot.height, keyboard, screenshot: join(packageDir, "linux-gui-smoke.png") })}\n`);
 } finally {
   if (app?.pid) {
     try { process.kill(-app.pid, "SIGTERM"); } catch {}
