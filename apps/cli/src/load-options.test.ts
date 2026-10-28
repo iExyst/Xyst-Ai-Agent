@@ -88,6 +88,17 @@ test("mission templates provide valid task graphs and execute through the normal
   }
   assert.equal((getMissionTemplate("issue-to-pr") as any).github.writeEnabled, false);
   assert.equal((getMissionTemplate("pr-review") as any).github.writeEnabled, false);
+  const documentTasks = (getMissionTemplate("document-spreadsheet") as { tasks: Array<{ id: string; objective: string; expectedOutputs: string[] }> }).tasks;
+  const documentPlanTask = documentTasks.find((task) => task.id === "plan-artifact");
+  const documentCreateObjective = documentTasks.find((task) => task.id === "create-artifact")?.objective ?? "";
+  const documentVerifyObjective = documentTasks.find((task) => task.id === "verify-artifact")?.objective ?? "";
+  assert.deepEqual(documentPlanTask?.expectedOutputs, ["artifact-plan.md"]);
+  assert.match(documentPlanTask?.objective ?? "", /reopen that exact file with file_read/);
+  assert.match(documentCreateObjective, /do not repeat that heading in the body/);
+  assert.match(documentVerifyObjective, /inspect the returned image pixels/);
+  assert.match(documentVerifyObjective, /PNG path alone is not visual evidence/);
+  assert.match(documentVerifyObjective, /any repeated or missing content/);
+  assert.match(documentVerifyObjective, /do not claim visual verification/);
   assert.throws(() => getMissionTemplate("unknown-template"), /Unknown mission template/);
 
   const runCalls: Array<{ objective: string; options: Record<string, unknown> }> = [];

@@ -2592,6 +2592,8 @@ test("image tasks select a model that declares vision and reject an incompatible
     sessions.addMessage(resumedSession, "assistant", `__xyst_api_message__:${JSON.stringify({ role: "assistant", content: "The image shows a pixel." })}`);
     const resumed = await agent.run("Continue analyzing the saved image.", { sessionId: resumedSession });
     assert.equal(resumed.model, "vision-model", "resume must select vision support for images still in the active context");
+    const retriedMissionTask = await agent.run("Continue the saved image inspection.", { sessionId: resumedSession, model: "text-model", automaticModelAssignment: true });
+    assert.equal(retriedMissionTask.model, "vision-model", "an automatic mission retry must replace a provisional text-only assignment when saved context contains images");
     config.set("global", "model.default", "text-model");
     await assert.rejects(() => agent.run("Describe this image", { initialMessage }), /does not declare vision support/);
   } finally { store.close(); }

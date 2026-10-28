@@ -296,9 +296,11 @@ export class AgentRunner {
       inventory ??= await this.deps.provider.models(options.signal);
       const assigned = modelForIdentifier(inventory, model);
       const declaredContext = assigned?.max_context_length;
-      if (!assigned || (typeof declaredContext === "number" && declaredContext < requiredContextTokens) || (onlineDiscoveryEnabled && typeof declaredContext !== "number")) {
+      if (!assigned || (visionRequired && assigned.capabilities?.vision !== true) || (typeof declaredContext === "number" && declaredContext < requiredContextTokens) || (onlineDiscoveryEnabled && typeof declaredContext !== "number")) {
         model = "";
-        selectionReason = "automatic mission assignment did not declare enough context; reselecting for the full agent prompt";
+        selectionReason = visionRequired && assigned?.capabilities?.vision !== true
+          ? "automatic mission assignment did not declare vision support for the saved image context; reselecting a vision-capable model"
+          : "automatic mission assignment did not declare enough context; reselecting for the full agent prompt";
       }
     }
     if (visionRequired) {
