@@ -128,10 +128,16 @@ test("desktop snapshot preserves LM Studio loaded instances for the renderer mod
   const workspace = resolve(root, "workspace");
   mkdirSync(workspace, { recursive: true });
   try {
-    const result = await runCliAsync(dataHome, workspace, { LM_STUDIO_BASE_URL: `http://127.0.0.1:${address.port}` }, "desktop", "snapshot");
+    const localUrl = `http://127.0.0.1:${address.port}`;
+    const result = await runCliAsync(dataHome, workspace, {
+      LM_STUDIO_BASE_URL: localUrl,
+      NO_PROXY: "127.0.0.1,localhost",
+      no_proxy: "127.0.0.1,localhost"
+    }, "desktop", "snapshot");
     assert.equal(result.error, undefined, result.error?.message);
     assert.equal(result.status, 0, result.stderr);
     const snapshot = JSON.parse(result.stdout).data;
+    assert.equal(snapshot.models.length, 1, `Expected the mock LM Studio model in the snapshot: ${JSON.stringify(snapshot)}`);
     assert.deepEqual(snapshot.models[0].loaded_instances, [{ id: "qwen/qwen3.5-9b:2", config: { context_length: 16_384 } }]);
   } finally {
     server.closeAllConnections();
