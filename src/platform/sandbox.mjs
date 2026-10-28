@@ -28,6 +28,8 @@ export function buildBubblewrapArgs({
   if (platform !== 'linux') throw new Error('Bubblewrap isolation is available only on Linux');
   if (typeof workspaceRoot !== 'string' || !path.isAbsolute(workspaceRoot))
     throw new TypeError('Sandbox workspaceRoot must be an absolute path');
+  if (path.posix.resolve(workspaceRoot) === '/')
+    throw Object.assign(new Error('The filesystem root cannot be used as a Bubblewrap workspace'), { code: 'SANDBOX_WORKSPACE_UNSAFE' });
   if (typeof command !== 'string' || !command.trim()) throw new TypeError('Sandbox command must be a non-empty string');
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) throw new TypeError('Sandbox args must be an array of strings');
   if (typeof bwrap !== 'string' || !bwrap.trim()) throw new TypeError('Bubblewrap executable must be a non-empty string');
@@ -163,9 +165,14 @@ export async function validateBubblewrapWorkspace(workspaceRoot, { platform = pr
     throw new TypeError('Sandbox workspaceRoot must be an absolute path');
 
   const root = await fs.realpath(workspaceRoot);
+  if (path.posix.resolve(root) === '/')
+    throw Object.assign(new Error('The filesystem root cannot be used as a Bubblewrap workspace'), { code: 'SANDBOX_WORKSPACE_UNSAFE' });
   const rootStat = await fs.lstat(root, { bigint: true });
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
     throw Object.assign(new Error('Bubblewrap workspace must resolve to a real directory'), { code: 'SANDBOX_WORKSPACE_INVALID' });
+  const filesystemRootStat = await fs.stat('/', { bigint: true });
+  if (rootStat.dev === filesystemRootStat.dev && rootStat.ino === filesystemRootStat.ino)
+    throw Object.assign(new Error('The filesystem root cannot be used as a Bubblewrap workspace'), { code: 'SANDBOX_WORKSPACE_UNSAFE' });
 
   // st_dev alone misses bind mounts on the same filesystem. Linux mountinfo
   // identifies those boundaries so the hard-link scan cannot silently skip names.

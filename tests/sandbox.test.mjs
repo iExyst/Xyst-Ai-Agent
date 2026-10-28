@@ -69,6 +69,56 @@ test('Bubblewrap workspace validation can return an identity to verify the later
   assert.equal(validated.identity, `${stat.dev}:${stat.ino}`);
 });
 
+test('Bubblewrap workspace validation rejects a canonical filesystem root', async (t) => {
+  const workspace = await createTempDirectory('xyst-bwrap-root-alias-');
+  t.after(() => fs.rm(workspace, { recursive: true, force: true }));
+  const originalRealpath = fs.realpath;
+  fs.realpath = async (target, ...args) => target === workspace ? '/' : originalRealpath(target, ...args);
+  try {
+    await assert.rejects(
+      validateBubblewrapWorkspace(workspace, { platform: 'linux', mountInfo: '' }),
+      (error) => error.code === 'SANDBOX_WORKSPACE_UNSAFE' && /filesystem root/.test(error.message),
+    );
+  } finally {
+    fs.realpath = originalRealpath;
+  }
+});
+
+test('Bubblewrap workspace validation rejects a bind-mounted filesystem root alias', async (t) => {
+  const workspace = await createTempDirectory('xyst-bwrap-root-mount-');
+  t.after(() => fs.rm(workspace, { recursive: true, force: true }));
+  const originalRealpath = fs.realpath;
+  const originalLstat = fs.lstat;
+  const filesystemRootStat = await fs.stat('/', { bigint: true });
+  const rootAlias = path.join(path.dirname(workspace), 'root-alias');
+  fs.realpath = async (target, ...args) => target === workspace ? rootAlias : originalRealpath(target, ...args);
+  fs.lstat = async (target, options) => target === rootAlias ? filesystemRootStat : originalLstat(target, options);
+  try {
+    await assert.rejects(
+      validateBubblewrapWorkspace(workspace, { platform: 'linux', mountInfo: '' }),
+      (error) => error.code === 'SANDBOX_WORKSPACE_UNSAFE' && /filesystem root/.test(error.message),
+    );
+  } finally {
+    fs.realpath = originalRealpath;
+    fs.lstat = originalLstat;
+  }
+});
+
+test('Bubblewrap argument builder rejects filesystem root aliases', () => {
+  for (const workspaceRoot of ['/', '/tmp/..']) {
+    assert.throws(
+      () => buildBubblewrapArgs({
+        workspaceRoot,
+        command: 'id',
+        workspaceIdentity: '1:2',
+        workspaceIdentityFailureToken: '00000000-0000-0000-0000-000000000000',
+        platform: 'linux',
+      }),
+      (error) => error.code === 'SANDBOX_WORKSPACE_UNSAFE' && /filesystem root/.test(error.message),
+    );
+  }
+});
+
 test('Bubblewrap workspace validation rejects nested filesystem boundaries', async (t) => {
   const workspace = await createTempDirectory('xyst-bwrap-filesystem-');
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
