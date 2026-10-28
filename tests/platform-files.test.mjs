@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { atomicWriteFile } from '../src/platform/files.mjs';
+import { atomicWriteFile, restoreAtomicWriteBackup } from '../src/platform/files.mjs';
 import { createTempDirectory } from './helpers.mjs';
 
 test('atomic writes flush file data before rename and directory metadata after on Linux', async (t) => {
@@ -88,6 +88,41 @@ test('atomic writes report committed content when Linux directory flushing fails
     assert.equal(await fs.readFile(destination, 'utf8'), 'replacement');
   } finally {
     fileHandlePrototype.sync = sync;
+  }
+});
+
+test('atomic backup recovery reads no more than its configured limit plus one byte', async (t) => {
+  const root = await createTempDirectory('xyst-atomic-write-bounded-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const destination = path.join(root, 'settings.json');
+  const backup = `${destination}.550e8400-e29b-41d4-a716-446655440000.bak`;
+  await fs.writeFile(backup, 'x');
+
+  const probe = await fs.open(backup, 'r');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const read = fileHandlePrototype.read;
+  const requests = [];
+  fileHandlePrototype.read = async (buffer, offset, length, _position) => {
+    requests.push(length);
+    buffer.fill(0, offset, offset + length);
+    return { bytesRead: length, buffer };
+  };
+  try {
+    await assert.rejects(restoreAtomicWriteBackup(destination, { maxBytes: 4, decode: (content) => content }), {
+      code: 'ATOMIC_WRITE_RECOVERY_REQUIRED',
+    });
+    assert.deepEqual(requests, [5]);
+    assert.equal(await fs.readFile(backup, 'utf8'), 'x');
+    assert.equal(
+      await fs.lstat(destination).then(
+        () => true,
+        (error) => error.code === 'ENOENT',
+      ),
+      true,
+    );
+  } finally {
+    fileHandlePrototype.read = read;
   }
 });
 

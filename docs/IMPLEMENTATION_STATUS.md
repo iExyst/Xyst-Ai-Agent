@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## Bounded atomic-backup recovery reads — 2026-10-28
+
+- Atomic-backup recovery now reads in fixed-size chunks and stops at `maxBytes + 1`, preventing a backup that grows after its metadata check from causing an unbounded allocation. Oversized content is rejected while the recovery backup is preserved.
+- The focused platform-files suite passes 6 tests with two expected Windows-only skips; its injected growth case confirms exactly `maxBytes + 1` bytes are requested. Changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+
 ## Stale file edit concurrency detection — 2026-10-28
 
 - A same-inode content change during `edit_file` open/read previously could be reported as a missing `old_string`. The tool now compares nanosecond size/mtime/ctime snapshots around the read and returns `STALE_FILE` without writing when the source changes. If the concurrent version exceeds the configured read limit, it retains the specific size-limit error.

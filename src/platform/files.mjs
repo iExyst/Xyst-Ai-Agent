@@ -189,8 +189,8 @@ export async function restoreAtomicWriteBackup(destination, { maxBytes, decode, 
     const opened = await handle.stat();
     if (!opened.isFile() || opened.nlink !== 1 || opened.size > maxBytes || opened.dev !== before.dev || opened.ino !== before.ino)
       throw Object.assign(new Error('Atomic-write recovery backup changed during inspection'), { code: 'ATOMIC_WRITE_RECOVERY_REQUIRED' });
-    const bytes = await handle.readFile();
-    if (bytes.length > maxBytes)
+    const bytes = await readBoundedFileHandle(handle, maxBytes);
+    if (bytes === null)
       throw Object.assign(new Error('Atomic-write recovery backup is oversized'), { code: 'ATOMIC_WRITE_RECOVERY_REQUIRED' });
     record = decode(bytes.toString('utf8'));
     const after = await fs.lstat(backup);
@@ -249,6 +249,20 @@ export async function restoreAtomicWriteBackup(destination, { maxBytes, decode, 
     });
   await fs.rm(backup);
   return record;
+}
+
+async function readBoundedFileHandle(handle, maxBytes) {
+  const chunks = [];
+  let totalBytes = 0;
+  while (totalBytes <= maxBytes) {
+    const remaining = maxBytes + 1 - totalBytes;
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, remaining));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, totalBytes);
+    if (bytesRead === 0) break;
+    totalBytes += bytesRead;
+    chunks.push(chunk.subarray(0, bytesRead));
+  }
+  return totalBytes > maxBytes ? null : Buffer.concat(chunks, totalBytes);
 }
 
 /** Restore a bounded raw-file backup left by a Windows replacement interrupted
