@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -55,4 +55,31 @@ test("config get resolves inherited project, mission, agent, and session context
     try { store.close(); } catch { /* closed before subprocess checks */ }
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("config import obeys restricted read roots and rejects oversized files", () => {
+  const root = mkdtempSync(join(tmpdir(), "xyst-config-import-policy-"));
+  assert.equal(resolve(root).startsWith(resolve(tmpdir())), true);
+  const dataHome = join(root, "data");
+  const allowedRoot = join(root, "allowed"); const outsideRoot = join(root, "outside");
+  mkdirSync(allowedRoot); mkdirSync(outsideRoot);
+  const allowedFile = join(allowedRoot, "settings.json"); const deniedFile = join(outsideRoot, "settings.json");
+  writeFileSync(allowedFile, JSON.stringify({ "global:": { "model.default": "allowed-model" } }));
+  writeFileSync(deniedFile, JSON.stringify({ "global:": { "model.default": "denied-model" } }));
+  const oversizedFile = join(allowedRoot, "oversized.json"); writeFileSync(oversizedFile, " ".repeat(1_048_577));
+  const env = { ...process.env, ...(process.platform === "win32" ? { APPDATA: dataHome } : { XDG_DATA_HOME: dataHome }) };
+  const store = new XystStore(join(dataHome, "xyst", "xyst.sqlite"));
+  try {
+    const config = new ConfigStore(store);
+    config.set("global", "access.profile", { mode: "restricted", readRoots: [allowedRoot], writeRoots: [], allowedExecutables: [], network: false, integrations: false, backgroundJobs: false, externalActions: false });
+  } finally { store.close(); }
+  try {
+    const run = (path: string) => spawnSync(process.execPath, ["--import", "tsx", cliEntry, "--json", "config", "import", path], { cwd: workspaceRoot, env, encoding: "utf8", timeout: 15_000 });
+    const allowed = run(allowedFile); assert.equal(allowed.error, undefined, allowed.error?.message); assert.equal(allowed.status, 0, allowed.stderr);
+    const denied = run(deniedFile); assert.equal(denied.error, undefined, denied.error?.message); assert.equal(denied.status, 1); assert.match(denied.stderr, /Restricted profile denies read access/);
+    const oversized = run(oversizedFile); assert.equal(oversized.error, undefined, oversized.error?.message); assert.equal(oversized.status, 1); assert.match(oversized.stderr, /exceeds the 1 MiB limit/);
+    const verify = new XystStore(join(dataHome, "xyst", "xyst.sqlite"));
+    try { assert.equal(new ConfigStore(verify).resolve("model.default")?.value, "allowed-model"); }
+    finally { verify.close(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -1204,7 +1204,9 @@ try {
     output(runtime.config.export());
   } else if (command === "config" && subcommand === "import") {
     if (!rest[0]) fail("Usage: config import <file>");
-    runtime.config.import(JSON.parse(await readFile(rest[0], "utf8"))); output({ imported: true });
+    const path = await runtime.access.assertPath(rest[0], "read");
+    if ((await stat(path)).size > 1_048_576) fail("Configuration import file exceeds the 1 MiB limit");
+    runtime.config.import(JSON.parse(await readFile(path, "utf8"))); output({ imported: true });
   } else if (command === "file" && subcommand === "read") {
     if (!rest[0]) fail("Usage: file read <path> [start-line] [end-line]");
     await runtime.access.assertPath(rest[0], "read");
