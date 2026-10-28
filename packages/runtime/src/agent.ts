@@ -628,7 +628,7 @@ export class AgentRunner {
       return `${index + 1}: ${JSON.stringify(item.name)}${path ? ` path=${JSON.stringify(path)}` : ""}`;
     };
     tools.task_complete = {
-      definition: { type: "function", function: { name: "task_complete", description: "Verify every required user or mission criterion shown in the system instructions against successful Xyst tool results. The runtime supplies the criteria and does not accept replacement criteria. Provide one evidence index for each required criterion in displayed order, one index if the same result supports every criterion, or a shorter list of distinct evidence indexes that collectively covers the request. For a shorter list, the runtime matches required tool, URL, and output-path criteria to the corresponding results. Indexes are one-based in the current system message's available evidence list. A declared file output is verified only by a successful file_read of that exact path; creating or patching it is not sufficient. This tool does not itself create evidence.", parameters: { type: "object", properties: { evidence_tool_call_indexes: { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, maxItems: 50 } }, required: ["evidence_tool_call_indexes"], additionalProperties: false } } },
+      definition: { type: "function", function: { name: "task_complete", description: "Verify every required user or mission criterion shown in the system instructions against successful Xyst tool results. The runtime supplies the criteria and does not accept replacement criteria. Provide one evidence index for each required criterion in displayed order, one index if the same result supports every criterion, or a shorter list of distinct evidence indexes that collectively covers the request. For a shorter list, the runtime matches required tool, URL, and output-path criteria to the corresponding results. Indexes are one-based in the current system message's available evidence list. A declared text file output is verified only by a successful file_read of that exact path; supported office documents may be verified by a successful office_read of that exact path. Creating or patching a file is not sufficient. This tool does not itself create evidence.", parameters: { type: "object", properties: { evidence_tool_call_indexes: { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, maxItems: 50 } }, required: ["evidence_tool_call_indexes"], additionalProperties: false } } },
       execute: async (input) => {
         const args = asRecord(input);
         const suppliedIndexes = args.evidence_tool_call_indexes;
@@ -712,8 +712,8 @@ export class AgentRunner {
           const subsequentMutations = this.deps.store.db.prepare("SELECT name,input_json FROM tool_calls WHERE rowid>? AND (session_id=? OR execution_scope=?) AND status IN ('completed','reconciled') ORDER BY rowid")
             .all(evidenceRow.rowid, sessionId, executionScope) as Array<{ name: string; input_json: string }>;
           const mutationNames = new Set(["file_create", "file_patch", "file_delete", "file_move", "office_create", "office_edit", "office_preview", "browser_download", "git_clone", "run_process", "run_shell", "desktop_action"]);
-          const evidenceFilePath = evidence.name === "file_read" ? evidencePath(evidence) : undefined;
-          const laterRelevantMutation = ["file_read", "run_process", "run_shell"].includes(evidence.name) ? subsequentMutations.find((mutation) => {
+          const evidenceFilePath = ["file_read", "office_read"].includes(evidence.name) ? evidencePath(evidence) : undefined;
+          const laterRelevantMutation = ["file_read", "office_read", "run_process", "run_shell"].includes(evidence.name) ? subsequentMutations.find((mutation) => {
             if (!mutationNames.has(mutation.name)) return false;
             if (["run_process", "run_shell", "desktop_action"].includes(mutation.name) || ["run_process", "run_shell"].includes(evidence.name)) return true;
             if (!evidenceFilePath) return false;
@@ -745,16 +745,17 @@ export class AgentRunner {
             const inputPath = asRecord(evidenceInput).path;
             const resultPath = evidenceRecord.path;
             const matchesExpectedPath = [inputPath, resultPath].some((value) => typeof value === "string" && normalizeOutputPath(value) === normalizeOutputPath(expectedOutputPath));
-            if (evidence.name !== "file_read" || !matchesExpectedPath) {
-              const matchingReadIndexes = currentEvidence.flatMap((item, itemIndex) => item.name === "file_read" && evidencePath(item) && normalizeOutputPath(evidencePath(item)!) === normalizeOutputPath(expectedOutputPath) ? [itemIndex + 1] : []);
-              const persistedReads = this.deps.store.db.prepare("SELECT id,name,input_json,output_json FROM tool_calls WHERE name='file_read' AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?) ORDER BY created_at DESC,rowid DESC LIMIT 50").all(sessionId, executionScope) as Array<{ id: string; name: string; input_json: string; output_json: string }>;
+            const isReadback = evidence.name === "file_read" || evidence.name === "office_read";
+            if (!isReadback || !matchesExpectedPath) {
+              const matchingReadIndexes = currentEvidence.flatMap((item, itemIndex) => ["file_read", "office_read"].includes(item.name) && evidencePath(item) && normalizeOutputPath(evidencePath(item)!) === normalizeOutputPath(expectedOutputPath) ? [itemIndex + 1] : []);
+              const persistedReads = this.deps.store.db.prepare("SELECT id,name,input_json,output_json FROM tool_calls WHERE name IN ('file_read','office_read') AND status IN ('completed','reconciled') AND output_json IS NOT NULL AND (session_id=? OR execution_scope=?) ORDER BY created_at DESC,rowid DESC LIMIT 50").all(sessionId, executionScope) as Array<{ id: string; name: string; input_json: string; output_json: string }>;
               const readAddedAfterPrompt = persistedReads.some((item) => !currentEvidence.some((listed) => listed.id === item.id) && evidencePath(item) && normalizeOutputPath(evidencePath(item)!) === normalizeOutputPath(expectedOutputPath));
               const correction = matchingReadIndexes.length
-                ? ` Use successful file_read evidence index ${matchingReadIndexes.join(", ")} for that path.`
+                ? ` Use successful readback evidence index ${matchingReadIndexes.join(", ")} for that path.`
                 : readAddedAfterPrompt
-                  ? " An exact file_read completed after the displayed evidence list was sent. Call task_complete again in a new turn using the refreshed evidence list for that read."
-                  : " Read the declared output with file_read, then use the new matching evidence index.";
-              throw new Error(`Completion evidence for declared output ${expectedOutputPath} must be a file_read of that exact path.${correction}`);
+                  ? " An exact readback completed after the displayed evidence list was sent. Call task_complete again in a new turn using the refreshed evidence list for that read."
+                  : ` Read the declared output with ${extname(expectedOutputPath).toLowerCase().match(/^\.(pdf|docx|xlsx|pptx|csv)$/) ? "office_read" : "file_read"}, then use the new matching evidence index.`;
+              throw new Error(`Completion evidence for declared output ${expectedOutputPath} must be a successful readback of that exact path with file_read or office_read.${correction}`);
             }
           }
           const fileContentRequirement = [...inferredFileContentRequirements.values()].find((requirement) => requirement.criterion === criterion);

@@ -1352,7 +1352,29 @@ test("mission completion evidence must reference each declared file output path"
     assert.equal(existsSync(expectedPath), false);
     assert.equal(await readFileAsync(join(root, "wrong.txt"), "utf8"), "wrong");
     const failedCompletion = store.db.prepare("SELECT output_json FROM tool_calls WHERE session_id=? AND name='task_complete' AND status='failed'").get(result.sessionId) as { output_json: string };
-    assert.match(failedCompletion.output_json, /must be a file_read of that exact path/);
+    assert.match(failedCompletion.output_json, /successful readback of that exact path/);
+  } finally { store.close(); }
+}));
+
+test("declared PDF outputs accept exact-path office_read verification", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "expected-pdf-output.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model");
+  const expectedPath = join(root, "brief.pdf"); const pdf = await PDFDocument.create(); pdf.addPage([180, 80]).drawText("Accessible UX Workshop", { x: 20, y: 35 }); await writeFile(expectedPath, await pdf.save());
+  let turn = 0;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async () => {
+      turn++;
+      if (turn === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "read-pdf-output", type: "function", function: { name: "office_read", arguments: JSON.stringify({ format: "pdf", path: "brief.pdf" }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "verify-pdf-output", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  try {
+    const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
+      .run("Verify the declared PDF output", { workspace: root, model: "test-model", maxTurns: 3, expectedOutputPaths: [expectedPath], completionCriteria: [expectedPath] });
+    assert.equal(result.status, "completed"); assert.equal(turn, 2);
+    const evidence = store.db.prepare("SELECT name,status,output_json FROM tool_calls WHERE session_id=? AND name='office_read'").get(result.sessionId) as { name: string; status: string; output_json: string };
+    assert.deepEqual([evidence.name, evidence.status, JSON.parse(evidence.output_json).path], ["office_read", "completed", expectedPath]);
   } finally { store.close(); }
 }));
 
@@ -1441,7 +1463,7 @@ test("declared outputs require exact readback and the refreshed evidence list id
     assert.equal(await readFileAsync(expectedPath, "utf8"), "VERIFIED");
     const completionCalls = store.db.prepare("SELECT status,input_json,output_json FROM tool_calls WHERE session_id=? AND name='task_complete' ORDER BY rowid").all(result.sessionId) as Array<{ status: string; input_json: string; output_json: string }>;
     assert.equal(completionCalls[0]?.status, "failed", "a file_create result cannot verify a declared file output");
-    assert.match(completionCalls[0]!.output_json, /file_read completed after the displayed evidence list was sent/);
+    assert.match(completionCalls[0]!.output_json, /readback completed after the displayed evidence list was sent/);
     assert.equal(completionCalls[1]?.status, "completed");
     assert.match(prompts[0]!, /Available persisted evidence call indexes \(newest-first/);
     assert.match(prompts[1]!, /1: "file_read" path=/);
@@ -2247,7 +2269,7 @@ test("missions validate dependency graphs and persist task checkpoints", async (
   ] });
   assert.deepEqual(fileEvidenceMission.definition.tasks?.[0]?.requiredToolEvidence, [{ tool: "file_read", path: "proof.txt", textEquals: "expected" }]);
   const mission = repository.create({ name: "ordered", objective: "Build it", agents: [{ id: "researcher", name: "Researcher", model: "small-model", maxTurns: 5, access: { mode: "restricted", readRoots: [root], writeRoots: [root], network: false, integrations: false, backgroundJobs: false, externalActions: false } }], tasks: [
-    { id: "first", objective: "Use web_fetch for https://api.github.com/repos/owner/repo, then run_process to verify the result.", dependsOn: [], agentId: "researcher", expectedOutputs: ["analysis.md"], completionCriteria: "The analysis is saved.", requiredToolEvidence: [{ tool: "run_process", exitCode: 0, stdoutIncludes: "verified" }] }, { id: "second", objective: "Second step", dependsOn: ["first"] }
+    { id: "first", objective: "Use web_fetch for https://api.github.com/repos/owner/repo, then run_process to verify the result.", dependsOn: [], agentId: "researcher", expectedOutputs: ["analysis.md", "Created file path workshop-brief.pdf", "One-page workshop brief structure"], completionCriteria: "The analysis is saved.", requiredToolEvidence: [{ tool: "run_process", exitCode: 0, stdoutIncludes: "verified" }] }, { id: "second", objective: "Second step", dependsOn: ["first"] }
   ] });
   const objectives: string[] = []; const assignments: Array<Record<string, unknown>> = [];
   const fakeAgent = { run: async (objective: string, options: { onSession?: (id: string) => void; [key: string]: unknown }) => {
@@ -2261,8 +2283,10 @@ test("missions validate dependency graphs and persist task checkpoints", async (
   assert.match(objectives[1]!, /result-1/);
   assert.match(objectives[0]!, /analysis\.md/); assert.match(objectives[0]!, /The analysis is saved/);
   assert.equal(assignments[0]?.agentId, "researcher"); assert.equal(assignments[0]?.model, "small-model"); assert.equal(assignments[0]?.maxTurns, 5);
-  assert.deepEqual(assignments[0]?.completionCriteria, ["Use web_fetch for https://api.github.com/repos/owner/repo, then run_process to verify the result.", "analysis.md", "The analysis is saved."]);
-  assert.ok(String((assignments[0]?.expectedOutputPaths as string[] | undefined)?.[0] ?? "").endsWith("analysis.md"));
+  assert.deepEqual(assignments[0]?.completionCriteria, ["Use web_fetch for https://api.github.com/repos/owner/repo, then run_process to verify the result.", "analysis.md", "Created file path workshop-brief.pdf", "One-page workshop brief structure", "The analysis is saved."]);
+  const outputPaths = assignments[0]?.expectedOutputPaths as string[];
+  assert.equal(outputPaths.length, 2, "only actual file paths should become declared file outputs");
+  assert.ok(outputPaths[0]!.endsWith("analysis.md")); assert.ok(outputPaths[1]!.endsWith("workshop-brief.pdf"));
   assert.deepEqual(assignments[0]?.requiredToolEvidence, [{ tool: "run_process", exitCode: 0, stdoutIncludes: "verified" }]);
   assert.deepEqual(assignments[0]?.accessProfile, { mode: "restricted", readRoots: [root], writeRoots: [root], network: false, integrations: false, backgroundJobs: false, externalActions: false });
   const tasks = store.db.prepare("SELECT task_key,state,attempts FROM mission_tasks WHERE run_id=? ORDER BY task_key").all(result.runId) as Array<{ task_key: string; state: string; attempts: number }>;

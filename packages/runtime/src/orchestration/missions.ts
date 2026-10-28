@@ -31,7 +31,17 @@ const scheduleSchema = z.object({ cron: z.string().min(1), timezone: z.string().
 const definitionSchema = z.object({ id: z.string().optional(), name: z.string().min(1).max(100), objective: z.string().min(1), workspace: z.string().optional(), worktreeRoot: z.string().optional(), projectId: z.string().optional(), model: z.string().optional(), agents: z.array(agentSchema).max(8).optional(), tasks: z.array(taskSchema).min(1).max(100).optional(), maxRetries: z.number().int().min(0).max(5).default(1), maxConcurrency: z.number().int().min(1).max(8).default(1), schedule: scheduleSchema.optional(), github: z.object({ enabled: z.boolean().optional(), writeEnabled: z.boolean().optional(), mergeAuthorized: z.boolean().optional() }).optional(), githubTrigger: z.object({ events: z.array(z.enum(["issues", "issue_comment", "pull_request", "pull_request_review"])).default(["issues"]), repositories: z.array(z.string()).optional() }).optional() }).strict();
 
 function declaredFileOutputPaths(outputs: string[] | undefined, workspace: string): string[] {
-  return (outputs ?? []).filter((output) => isAbsolute(output) || /[\\/]/.test(output) || /\.[^./\\]{1,16}$/.test(output)).map((output) => resolve(workspace, output));
+  return (outputs ?? []).flatMap((output) => {
+    const value = output.trim();
+    const quotedPath = [...value.matchAll(/[\"'`]([^\"'`]+\.[^./\\\"'`]{1,16})[\"'`]/g)].at(-1)?.[1];
+    if (quotedPath) return [resolve(workspace, quotedPath)];
+    const absoluteSuffix = value.match(/(?:^|\s)((?:[A-Za-z]:[\\/]|\\\\|\/)[^\r\n]+)$/)?.[1];
+    if (absoluteSuffix) return [isAbsolute(absoluteSuffix) ? absoluteSuffix : resolve(workspace, absoluteSuffix)];
+    if (isAbsolute(value)) return [value];
+    if (!/\s/.test(value) && /[\\/]/.test(value)) return [resolve(workspace, value)];
+    const filename = value.match(/(?:^|\s)([A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16})[.)]?$/)?.[1];
+    return filename ? [resolve(workspace, filename)] : [];
+  });
 }
 
 export interface MissionAgentDefinition { id: string; name: string; model?: string; maxTurns?: number; access?: AccessProfile }
