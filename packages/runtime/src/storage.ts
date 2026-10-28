@@ -53,7 +53,7 @@ const migrations = [
    UPDATE tool_calls SET status='uncertain',finished_at=COALESCE(finished_at,CURRENT_TIMESTAMP) WHERE status='running' AND effect='external';`,
   `CREATE TABLE session_compactions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, through_message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, summary_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(session_id,through_message_id));
     CREATE INDEX session_compactions_recent ON session_compactions(session_id,created_at DESC);`,
-  `UPDATE tool_calls SET effect='external' WHERE name IN ('github_issue_labels_add','github_issue_labels_replace','github_issue_label_remove','github_update_pull_request');
+  `UPDATE tool_calls SET effect='external' WHERE name IN ('github_issue_labels_add','github_issue_labels_replace','github_issue_label_remove','github_update_pull_request','browser_close_tab');
    UPDATE tool_calls SET execution_scope=COALESCE((SELECT run_id||':'||task_key FROM mission_tasks WHERE mission_tasks.session_id=tool_calls.session_id LIMIT 1),session_id) WHERE effect='external' AND execution_scope IS NULL;
    UPDATE tool_calls SET status='uncertain',finished_at=COALESCE(finished_at,CURRENT_TIMESTAMP) WHERE status='running' AND effect='external';`
 ];

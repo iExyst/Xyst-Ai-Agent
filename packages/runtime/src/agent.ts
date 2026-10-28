@@ -34,7 +34,7 @@ function instanceContextLength(instance: LMStudioModel["loaded_instances"][numbe
 }
 const asRecord = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
 const asArray = (value: unknown): any[] => Array.isArray(value) ? value : [];
-const externalToolNames = new Set(["file_create", "file_patch", "file_delete", "file_move", "office_create", "office_edit", "office_preview", "run_process", "git_clone", "git_create_branch", "git_stage", "git_commit", "git_fetch", "git_push", "github_issue_comment", "github_issue_labels_add", "github_issue_labels_replace", "github_issue_label_remove", "github_update_pull_request", "github_create_pull_request", "github_create_review_comment", "github_workflow_dispatch", "github_merge_pull_request", "browser_click", "browser_fill", "browser_select", "browser_press", "browser_download", "browser_upload", "desktop_action"]);
+const externalToolNames = new Set(["file_create", "file_patch", "file_delete", "file_move", "office_create", "office_edit", "office_preview", "run_process", "git_clone", "git_create_branch", "git_stage", "git_commit", "git_fetch", "git_push", "github_issue_comment", "github_issue_labels_add", "github_issue_labels_replace", "github_issue_label_remove", "github_update_pull_request", "github_create_pull_request", "github_create_review_comment", "github_workflow_dispatch", "github_merge_pull_request", "browser_close_tab", "browser_click", "browser_fill", "browser_select", "browser_press", "browser_download", "browser_upload", "desktop_action"]);
 const isExternalAction = (name: string) => externalToolNames.has(name) || (name.startsWith("mcp_") && !/_((resources)|(read_resource)|(prompts)|(get_prompt))$/.test(name));
 const parallelReadToolNames = new Set(["file_read", "file_list", "file_search", "git_status", "git_diff", "git_log", "git_branches"]);
 const workspaceMutationNames = new Set(["file_create", "file_patch", "file_delete", "file_move", "office_create", "office_edit", "office_preview", "browser_download", "git_clone", "git_create_branch", "git_fetch", "git_stage", "git_commit"]);
@@ -180,7 +180,7 @@ export function assertRequiredToolEvidence(toolName: string, output: unknown, re
 export interface AgentResult { sessionId: string; model: string; selectionReason: string; turns: number; status: "completed" | "unverified" | "cancelled" | "limit"; response: string }
 
 export class AgentRunner {
-  constructor(private readonly deps: { store: XystStore; config: ConfigStore; sessions: SessionStore; events: RuntimeEvents; access: AccessController; provider: LMStudioProvider; github: GitHubProvider; modelAcquisition?: ModelAcquisitionService; dataDir?: string; credentials?: { get(service: string, name: string): Promise<string | undefined> }; memories?: MemoryStore; resourceStatsReader?: typeof readHostResourceStats }) {}
+  constructor(private readonly deps: { store: XystStore; config: ConfigStore; sessions: SessionStore; events: RuntimeEvents; access: AccessController; provider: LMStudioProvider; github: GitHubProvider; modelAcquisition?: ModelAcquisitionService; dataDir?: string; browserToolsFactory?: typeof createBrowserTools; credentials?: { get(service: string, name: string): Promise<string | undefined> }; memories?: MemoryStore; resourceStatsReader?: typeof readHostResourceStats }) {}
 
   async run(objective: string, options: AgentOptions = {}): Promise<AgentResult> {
     const safeObjective = this.deps.provider.redact(objective);
@@ -541,7 +541,7 @@ export class AgentRunner {
     const browserHeadless = this.deps.config.resolve<boolean>("browser.headless", scopes)?.value ?? true;
     const browserMaxDownloadBytes = this.deps.config.resolve<number>("browser.maxDownloadBytes", scopes)?.value ?? 512 * 1024 ** 2;
     const browser = browserAutomationEnabled && this.deps.dataDir
-      ? createBrowserTools({ access, dataDir: this.deps.dataDir, sessionId, workspace, headless: browserHeadless, maxDownloadBytes: browserMaxDownloadBytes, ...(options.signal ? { signal: options.signal } : {}) })
+      ? (this.deps.browserToolsFactory ?? createBrowserTools)({ access, dataDir: this.deps.dataDir, sessionId, workspace, headless: browserHeadless, maxDownloadBytes: browserMaxDownloadBytes, ...(options.signal ? { signal: options.signal } : {}) })
       : { tools: {}, close: async () => undefined };
     const semanticMemory = this.deps.memories && semanticMemoryEnabled ? {
       search: async (query: string, limit: number) => {

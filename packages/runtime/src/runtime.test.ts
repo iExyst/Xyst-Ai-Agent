@@ -666,10 +666,10 @@ test("failed multi-statement migration rolls back cleanly and can be retried", a
   } finally { recovered.close(); }
 }));
 
-test("migration 16 classifies historical GitHub writes and quarantines interrupted calls", async () => withTemp(async (root) => {
+test("migration 16 classifies historical external actions and quarantines interrupted calls", async () => withTemp(async (root) => {
   const path = join(root, "github-write-recovery.sqlite");
   const initial = new XystStore(path); const sessions = new SessionStore(initial); const sessionId = sessions.create("Legacy write records");
-  const names = ["github_issue_labels_add", "github_issue_labels_replace", "github_issue_label_remove", "github_update_pull_request"];
+  const names = ["github_issue_labels_add", "github_issue_labels_replace", "github_issue_label_remove", "github_update_pull_request", "browser_close_tab"];
   const createdAt = new Date().toISOString();
   const insert = initial.db.prepare("INSERT INTO tool_calls(id,session_id,name,input_json,status,created_at,effect) VALUES(?,?,?,'{}','running',?,'read')");
   names.forEach((name) => insert.run(randomUUID(), sessionId, name, createdAt));
@@ -1070,6 +1070,23 @@ test("all GitHub mutations require approval and durable external-action tracking
       assert.ok(call.execution_scope); assert.match(call.request_hash, /^[a-f0-9]{64}$/);
     }
     assert.deepEqual(sideEffects, [], "none of the GitHub providers may be reached without user approval");
+  } finally { store.close(); }
+}));
+
+test("closing a browser tab requires approval and durable external-action tracking", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "browser-close-approval.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "test-model"); config.set("global", "browser.automation.enabled", true); config.set("global", "autonomy.externalActionApproval", true);
+  let closes = 0;
+  const provider = { redact: (value: string) => value, streamChatWithTools: async () => ({ choices: [{ message: { role: "assistant", tool_calls: [{ id: "unapproved-close-tab", type: "function", function: { name: "browser_close_tab", arguments: JSON.stringify({ tab_id: "tab-1" }) } }] } }] }) };
+  const agent = new AgentRunner({
+    store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never, dataDir: root,
+    browserToolsFactory: () => ({ tools: { browser_close_tab: { definition: { type: "function", function: { name: "browser_close_tab", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } }, execute: async () => { closes++; return { closed: "tab-1" }; } } }, close: async () => undefined })
+  });
+  try {
+    await assert.rejects(() => agent.run("Read the page and summarize it. Do not change anything.", { workspace: root, maxTurns: 1 }), (error: unknown) => error instanceof ExternalActionApprovalError && error.code === "EXTERNAL_ACTION_APPROVAL_REQUIRED");
+    assert.equal(closes, 0, "the tab stays open until user approval");
+    const call = store.db.prepare("SELECT status,effect,execution_scope,request_hash FROM tool_calls WHERE name='browser_close_tab'").get() as { status: string; effect: string; execution_scope: string; request_hash: string };
+    assert.deepEqual([call.status, call.effect], ["failed", "external"]); assert.ok(call.execution_scope); assert.match(call.request_hash, /^[a-f0-9]{64}$/);
   } finally { store.close(); }
 }));
 
