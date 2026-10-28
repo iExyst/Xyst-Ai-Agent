@@ -7,7 +7,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { resolveToolPath } from '../platform/paths.mjs';
 import { safeProcessEnvironment, terminateProcessTree } from '../platform/process.mjs';
-import { deepFreeze, resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, validateMcpToolOutput } from './schemas.mjs';
+import { deepFreeze, MCP_SCHEMA_REF, resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, validateMcpToolOutput } from './schemas.mjs';
 import { LegacySseMcpSession, StreamableHttpMcpSession } from './mcp-http.mjs';
 import { getActiveInstalledMcpPackages } from '../extensions/package-registry.mjs';
 import { buildBubblewrapArgs, bubblewrapLauncherEnvironment, findBubblewrap, validateBubblewrapWorkspace } from '../platform/sandbox.mjs';
@@ -1037,11 +1037,14 @@ function resolveLocalSchemaReference(rootSchema, reference) {
   return current;
 }
 
-function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema = schema, refStack = new Set()) {
-  if (--budget.remaining < 0) throw mcpError('MCP tool input schema exceeds its validation budget', 'MCP_INVALID_SCHEMA');
+function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema = schema, refStack = new Set(), cache = new WeakMap()) {
   if (typeof schema === 'boolean') return schema;
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema) || depth > 32)
-    throw mcpError('MCP tool input schema is invalid or too deeply nested', 'MCP_INVALID_SCHEMA');
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) throw mcpError('MCP schema is invalid', 'MCP_INVALID_SCHEMA');
+  if (cache.has(schema)) return cache.get(schema);
+  if (--budget.remaining < 0) throw mcpError('MCP tool input schema exceeds its validation budget', 'MCP_INVALID_SCHEMA');
+  if (depth > 32) throw mcpError('MCP tool input schema is invalid or too deeply nested', 'MCP_INVALID_SCHEMA');
+  const result = {};
+  cache.set(schema, result);
   const allowed = new Set([
     '$schema',
     '$comment',
@@ -1116,19 +1119,9 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   )
     throw mcpError('MCP tool input schema has invalid definitions', 'MCP_INVALID_SCHEMA');
   if (schema.$ref !== undefined) {
-    if (typeof schema.$ref !== 'string' || refStack.has(schema.$ref))
-      throw mcpError('MCP tool input schema has an invalid or recursive $ref', 'MCP_INVALID_SCHEMA');
+    if (typeof schema.$ref !== 'string') throw mcpError('MCP schema has an invalid $ref', 'MCP_INVALID_SCHEMA');
     const target = resolveLocalSchemaReference(rootSchema, schema.$ref);
-    const nextRefStack = new Set(refStack);
-    nextRefStack.add(schema.$ref);
-    const normalizedTarget = normalizeSchema(target, depth + 1, budget, rootSchema, nextRefStack);
-    const sibling = Object.fromEntries(
-      Object.entries(schema).filter(([key]) => key !== '$ref' && key !== '$defs' && key !== 'definitions'),
-    );
-    if (Object.keys(sibling).length === 0) return normalizedTarget;
-    return {
-      allOf: [normalizedTarget, normalizeSchema(sibling, depth + 1, budget, rootSchema, refStack)],
-    };
+    result[MCP_SCHEMA_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
   }
   const type = schema.type;
   const hasType = Object.hasOwn(schema, 'type');
@@ -1140,7 +1133,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     (hasType && types.some((item) => !['object', 'string', 'integer', 'number', 'boolean', 'array', 'null'].includes(item)))
   )
     throw mcpError('MCP tool input schema uses an unsupported type', 'MCP_INVALID_SCHEMA');
-  const result = hasType ? { type } : {};
+  Object.assign(result, hasType ? { type } : {});
   for (const key of ['$schema', '$comment', '$anchor', 'format', 'contentEncoding', 'contentMediaType'])
     if (schema[key] !== undefined) {
       if (typeof schema[key] !== 'string') throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
@@ -1149,7 +1142,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   if (schema.$anchor !== undefined && !/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(schema.$anchor))
     throw mcpError('MCP tool input schema has an invalid $anchor', 'MCP_INVALID_SCHEMA');
   if (schema.contentSchema !== undefined)
-    result.contentSchema = normalizeSchema(schema.contentSchema, depth + 1, budget, rootSchema, refStack);
+    result.contentSchema = normalizeSchema(schema.contentSchema, depth + 1, budget, rootSchema, refStack, cache);
   if (schema.examples !== undefined && !Array.isArray(schema.examples))
     throw mcpError('MCP tool input schema has invalid examples', 'MCP_INVALID_SCHEMA');
   for (const key of ['deprecated', 'readOnly', 'writeOnly'])
@@ -1173,17 +1166,17 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   if (schema.allOf !== undefined) {
     if (!Array.isArray(schema.allOf) || schema.allOf.length === 0 || schema.allOf.length > 8)
       throw mcpError('MCP tool input schema has invalid allOf', 'MCP_INVALID_SCHEMA');
-    result.allOf = schema.allOf.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack));
+    result.allOf = schema.allOf.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack, cache));
   }
   for (const key of ['anyOf', 'oneOf'])
     if (schema[key] !== undefined) {
       if (!Array.isArray(schema[key]) || schema[key].length === 0 || schema[key].length > 8)
         throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
-      result[key] = schema[key].map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack));
+      result[key] = schema[key].map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack, cache));
     }
-  if (schema.not !== undefined) result.not = normalizeSchema(schema.not, depth + 1, budget, rootSchema, refStack);
+  if (schema.not !== undefined) result.not = normalizeSchema(schema.not, depth + 1, budget, rootSchema, refStack, cache);
   for (const key of ['if', 'then', 'else'])
-    if (schema[key] !== undefined) result[key] = normalizeSchema(schema[key], depth + 1, budget, rootSchema, refStack);
+    if (schema[key] !== undefined) result[key] = normalizeSchema(schema[key], depth + 1, budget, rootSchema, refStack, cache);
   for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'])
     if (schema[key] !== undefined) {
       if (!Number.isFinite(schema[key])) throw mcpError('MCP tool input schema has invalid numeric bounds', 'MCP_INVALID_SCHEMA');
@@ -1210,15 +1203,15 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     }
     result.pattern = schema.pattern;
   }
-  if (schema.contains !== undefined) result.contains = normalizeSchema(schema.contains, depth + 1, budget, rootSchema, refStack);
+  if (schema.contains !== undefined) result.contains = normalizeSchema(schema.contains, depth + 1, budget, rootSchema, refStack, cache);
   if (Array.isArray(schema.items)) {
     if (schema.prefixItems !== undefined || schema.items.length > 64)
       throw mcpError('MCP tuple items invalid or incompatible with prefixItems', 'MCP_INVALID_SCHEMA');
-    result.prefixItems = schema.items.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack));
+    result.prefixItems = schema.items.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack, cache));
   } else if (schema.prefixItems !== undefined) {
     if (!Array.isArray(schema.prefixItems) || schema.prefixItems.length > 64)
       throw mcpError('MCP tool input schema has invalid prefixItems', 'MCP_INVALID_SCHEMA');
-    result.prefixItems = schema.prefixItems.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack));
+    result.prefixItems = schema.prefixItems.map((item) => normalizeSchema(item, depth + 1, budget, rootSchema, refStack, cache));
   }
   if (result.minimum !== undefined && result.maximum !== undefined && result.minimum > result.maximum)
     throw mcpError('MCP tool input schema has inconsistent numeric bounds', 'MCP_INVALID_SCHEMA');
@@ -1254,7 +1247,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     result.properties = Object.fromEntries(
       Object.entries(properties).map(([key, value]) => {
         if (key.length > 128) throw mcpError('MCP tool input schema has an invalid property name', 'MCP_INVALID_SCHEMA');
-        return [key, normalizeSchema(value, depth + 1, budget, rootSchema, refStack)];
+        return [key, normalizeSchema(value, depth + 1, budget, rootSchema, refStack, cache)];
       }),
     );
     if (
@@ -1292,7 +1285,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
       result.dependentSchemas = Object.fromEntries(
         dependencies.map(([key, child]) => {
           if (key.length > 128) throw mcpError('MCP dependentSchemas key is too long', 'MCP_INVALID_SCHEMA');
-          return [key, normalizeSchema(child, depth + 1, budget, rootSchema, refStack)];
+          return [key, normalizeSchema(child, depth + 1, budget, rootSchema, refStack, cache)];
         }),
       );
     }
@@ -1319,7 +1312,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
             writable: true,
           });
         } else {
-          const normalized = normalizeSchema(dependency, depth + 1, budget, rootSchema, refStack);
+          const normalized = normalizeSchema(dependency, depth + 1, budget, rootSchema, refStack, cache);
           result.dependentSchemas ||= Object.create(null);
           const existing = Object.hasOwn(result.dependentSchemas, key) ? result.dependentSchemas[key] : null;
           Object.defineProperty(result.dependentSchemas, key, {
@@ -1344,22 +1337,22 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
           } catch {
             throw mcpError('MCP patternProperties key is invalid', 'MCP_INVALID_SCHEMA');
           }
-          return [pattern, normalizeSchema(child, depth + 1, budget, rootSchema, refStack)];
+          return [pattern, normalizeSchema(child, depth + 1, budget, rootSchema, refStack, cache)];
         }),
       );
     }
     if (schema.propertyNames !== undefined)
-      result.propertyNames = normalizeSchema(schema.propertyNames, depth + 1, budget, rootSchema, refStack);
+      result.propertyNames = normalizeSchema(schema.propertyNames, depth + 1, budget, rootSchema, refStack, cache);
     if (schema.additionalProperties !== undefined) {
       if (
         typeof schema.additionalProperties !== 'boolean' &&
         (!schema.additionalProperties || typeof schema.additionalProperties !== 'object')
       )
         throw mcpError('MCP object schema has invalid additionalProperties', 'MCP_INVALID_SCHEMA');
-      result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1, budget, rootSchema, refStack);
+      result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1, budget, rootSchema, refStack, cache);
     }
     if (schema.unevaluatedProperties !== undefined)
-      result.unevaluatedProperties = normalizeSchema(schema.unevaluatedProperties, depth + 1, budget, rootSchema, refStack);
+      result.unevaluatedProperties = normalizeSchema(schema.unevaluatedProperties, depth + 1, budget, rootSchema, refStack, cache);
   }
   if (
     types.includes('array') ||
@@ -1369,11 +1362,13 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   ) {
     if (Array.isArray(schema.items)) {
       result.items =
-        schema.additionalItems === undefined ? true : normalizeSchema(schema.additionalItems, depth + 1, budget, rootSchema, refStack);
-    } else if (schema.items !== undefined) result.items = normalizeSchema(schema.items, depth + 1, budget, rootSchema, refStack);
-    else if (schema.additionalItems !== undefined) normalizeSchema(schema.additionalItems, depth + 1, budget, rootSchema, refStack);
+        schema.additionalItems === undefined
+          ? true
+          : normalizeSchema(schema.additionalItems, depth + 1, budget, rootSchema, refStack, cache);
+    } else if (schema.items !== undefined) result.items = normalizeSchema(schema.items, depth + 1, budget, rootSchema, refStack, cache);
+    else if (schema.additionalItems !== undefined) normalizeSchema(schema.additionalItems, depth + 1, budget, rootSchema, refStack, cache);
     if (schema.unevaluatedItems !== undefined)
-      result.unevaluatedItems = normalizeSchema(schema.unevaluatedItems, depth + 1, budget, rootSchema, refStack);
+      result.unevaluatedItems = normalizeSchema(schema.unevaluatedItems, depth + 1, budget, rootSchema, refStack, cache);
   }
   return result;
 }

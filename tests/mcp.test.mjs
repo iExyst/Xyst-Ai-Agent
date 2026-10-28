@@ -72,7 +72,8 @@ const sendMethodResult = (request, result) => {
       ],
       unevaluatedItems: false,
     };
-    result.tools[0].inputSchema.$defs = { ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 } };
+    result.tools[0].inputSchema.$defs = { ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 }, TreeNode: { type: 'object', properties: { value: { type: 'integer' }, children: { type: 'array', items: { $ref: '#/$defs/TreeNode' } } }, required: ['value'], additionalProperties: false } };
+    result.tools[0].inputSchema.properties.recursive_tree = { $ref: '#/$defs/TreeNode' };
     result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
     result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
     result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
@@ -348,6 +349,14 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', tuple_values: ['name', 'wrong'] }), /valid integer/);
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', tuple_values: ['name', 2, 'wrong'] }), /boolean/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_text: 'short' }).ref_text, 'short');
+  assert.deepEqual(
+    validateArguments(definition.parameters, { text: 'hello', recursive_tree: { value: 1, children: [{ value: 2 }] } }).recursive_tree,
+    { value: 1, children: [{ value: 2 }] },
+  );
+  assert.throws(
+    () => validateArguments(definition.parameters, { text: 'hello', recursive_tree: { value: 1, children: [{ value: 'bad' }] } }),
+    /valid integer/,
+  );
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_text: 'x' }), /characters/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_tight: 'abc' }).ref_tight, 'abc');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_tight: 'longer' }), /characters/);
@@ -1109,10 +1118,17 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
       };
       result.tools[0].inputSchema.$defs = {
         ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 },
+        TreeNode: {
+          type: 'object',
+          properties: { value: { type: 'integer' }, children: { type: 'array', items: { $ref: '#/$defs/TreeNode' } } },
+          required: ['value'],
+          additionalProperties: false,
+        },
         Region: { type: 'string', 'x-mcp-header': 'Region' },
       };
       result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
       result.tools[0].inputSchema.properties.region = { $ref: '#/$defs/Region' };
+      result.tools[0].inputSchema.properties.recursive_tree = { $ref: '#/$defs/TreeNode' };
       result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
       result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
       result.tools[0].inputSchema.properties.ref_anchor = { $ref: '#ShortTextAnchor' };
@@ -1291,6 +1307,23 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
     /boolean/,
   );
   assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_text: 'short' }).ref_text, 'short');
+  assert.deepEqual(
+    validateArguments(definitions[0].parameters, {
+      text: 'hello',
+      region: 'Québec',
+      recursive_tree: { value: 1, children: [{ value: 2 }] },
+    }).recursive_tree,
+    { value: 1, children: [{ value: 2 }] },
+  );
+  assert.throws(
+    () =>
+      validateArguments(definitions[0].parameters, {
+        text: 'hello',
+        region: 'Québec',
+        recursive_tree: { value: 1, children: [{ value: 'bad' }] },
+      }),
+    /valid integer/,
+  );
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_text: 'x' }), /characters/);
   assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_tight: 'abc' }).ref_tight, 'abc');
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_tight: 'longer' }), /characters/);

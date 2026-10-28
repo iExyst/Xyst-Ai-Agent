@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 import vm from 'node:vm';
 
 export const TOOL_SCHEMA_VERSION = 1;
+export const MCP_SCHEMA_REF = Symbol('mcpSchemaRef');
 
 const PLATFORM_TIMEOUT = Object.freeze({ kind: 'platform_operation' });
 const DEFAULT_EXECUTION_POLICY = Object.freeze({ timeout: PLATFORM_TIMEOUT, sandbox: 'not_applicable' });
@@ -404,7 +405,7 @@ export function validateArguments(schema, input) {
   } catch {
     throw new Error('Tool arguments are not valid JSON');
   }
-  validateValue(schema, value, '$', { patternChecksRemaining: 256 });
+  validateValue(schema, value, '$', { patternChecksRemaining: 256, referenceDepth: 0 });
   return value;
 }
 
@@ -415,7 +416,7 @@ export function validateMcpToolOutput(schema, result) {
       code: 'MCP_INVALID_RESULT',
     });
   try {
-    validateValue(schema, result.structuredContent, '$.structuredContent', { patternChecksRemaining: 256 });
+    validateValue(schema, result.structuredContent, '$.structuredContent', { patternChecksRemaining: 256, referenceDepth: 0 });
   } catch {
     throw Object.assign(new Error('MCP tool structuredContent does not match its advertised outputSchema'), {
       code: 'MCP_INVALID_RESULT',
@@ -428,6 +429,18 @@ function validateValue(schema, value, location, state) {
   if (schema === true) return emptyEvaluated();
   if (schema === false) throw new Error(`${location} is not allowed`);
   const evaluated = emptyEvaluated();
+  if (schema[MCP_SCHEMA_REF] !== undefined) {
+    state.referenceDepth += 1;
+    if (state.referenceDepth > 128) {
+      state.referenceDepth -= 1;
+      throw Object.assign(new Error(`${location} exceeds the recursive MCP schema depth limit`), { code: 'MCP_SCHEMA_EVALUATION_LIMIT' });
+    }
+    try {
+      mergeEvaluated(evaluated, validateValue(schema[MCP_SCHEMA_REF], value, location, state));
+    } finally {
+      state.referenceDepth -= 1;
+    }
+  }
   if (Object.hasOwn(schema, 'const') && !isDeepStrictEqual(schema.const, value)) throw new Error(`${location} must match its fixed value`);
   if (Array.isArray(schema.type)) {
     const matches = schema.type.filter((type) => matchesSchemaType(type, value));
@@ -614,7 +627,8 @@ function validateValue(schema, value, location, state) {
 function tryValidateValue(schema, value, location, state) {
   try {
     return validateValue(schema, value, location, state);
-  } catch {
+  } catch (error) {
+    if (error?.code === 'MCP_SCHEMA_EVALUATION_LIMIT') throw error;
     return null;
   }
 }
@@ -688,6 +702,6 @@ function readConfigPath(config, configPath) {
 function freezeDeep(value, seen) {
   if (!value || typeof value !== 'object' || seen.has(value)) return value;
   seen.add(value);
-  for (const child of Object.values(value)) freezeDeep(child, seen);
+  for (const key of Reflect.ownKeys(value)) freezeDeep(value[key], seen);
   return Object.freeze(value);
 }

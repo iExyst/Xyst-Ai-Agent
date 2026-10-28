@@ -2697,7 +2697,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 ## MCP legacy schema definitions compatibility — 2026-10-28
 
-- Both MCP transports now accept the draft-07 `definitions` container and resolve bounded local JSON Pointer references into it, while preserving fail-closed behavior for recursive and external references. Anchor lookup traverses the container too.
+- Both MCP transports accept the draft-07 `definitions` container and resolve bounded local JSON Pointer references into it. Anchor lookup traverses the container too; external references remain fail-closed.
 - Focused stdio and Streamable HTTP schema tests pass 2/2, including valid and invalid references. Changed-file Biome and whitespace checks pass; exact-source hosted CI is pending.
 
 - Draft-07 `dependencies` is now accepted on both MCP transports. Property dependency arrays map to required-property checks; schema dependencies map to dependent schemas, preserving conjunctions when old and new forms overlap. Entries, names, and depth remain bounded, and generated maps safely preserve special property names.
@@ -2711,6 +2711,16 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - MCP arrays now support draft-07 tuple `items` and `additionalItems` on stdio and Streamable HTTP. Tuple length remains capped at 64; omitted `additionalItems` is normalized to an allowing schema, preserving legacy semantics alongside the unevaluated-item validator.
 - Focused transport checks pass 2/2 and changed-file Biome/whitespace checks pass. Exact-source Windows/Linux confirmation is pending.
 
+## Recursive MCP JSON Schema references — 2026-10-28
+
+- Stdio and Streamable HTTP now preserve same-document recursive `$ref` links so schemas can validate nested data such as tree-shaped objects. Reference evaluation has a 128-step runtime limit; external references remain rejected.
+- Both transports cover a valid nested tree and an invalid child value. `node --test tests/mcp.test.mjs` passes 37 tests with one expected Linux Bubblewrap capability skip; changed-file Biome and whitespace checks pass. Exact-source hosted Windows/Linux CI is pending.
+
 ## CI runner throughput — 2026-10-28
 
 - CI runs are now grouped by ref and superseded runs are cancelled on the next push, preventing stale full matrices from occupying Windows/Linux runner slots. The latest revision still runs the complete required matrix and both desktop package lifecycle jobs.
+
+## Semantic index ext4 overflow smoke — 2026-10-28
+
+- Ran the index against an Ubuntu WSL ext4 workspace containing 2,500 files. The file cap indexed 512 and reported truncation; a separate 1,000-entry cap indexed 999 and reported truncation. Both paths cleared the index and removed their locks cleanly.
+- This validates bounded overflow and recovery on ext4 but does not replace native Ubuntu Desktop/Wayland acceptance or a maximum-size 50,000-entry soak. The evidence was gathered from the current source revision.
