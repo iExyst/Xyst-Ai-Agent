@@ -2636,7 +2636,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Existing setup docs cover loopback local-model discovery, remote HTTPS model profiles, environment and OS credential-store secrets, and provider-side billing/data handling. The maintained Hello World signed MCP example includes package build, verify, install, and enable commands; extension docs explain Linux no-network sandboxing and the host-OS permissions used elsewhere.
 
-## MCP schema composition validation — 2026-10-28
+## MCP schema composition and pattern validation — 2026-10-28
 
 - MCP stdio and Streamable HTTP tool schemas accept bounded `allOf`, `anyOf`, `oneOf`, `not`, and `if`/`then`/`else` composition, including type-free composition wrappers. A per-schema validation budget and branch/depth caps bound server-provided schemas. Type-specific constraints still require an explicit type, avoiding silent acceptance of constraints the validator cannot apply.
-- The focused stdio and Streamable HTTP regressions pass (2/2); changed-file Biome checks and `git diff --check` pass. Additional JSON Schema composition and validation keywords remain open.
+- String `pattern` constraints are checked in a timed VM context; malformed patterns are rejected while schemas are normalized, and a catastrophic backtracking pattern cannot stall argument validation beyond the configured 10 ms execution budget.
+- The focused stdio and Streamable HTTP regressions pass (2/2), including pattern match/mismatch and catastrophic-pattern cases; changed-file Biome checks and `git diff --check` pass. Additional JSON Schema composition and validation keywords remain open.

@@ -849,6 +849,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     'maximum',
     'minLength',
     'maxLength',
+    'pattern',
     'minItems',
     'maxItems',
     'minProperties',
@@ -941,6 +942,16 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
         throw mcpError('MCP tool input schema has bounds for the wrong type', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
+  if (schema.pattern !== undefined) {
+    if (typeof schema.pattern !== 'string' || schema.pattern.length > 256)
+      throw mcpError('MCP tool input schema has invalid pattern', 'MCP_INVALID_SCHEMA');
+    try {
+      new RegExp(schema.pattern);
+    } catch {
+      throw mcpError('MCP tool input schema has invalid pattern', 'MCP_INVALID_SCHEMA');
+    }
+    result.pattern = schema.pattern;
+  }
   if (result.minimum !== undefined && result.maximum !== undefined && result.minimum > result.maximum)
     throw mcpError('MCP tool input schema has inconsistent numeric bounds', 'MCP_INVALID_SCHEMA');
   if (result.minLength !== undefined && result.maxLength !== undefined && result.minLength > result.maxLength)

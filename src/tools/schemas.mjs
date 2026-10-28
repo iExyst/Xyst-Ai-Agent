@@ -5,6 +5,7 @@ const integer = { type: 'integer', minimum: 1 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 import { isDeepStrictEqual } from 'node:util';
+import vm from 'node:vm';
 
 export const TOOL_SCHEMA_VERSION = 1;
 
@@ -427,6 +428,8 @@ function validateValue(schema, value, location) {
   }
   if (schema.enum && !schema.enum.some((candidate) => isDeepStrictEqual(candidate, value)))
     throw new Error(`${location} must match one of the allowed values`);
+  if (typeof value === 'string' && schema.pattern !== undefined && !matchesPattern(schema.pattern, value, location))
+    throw new Error(`${location} must match the required pattern`);
   for (const branch of schema.allOf || []) validateValue(branch, value, location);
   if (schema.anyOf) {
     let matched = false;
@@ -513,6 +516,15 @@ function validateValue(schema, value, location) {
     }
     for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`);
   } else throw new Error(`Unsupported tool schema type '${schema.type}'`);
+}
+
+function matchesPattern(pattern, value, location) {
+  try {
+    return vm.runInNewContext('new RegExp(pattern).test(value)', { pattern, value }, { timeout: 10 });
+  } catch (error) {
+    if (error.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw new Error(`${location} pattern validation timed out`);
+    throw error;
+  }
 }
 
 function schemaMatches(schema, value, location) {

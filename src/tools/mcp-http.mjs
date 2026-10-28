@@ -1030,6 +1030,7 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
     'maximum',
     'minLength',
     'maxLength',
+    'pattern',
     'minItems',
     'maxItems',
     'minProperties',
@@ -1122,6 +1123,15 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
         throw mcpError('MCP size bound invalid', 'MCP_INVALID_SCHEMA');
       out[k] = schema[k];
     }
+  if (schema.pattern !== undefined) {
+    if (typeof schema.pattern !== 'string' || schema.pattern.length > 256) throw mcpError('MCP pattern invalid', 'MCP_INVALID_SCHEMA');
+    try {
+      new RegExp(schema.pattern);
+    } catch {
+      throw mcpError('MCP pattern invalid', 'MCP_INVALID_SCHEMA');
+    }
+    out.pattern = schema.pattern;
+  }
   if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
     throw mcpError('MCP uniqueItems invalid', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined && !types.includes('array'))
