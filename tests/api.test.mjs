@@ -1042,6 +1042,9 @@ test('local control API authenticates, rejects hostile origins and streams a com
   const sharedRedactionModule = await fetch(`${url}/src/core/redaction.mjs`);
   assert.equal(sharedRedactionModule.status, 200);
   assert.match(await sharedRedactionModule.text(), /redactSecrets/);
+  const sharedModelFallbackModule = await fetch(`${url}/src/core/model-fallback.mjs`);
+  assert.equal(sharedModelFallbackModule.status, 200);
+  assert.match(await sharedModelFallbackModule.text(), /formatModelFallbackActivity/);
   for (const asset of ['statuses.mjs', 'limits.mjs', 'budgets.mjs']) {
     const moduleResponse = await fetch(`${url}/core/${asset}`);
     assert.equal(moduleResponse.status, 200, `${asset} should resolve from the served API contract modules`);
@@ -1060,6 +1063,10 @@ test('local control API authenticates, rejects hostile origins and streams a com
   assert.equal(crossSiteMetadataModule.status, 403);
   const crossSiteRedactionModule = await fetch(`${url}/src/core/redaction.mjs`, { headers: { origin: 'http://localhost:3000' } });
   assert.equal(crossSiteRedactionModule.status, 403);
+  const crossSiteModelFallbackModule = await fetch(`${url}/src/core/model-fallback.mjs`, {
+    headers: { origin: 'http://localhost:3000' },
+  });
+  assert.equal(crossSiteModelFallbackModule.status, 403);
   const crossSiteBudgetsModule = await fetch(`${url}/core/budgets.mjs`, { headers: { origin: 'http://localhost:3000' } });
   assert.equal(crossSiteBudgetsModule.status, 403);
   assert.match(appHtml, /id="import-session-file"/);

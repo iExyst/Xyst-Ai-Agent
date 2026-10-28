@@ -256,6 +256,7 @@ export class LocalControlServer {
         url.pathname === '/src/core/keybindings.mjs' ||
         url.pathname === '/src/core/model-metadata.mjs' ||
         url.pathname === '/src/core/redaction.mjs' ||
+        url.pathname === '/src/core/model-fallback.mjs' ||
         url.pathname === '/core/budgets.mjs' ||
         url.pathname === '/core/statuses.mjs' ||
         url.pathname === '/core/limits.mjs';
@@ -1909,6 +1910,7 @@ export class LocalControlServer {
       ['/src/core/keybindings.mjs', [path.join(GUI_ROOT, '..', 'src', 'core', 'keybindings.mjs'), 'text/javascript; charset=utf-8']],
       ['/src/core/model-metadata.mjs', [path.join(GUI_ROOT, '..', 'src', 'core', 'model-metadata.mjs'), 'text/javascript; charset=utf-8']],
       ['/src/core/redaction.mjs', [path.join(GUI_ROOT, '..', 'src', 'core', 'redaction.mjs'), 'text/javascript; charset=utf-8']],
+      ['/src/core/model-fallback.mjs', [path.join(GUI_ROOT, '..', 'src', 'core', 'model-fallback.mjs'), 'text/javascript; charset=utf-8']],
       ['/core/statuses.mjs', [path.join(GUI_ROOT, '..', 'src', 'core', 'statuses.mjs'), 'text/javascript; charset=utf-8']],
       ['/core/budgets.mjs', [path.join(GUI_ROOT, '..', 'src', 'core', 'budgets.mjs'), 'text/javascript; charset=utf-8']],
       ['/core/limits.mjs', [path.join(GUI_ROOT, '..', 'src', 'core', 'limits.mjs'), 'text/javascript; charset=utf-8']],

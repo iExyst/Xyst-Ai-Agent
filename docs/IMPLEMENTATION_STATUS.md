@@ -2768,3 +2768,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Repository-wide secret scan findings — 2026-10-28
 
 - Exact-source run [40748305699](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40748305699) failed its security scan on three credential-like findings in commits `a3462713e7cfae574e6b1abf9f9e7530756e7fdf` and `d1c8e922d183e174b3f5f1c65959509fa197d8b6`. Both commits are reachable from `origin/codex/integrate-green-prs-58-71` and absent from the authorized build branch's history. Scanner output remains redacted; no allowlist or other-branch history change was made. The branch build is not release-qualified while this repository-wide gate remains red.
+
+## Current-source CI follow-up — 2026-10-28
+
+- Run [40749477976](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40749477976) exposed two regressions fixed in the next revision: the browser needed the new model-fallback module added to the same-origin GUI allowlist, and the built-in retry-task UUID schema needed an explicit assertion after JSON Schema `format` became annotation-only. Focused API and schema regressions pass, and the browser smoke now completes locally.
+- That run's two other Linux failures are hosted Bubblewrap capability limits: loopback setup is denied, which prevents the required signed MCP isolation case. The Ubuntu lanes passed lint/format, CLI workflow, extension-package validation, and routing/agent/injection evaluations. Exact-source hosted revalidation of the fixes remains required.

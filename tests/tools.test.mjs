@@ -51,7 +51,10 @@ test('tool schemas reject unknown fields and malformed values', () => {
       task_id: '00000000-0000-4000-8000-000000000001',
     },
   );
-  assert.throws(() => validateArguments(TOOL_DEFINITIONS.retry_subagent_task.parameters, { task_id: '../other-session' }), /valid UUID/);
+  assert.throws(
+    () => validateArguments(TOOL_DEFINITIONS.retry_subagent_task.parameters, { task_id: '../other-session' }),
+    /required pattern/,
+  );
   assert.deepEqual(validateArguments(TOOL_DEFINITIONS.computer_control.parameters, { action: 'press_key', key: 'CTRL+SHIFT+ESC' }), {
     action: 'press_key',
     key: 'CTRL+SHIFT+ESC',
