@@ -4,7 +4,15 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-import { assertProductVersionAlignment, buildReleaseArchive } from '../scripts/build-release.mjs';
+import { assertProductVersionAlignment, buildReleaseArchive, normalizeArchiveText } from '../scripts/build-release.mjs';
+
+test('release archive text normalization is stable across checkout line endings', () => {
+  assert.deepEqual(normalizeArchiveText(Buffer.from('first\r\nsecond\rthird\n')), Buffer.from('first\nsecond\nthird\n'));
+  const binary = Buffer.from([0x00, 0xff, 0x0d, 0x0a]);
+  assert.equal(normalizeArchiveText(binary), binary);
+  const invalidUtf8 = Buffer.from([0xff, 0x0d, 0x0a]);
+  assert.equal(normalizeArchiveText(invalidUtf8), invalidUtf8);
+});
 
 test('release version alignment rejects mismatched product components', async (t) => {
   const scratchRoot = path.join(process.cwd(), '.test-tmp');
@@ -92,6 +100,7 @@ test('release archive is reproducible and contains verified source files without
   assert.ok(entries.has(`${prefix}CHANGELOG.md`));
   assert.ok(entries.has(`${prefix}CONTRIBUTING.md`));
   assert.ok(entries.has(`${prefix}docs/RELEASE_POLICY.md`));
+  assert.ok(!entries.get(`${prefix}.github/workflows/ci.yml`).data.includes(0x0d), 'text files use LF line endings in the source archive');
   assert.match(entries.get(`${prefix}LICENSE`).data.toString('utf8'), /Apache License[\s\S]*Version 2\.0/);
   assert.ok(entries.has(`${prefix}biome.json`));
   assert.ok(entries.has(`${prefix}pnpm-lock.yaml`));

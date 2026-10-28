@@ -69,7 +69,7 @@ export async function buildReleaseArchive({ outputDirectory = path.join(ROOT, 'd
       contentEntries.push({ name: `${packageDirectory}/${record.archivePath}`, type: 'directory', data: Buffer.alloc(0) });
       continue;
     }
-    const data = await fs.readFile(record.absolutePath);
+    const data = normalizeArchiveText(await fs.readFile(record.absolutePath));
     totalBytes += data.length;
     if (totalBytes > MAX_SOURCE_BYTES) throw new Error(`Release source exceeds ${MAX_SOURCE_BYTES} bytes`);
     manifestFiles.push({ path: record.archivePath, size: data.length, sha256: createHash('sha256').update(data).digest('hex') });
@@ -154,6 +154,15 @@ export async function assertProductVersionAlignment(productVersion, root = ROOT)
         .join(', ')}`,
     );
   return versions;
+}
+
+export function normalizeArchiveText(data) {
+  if (!Buffer.isBuffer(data)) throw new TypeError('Archive file data must be a Buffer');
+  if (data.includes(0)) return data;
+  const text = data.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(data)) return data;
+  const normalized = text.replace(/\r\n?/g, '\n');
+  return normalized === text ? data : Buffer.from(normalized, 'utf8');
 }
 
 async function replaceExisting(temporary, destination) {

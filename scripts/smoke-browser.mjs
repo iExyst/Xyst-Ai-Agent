@@ -558,7 +558,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
 
     const themeRendering = await evaluate(
       protocol,
-      `(() => {
+      `(async () => {
         const root = document.documentElement;
         const originalTheme = root.dataset.theme || 'system';
         const probes = Object.fromEntries(Object.entries({
@@ -622,9 +622,11 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
         const mutedTextProbe = document.createElement('div');
         mutedTextProbe.style.color = 'var(--muted)';
         document.body.append(mutedTextProbe);
-        const inspect = (theme) => {
+        const inspect = async (theme) => {
           Object.values(probes).forEach((element) => { element.style.transition = 'none'; });
           root.dataset.theme = theme;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          void document.body.offsetWidth;
           const styles = getComputedStyle(root);
           return {
             canvas: styles.getPropertyValue('--canvas').trim(),
@@ -671,8 +673,8 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
             },
           };
         };
-        const dark = inspect('dark');
-        const light = inspect('light');
+        const dark = await inspect('dark');
+        const light = await inspect('light');
         root.dataset.theme = originalTheme;
         Object.values(probes).forEach((element) => element.remove());
         assistantMessage.remove();

@@ -1,5 +1,11 @@
 # Xyst development build status — 2026-10-28
 
+## Cross-platform source archive line endings and browser theme smoke — 2026-10-28
+
+- Windows worktrees can contain CRLF checkout bytes for Git-normalized text files. The source archive now normalizes valid UTF-8 text to LF before it records file sizes/hashes and writes the tarball; binary and invalid-UTF-8 data are preserved. Focused archive normalization/reproducibility regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source hosted confirmation is pending.
+- Hosted exact-source run [40646095129](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40646095129) confirmed that all eight independent CLI, VS Code package, browser/accessibility, routing, agent, injection, config, and source-archive steps ran and passed on both Ubuntu Node 22/24 lanes after the required Linux test failure. Windows Node 22/24 exposed a browser-smoke mismatch on the light-theme settings panel: the panel measured light, while a generic CSS-variable probe still returned the dark value during a same-frame theme change. After-frame style sampling fixes the comparison in a local Windows Edge smoke; Windows hosted Chromium confirmation is pending.
+- Security passed, and the exact-source Ubuntu desktop build, native checks, DEB lifecycle/rollback, and AppImage Xvfb smoke passed. Windows package build and lifecycle are still in progress. Required Node matrices remain blocked by hosted ConPTY initialization (`0xC0000142`) and Bubblewrap loopback (`RTM_NEWADDR: Operation not permitted`); the signed-MCP integration depends on the latter.
+
 ## CI acceptance steps after platform test failures — 2026-10-28
 
 - The hosted Node matrix previously skipped independent CLI, VS Code package, browser, agent/routing/injection evaluation, example-config, and source-archive checks after the required OS test step failed. Those steps now run when locked JavaScript dependencies are installed, with browser smoke also gated on successful Chrome setup. A platform test failure remains visible as a failed job; independent acceptance results will still be reported. The first exact-source CI run for this workflow change is pending.
