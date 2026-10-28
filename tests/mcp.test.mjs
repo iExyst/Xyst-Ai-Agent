@@ -33,6 +33,7 @@ function fixtureServerCode({
   unsupportedSchemaDialect = false,
   hangTool = false,
   progressTool = false,
+  resourceOnly = false,
 } = {}) {
   return `
 const readline = require('node:readline');
@@ -129,7 +130,9 @@ lines.on('line', (line) => {
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {}, error: { code: -32601 } }) + '\\n');
     return;
   }
-  if (request.method === 'server/discover') {
+  if (request.method === 'server/discover' && ${resourceOnly ? 'true' : 'false'}) {
+    sendMethodResult(request, { supportedVersions: ['2026-07-28'], capabilities: { resources: {}, prompts: {} } });
+  } else if (request.method === 'server/discover') {
     ${legacy ? "fail(request.id, -32601, 'method not found');" : invalidDiscovery ? "sendMethodResult(request, { supportedVersions: '2026-07-28', capabilities: {} });" : invalidDiscoveryVersions ? `sendMethodResult(request, { supportedVersions: ${JSON.stringify(invalidDiscoveryVersions)}, capabilities: {} });` : `sendMethodResult(request, { supportedVersions: ['2026-07-28'], capabilities: { tools: ${dynamicToolNotifications ? '{ listChanged: true }' : '{}'}, resources: {}, prompts: {}, private: { token: 'metadata-secret-canary' } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'fixture', version: 'token=metadata-secret-canary' } } });`}
   } else if (request.method === 'initialize') {
     send(request.id, { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } });
@@ -139,6 +142,8 @@ lines.on('line', (line) => {
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/subscriptions/acknowledged', params: { _meta: { 'io.modelcontextprotocol/subscriptionId': subscriptionId }, notifications: { toolsListChanged: true } } }) + '\\n');
   } else if (request.method === 'notifications/cancelled') {
     if (${hangTool ? 'true' : 'false'} && request.params?.requestId === cancelledToolCall) cancelledToolCall = 'cancelled';
+  } else if (request.method === 'tools/list' && ${resourceOnly ? 'true' : 'false'}) {
+    fail(request.id, -32601, 'method not found');
   } else if (request.method === 'tools/list') {
     sendMethodResult(request, { tools: [{ name: 'echo', description: 'Return the supplied text.', inputSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', properties: { text: { type: 'string', minLength: 1, maxLength: 40 }, format_metadata: { type: 'string', format: 'email', contentEncoding: 'utf-8', contentMediaType: 'text/plain', contentSchema: { type: 'object', properties: { value: { type: 'string' } } }, default: 'person@example.test', examples: ['person@example.test'], deprecated: true, readOnly: true }, optional_null: { type: 'null' }, nullable_text: { type: ['string', 'null'], maxLength: 10 }, fixed_mode: { type: 'string', const: 'safe' }, object_choice: { type: 'object', properties: { mode: { type: 'string' } }, required: ['mode'], enum: [{ mode: 'fast' }] }, bounded_object: { type: 'object', properties: { flag: { type: 'boolean' } }, minProperties: 1, maxProperties: 1 }, unique_tags: { type: 'array', items: { type: 'object', properties: { tag: { type: 'string' } } }, uniqueItems: true }, positive_number: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 10, multipleOf: 0.1 }, any_value: true, forbidden: false, one_character: { type: 'string', maxLength: 1 }, composed_text: { allOf: [{ type: 'string' }, { type: 'string', minLength: 2 }] }, choice: { anyOf: [{ type: 'string', minLength: 2 }, { type: 'integer' }] }, exclusive_choice: { oneOf: [{ type: 'integer' }, { const: 1 }] }, not_long_text: { not: { type: 'string', minLength: 2 } }, conditional_text: { if: { type: 'string' }, then: { type: 'string', minLength: 2 }, else: { type: 'integer' } }, pattern_code: { type: 'string', pattern: '^[A-Z]{2}-[0-9]{3}$' }, slow_pattern: { type: 'string', pattern: '^(a+)+$' }, pattern_map: { patternProperties: { '^S_': { type: 'string' }, '^I_': { type: 'integer' } }, additionalProperties: false }, names_only: { propertyNames: { pattern: '^[a-z_]+$' } }, implicit_minimum: { minimum: 1 }, implicit_length: { minLength: 2 }, typed_free_object: { required: ['flag'] }, dependent_fields: { dependentRequired: { card: ['billing'] }, dependentSchemas: { member: { required: ['id'] } } }, contain_array: { type: 'array', contains: { const: 'hit' }, minContains: 1, maxContains: 2 }, tuple_values: { type: 'array', prefixItems: [{ type: 'string' }, { type: 'integer' }], items: { type: 'boolean' } } }, required: ['text'], additionalProperties: { type: 'string' } } }, { name: 'count', inputSchema: { type: 'object', properties: { count: { type: 'integer', enum: [1, 2] } } } }] });
   } else if (request.method === 'tools/call') {
@@ -555,6 +560,50 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
     ['started', 'succeeded'],
   );
   assert.doesNotMatch(JSON.stringify(events), /process\.execPath/);
+});
+
+test('MCP stdio keeps a resource and prompt server usable without a tools capability', async (t) => {
+  const root = await createTempDirectory('xyst-mcp-resource-only-');
+  const config = managerConfig();
+  config.mcp.servers.fixture.args = ['-e', fixtureServerCode({ resourceOnly: true })];
+  const manager = new StdioMcpManager({ config, workspaceRoot: root });
+  t.after(async () => {
+    await manager.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await manager.initialize();
+
+  assert.equal(manager.serverCatalog[0].connection_state, 'connected');
+  assert.deepEqual(manager.serverCatalog[0].capabilities, ['prompts', 'resources']);
+  assert.equal(
+    manager.definitions.some((tool) => tool.name === 'mcp__fixture__echo'),
+    false,
+  );
+  const resourceTool = manager.definitions.find((tool) => tool._mcp.operation === 'resources/read');
+  const promptTool = manager.definitions.find((tool) => tool._mcp.operation === 'prompts/get');
+  assert.ok(resourceTool);
+  assert.ok(promptTool);
+  assert.match((await manager.call(resourceTool.name, { uri: 'file:///docs/readme' })).contents[0].text, /Fixture resource contents/);
+  assert.match((await manager.call(promptTool.name, { name: 'Ada' })).messages[0].content.text, /Hello Ada/);
+});
+
+test('Streamable HTTP skips tools/list when the server has no tools capability', async () => {
+  let requestCount = 0;
+  const session = new StreamableHttpMcpSession({
+    name: 'resource-only',
+    settings: { url: 'http://127.0.0.1:8765/mcp' },
+    headers: {},
+    timeoutMs: 1000,
+    fetchImpl: async () => {
+      requestCount += 1;
+      throw new Error('tools/list must not be requested');
+    },
+  });
+  session.capabilities = { resources: {} };
+
+  assert.deepEqual(await session.listTools(), []);
+  assert.equal(requestCount, 0);
 });
 
 test('MCP JSON Schema enum and const compare JSON numbers mathematically', () => {

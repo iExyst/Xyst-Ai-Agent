@@ -2786,3 +2786,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## MCP JSON Schema boolean conditionals — 2026-10-28
 
 - Boolean subschemas are valid for `if`, `then`, and `else`. Xyst now evaluates `if: false` and applies the `else` branch instead of skipping the conditional. Focused regressions for both valid and rejected branches pass; exact-source Windows/Linux CI is pending.
+
+## MCP servers without tools — 2026-10-28
+
+- MCP servers may advertise resources or prompts without a `tools` capability. Stdio and Streamable HTTP clients now skip `tools/list` for those servers. A resource/prompt-only stdio fixture remains connected and can read a resource and get a prompt; an HTTP regression verifies no tools request is sent. Focused regressions pass; exact-source Windows/Linux CI is pending.

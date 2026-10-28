@@ -555,6 +555,7 @@ class McpStdioSession {
   }
 
   async listTools() {
+    if (!this.capabilities.tools) return [];
     const tools = [];
     let cursor;
     const seenCursors = new Set();
