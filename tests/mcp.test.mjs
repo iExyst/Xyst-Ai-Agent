@@ -841,6 +841,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   let streamCancelled = false;
   let templateMethodUnsupported = false;
   let callResultType = null;
+  let callStructuredContent = { text: 'hello' };
   const fetchImpl = async (url, options) => {
     assert.equal(url, 'http://127.0.0.1:8765/mcp');
     assert.equal(options.redirect, 'error');
@@ -856,6 +857,12 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
               tools: [
                 {
                   name: 'echo',
+                  outputSchema: {
+                    type: 'object',
+                    properties: { text: { type: 'string' } },
+                    required: ['text'],
+                    additionalProperties: false,
+                  },
                   inputSchema: {
                     $schema: 'https://json-schema.org/draft/2020-12/schema',
                     type: 'object',
@@ -915,6 +922,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                     ? { messages: [{ role: 'user', content: { type: 'text', text: request.params.arguments.topic } }] }
                     : {
                         content: [{ type: 'text', text: `http:${request.params.arguments.text}` }],
+                        structuredContent: callStructuredContent,
                         resultType: callResultType || 'complete',
                       };
     result.resultType ||= 'complete';
@@ -1089,10 +1097,13 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
     { text: 'hello', region: 'Québec', unique_tags: [{ tag: 'a' }, { tag: 'b' }], positive_number: 2.3 },
   );
   assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', one_character: '😀' }).one_character, '😀');
-  assert.deepEqual(
-    await session.callTool('echo', { text: 'hello', region: 'Québec' }, { headerParameters: definitions[0]._mcp.headerParameters }),
-    { resultType: 'complete', content: [{ type: 'text', text: 'http:hello' }] },
-  );
+  assert.deepEqual(await session.callTool('echo', { text: 'hello', region: 'Québec' }, definitions[0]._mcp), {
+    resultType: 'complete',
+    content: [{ type: 'text', text: 'http:hello' }],
+    structuredContent: { text: 'hello' },
+  });
+  callStructuredContent = { text: 42 };
+  await assert.rejects(session.callTool('echo', { text: 'hello', region: 'Québec' }, definitions[0]._mcp), { code: 'MCP_INVALID_RESULT' });
   callResultType = 'input_required';
   await assert.rejects(
     session.callTool('echo', { text: 'needs input', region: 'Québec' }, { headerParameters: definitions[0]._mcp.headerParameters }),
@@ -1127,6 +1138,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
       'prompts/list',
       'tools/call',
       'tools/call',
+      'tools/call',
       'resources/read',
       'resources/read',
       'prompts/get',
@@ -1139,9 +1151,9 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   assert.equal(requests[5].headers.get('accept'), 'application/json, text/event-stream');
   assert.equal(requests[5].headers.get('mcp-name'), 'echo');
   assert.equal(requests[5].headers.get('mcp-param-region'), '=?base64?UXXDqWJlYw==?=');
-  assert.equal(requests[7].headers.get('mcp-name'), 'https://docs.example.test/readme');
-  assert.equal(requests[8].headers.get('mcp-name'), 'https://docs.example.test/alpha');
-  assert.equal(requests[9].headers.get('mcp-name'), 'review');
+  assert.equal(requests[8].headers.get('mcp-name'), 'https://docs.example.test/readme');
+  assert.equal(requests[9].headers.get('mcp-name'), 'https://docs.example.test/alpha');
+  assert.equal(requests[10].headers.get('mcp-name'), 'review');
   assert.equal(streamCancelled, true);
 });
 
