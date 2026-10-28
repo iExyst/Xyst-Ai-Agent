@@ -1754,3 +1754,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added an integration regression using the real `AgentRunner` and `PersistentMissionRunner` with two independent mission tasks. One task waits on an in-flight model request while the other runs a child process scheduled to write a delayed marker. Cancelling the mission aborts both, leaves both task rows pending for resumption, and the child creates no marker after its scheduled write time.
 - Focused test passed 1/1. This is one bounded concurrent cancellation case; sustained task batches, concurrent tool calls within tasks, repeated pause/resume, and broader delegated graphs remain unverified under A5.
+
+## Repeated mission pause and resume · 2026-10-28
+
+- Added a runtime integration regression that pauses one persistent mission during inference three times, resumes the saved task after each interruption, checks the task remains pending with attempt counts preserved, then completes the fourth execution.
+- Focused test passed 1/1. This covers three sequential pause/resume cycles for one task; larger task graphs, concurrent tool batches, and broader delegated graphs remain unverified under A5.

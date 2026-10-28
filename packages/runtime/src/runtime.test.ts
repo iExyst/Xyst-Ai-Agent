@@ -2535,6 +2535,38 @@ test("mission tasks can pause independently and resume their saved execution", a
   } finally { store.close(); }
 }));
 
+test("missions preserve resumable task state across repeated pause and resume cycles", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "mission-repeated-pause.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  try {
+    let starts = 0; const started: Array<Promise<void>> = []; const announce: Array<() => void> = [];
+    for (let cycle = 0; cycle < 3; cycle++) started.push(new Promise<void>((resolve) => { announce.push(resolve); }));
+    const runner = new PersistentMissionRunner({ store, config, events, agent: { run: async (_objective: string, options: { signal?: AbortSignal; onSession?: (id: string) => void }) => {
+      const attempt = starts++; options.onSession?.("repeated-pause-session");
+      if (attempt < 3) {
+        announce[attempt]!();
+        if (options.signal?.aborted) return { sessionId: "repeated-pause-session", model: "fake", selectionReason: "test", turns: 1, status: "cancelled" as const, response: "paused" };
+        await new Promise<void>((resolve) => options.signal?.addEventListener("abort", () => resolve(), { once: true }));
+        return { sessionId: "repeated-pause-session", model: "fake", selectionReason: "test", turns: 1, status: "cancelled" as const, response: "paused" };
+      }
+      return { sessionId: "repeated-pause-session", model: "fake", selectionReason: "test", turns: 1, status: "completed" as const, response: "resumed" };
+    } } as never });
+    const mission = runner.repository.create({ name: "Repeated pause and resume", objective: "Retain the task across interruptions", tasks: [{ id: "worker", objective: "Wait and resume repeatedly", dependsOn: [] }] });
+    let running = runner.run(mission.id);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await started[cycle];
+      runner.pause(mission.id);
+      const paused = await running; assert.equal(paused.status, "paused", `cycle ${cycle + 1} should finish in paused state`);
+      const task = store.db.prepare("SELECT state,attempts FROM mission_tasks WHERE run_id=? AND task_key='worker'").get(paused.runId) as { state: string; attempts: number };
+      assert.equal(task.state, "pending", `cycle ${cycle + 1} should leave work resumable`);
+      assert.equal(task.attempts, cycle + 1);
+      if (cycle < 2) running = runner.resume(mission.id);
+    }
+    const resumed = await runner.resume(mission.id); assert.equal(resumed.status, "completed");
+    assert.equal(starts, 4);
+    assert.equal((store.db.prepare("SELECT state,attempts FROM mission_tasks WHERE run_id=? AND task_key='worker'").get(resumed.runId) as { state: string; attempts: number }).state, "completed");
+  } finally { store.close(); }
+}));
+
 test("mission task retry explicitly reruns a failed assignment", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-task-retry.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   try {
