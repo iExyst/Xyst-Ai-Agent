@@ -2,14 +2,14 @@
 
 ## Windows development installer rebuild — 2026-10-28
 
-- `pnpm build:desktop:windows-installer` completed from source commit `8f23da0`; the NSIS installer is 29,158,222 bytes with SHA-256 `0e490cfcde4b7a7341f2279f2573eb1c518fc8d9de6f3a89891940409665e1e7`. It is `NotSigned`. No fresh local install smoke was run; hosted package lifecycle verification for this source is pending. The development artifact and checksum are in local `dist/dev/`.
-- The same hosted run built the Ubuntu 24.04 DEB (54,859,246 bytes; SHA-256 `7afce5cb3bd62fd6111ea3a41d9c3d57315a924a8ca803b8c1348862b3fedf52`) and AppImage (128,207,352 bytes; SHA-256 `3038662eff34c4fa8a10b911a242db02a602b5c27d182a55aa9def8ded2badbf`). The hosted Ubuntu desktop/package lifecycle job passed. Both artifacts and their hashes are copied into local `dist/dev/`.
-- These package artifacts match source commit `36a8b94`. Refresh them after hosted verification of the compaction cancellation fix below before reusing them as current-source development builds.
+- `pnpm build:desktop:windows-installer` completed from source commit `8f23da0`; the NSIS installer is 29,158,222 bytes with SHA-256 `0e490cfcde4b7a7341f2279f2573eb1c518fc8d9de6f3a89891940409665e1e7`. It is `NotSigned`. No fresh local install smoke was run. The development artifact and checksum are in local `dist/dev/`.
+- Hosted run [40619405721](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40619405721) for source `8f23da0` passed the Windows and Ubuntu desktop/package lifecycle jobs. The Ubuntu 24.04 DEB is 54,857,906 bytes (SHA-256 `7be4970432e4af2d449dfce449b842ad8874bc9539dda977e45d2817229d79f6`); the AppImage is 128,207,352 bytes (SHA-256 `53fcbe50ba941cf9a85d088e29e39178bf8d7167f98a98e9432731a720857117`). Both hosted artifacts were retrieved into local `dist/dev/linux/`.
+- The hosted run's security job passed. Its Node matrices retain only the known ConPTY initialization failure on Windows and Bubblewrap network-namespace setup plus dependent signed-MCP isolation failures on Ubuntu. The packages are development artifacts and do not qualify a release.
 
 ## Compaction cancellation boundary — 2026-10-28
 
 - Compaction checks its abort signal after usage settlement and before persisting trimmed history. A provider that ignores cancellation can no longer cause the old transcript to be archived and removed after the user cancels. If cancellation lands during archive creation, cleanup removes the unreferenced archive before propagating cancellation.
-- Focused compaction suite passes 7/7 and changed-file Biome checks pass. Exact-source hosted run [40619405721](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40619405721) is pending.
+- Focused compaction suite passes 7/7 and changed-file Biome checks pass. Exact-source hosted run [40619405721](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40619405721) passed security and both desktop/package lifecycle jobs; the only matrix failures are the documented runner capability limits.
 
 ## MCP list-result schema conformance — 2026-10-28
 
