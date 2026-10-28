@@ -2,12 +2,13 @@
 
 ## Windows development installer rebuild — 2026-10-28
 
-- `pnpm build:desktop:windows-installer` completed from source commit `36a8b94`; the NSIS installer is 29,154,464 bytes with SHA-256 `b2c795d0e666c405025223232ddaf1959eb4f96437f5664a0be05394b5ffed31`. It is `NotSigned`. The build completed; no fresh install smoke was run. The development artifact and checksum are in local `dist/dev/`.
+- `pnpm build:desktop:windows-installer` completed from source commit `36a8b94`; the NSIS installer is 29,154,464 bytes with SHA-256 `b2c795d0e666c405025223232ddaf1959eb4f96437f5664a0be05394b5ffed31`. It is `NotSigned`. No fresh local install smoke was run; hosted run [40617017783](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40617017783) passed the Windows desktop package lifecycle job from that source. The development artifact and checksum are in local `dist/dev/`.
+- The same hosted run built the Ubuntu 24.04 DEB (54,859,246 bytes; SHA-256 `7afce5cb3bd62fd6111ea3a41d9c3d57315a924a8ca803b8c1348862b3fedf52`) and AppImage (128,207,352 bytes; SHA-256 `3038662eff34c4fa8a10b911a242db02a602b5c27d182a55aa9def8ded2badbf`). The hosted Ubuntu desktop/package lifecycle job passed. Both artifacts and their hashes are copied into local `dist/dev/`.
 
 ## MCP list-result schema conformance — 2026-10-28
 
 - MCP tool, resource, resource-template, and prompt list responses validate required arrays and definition fields, including JSON Schema object input schemas, optional prompt arguments, pagination cursors, annotations, icons, and metadata objects. Discovery validates known capability flags/maps and optional instructions; resource text/blob alternative fields are type-checked. `tools/call.structuredContent` accepts any JSON value (including arrays, scalars, and `null`) as the official schema specifies.
-- Focused protocol and MCP transport/integration suites pass 36 tests with one expected Linux sandbox capability skip; changed-file Biome checks pass. Hosted CI for this source is pending. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
+- Focused protocol and MCP transport/integration suites pass 36 tests with one expected Linux sandbox capability skip; changed-file Biome checks pass. Exact-source hosted run [40617017783](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40617017783) passed security and both desktop lifecycle jobs. Windows Node 22/24 each passed 939/961 with 21 skips and one known ConPTY failure; Ubuntu Node 22/24 each passed 953/961 with six skips and the known Bubblewrap namespace failure plus dependent signed-MCP isolation failure. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
 
 ## MCP result-shape conformance — 2026-10-28
 
