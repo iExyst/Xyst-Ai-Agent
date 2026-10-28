@@ -2198,7 +2198,7 @@ test("GitHub API tools pass agent cancellation through to HTTP requests", async 
 });
 
 test("GitHub pagination keeps credentials on the configured API origin and path", async () => {
-  const originalFetch = globalThis.fetch; const requests: Array<{ url: string; authorization: string | null; redirect?: RequestRedirect }> = [];
+  const originalFetch = globalThis.fetch; const requests: Array<{ url: string; authorization: string | null; redirect: RequestRedirect | undefined }> = [];
   const credentials = { get: async () => "test-github-token" };
   globalThis.fetch = async (input, init) => {
     const url = String(input); requests.push({ url, authorization: new Headers(init?.headers).get("authorization"), redirect: init?.redirect });
