@@ -192,6 +192,10 @@ export class ApprovalRuleStore {
       await this.#assertDirectoryChain(directory);
       try {
         handle = await fs.open(lockFile, 'wx', 0o600);
+        await handle.writeFile(
+          JSON.stringify({ lock_token: lockToken, pid: process.pid, hostname: os.hostname(), started_at: new Date().toISOString() }),
+        );
+        await handle.sync();
         lockIdentity = await handle.stat();
         assertRuleFile(lockIdentity, 'Approval rule lock must be a regular single-link file', MAX_APPROVAL_LOCK_BYTES);
         const lockPathInfo = await fs.lstat(lockFile);
@@ -200,8 +204,16 @@ export class ApprovalRuleStore {
         await this.#assertDirectoryChain(directory);
       } catch (error) {
         if (handle) {
+          const openedInfo = lockIdentity || (await handle.stat().catch(() => null));
           await handle.close().catch(() => {});
+          try {
+            await this.#assertDirectoryChain(directory);
+            await removeApprovalLockIfOwned(lockFile, lockToken, openedInfo);
+          } catch {
+            // Preserve a lock when its directory or ownership cannot be confirmed.
+          }
           handle = null;
+          lockIdentity = null;
         }
         const contention = error.code === 'EEXIST' || (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code));
         if (!contention) throw error;
@@ -223,10 +235,6 @@ export class ApprovalRuleStore {
       }
     }
     try {
-      await handle.writeFile(
-        JSON.stringify({ lock_token: lockToken, pid: process.pid, hostname: os.hostname(), started_at: new Date().toISOString() }),
-      );
-      await handle.sync();
       await this.#assertDirectoryChain(directory);
       await restoreAtomicWriteBackup(path.join(directory.path, 'rules.json'), {
         maxBytes: MAX_APPROVAL_RULE_BYTES,
@@ -245,18 +253,11 @@ export class ApprovalRuleStore {
       return await operation();
     } finally {
       await handle.close().catch(() => {});
-      if (lockIdentity) {
-        try {
-          await this.#assertDirectoryChain(directory);
-          const current = await fs.lstat(lockFile);
-          assertRuleFile(current, 'Approval rule lock must be a regular single-link file', MAX_APPROVAL_LOCK_BYTES);
-          if (sameFileIdentity(lockIdentity, current)) {
-            const record = JSON.parse(await fs.readFile(lockFile, 'utf8'));
-            if (record.lock_token === lockToken) await fs.unlink(lockFile);
-          }
-        } catch {
-          // A replaced or unsafe lock path is left for explicit operator recovery.
-        }
+      try {
+        await this.#assertDirectoryChain(directory);
+        await removeApprovalLockIfOwned(lockFile, lockToken, lockIdentity);
+      } catch {
+        // A replaced or unsafe lock path is left for explicit operator recovery.
       }
     }
   }
@@ -291,6 +292,22 @@ export class ApprovalRuleStore {
       if (!sameFileIdentity(expected.info, current)) throw invalidRuleStore('Approval rule state directory changed during access');
     }
   }
+}
+
+async function removeApprovalLockIfOwned(lockFile, lockToken, identity) {
+  const current = await fs.lstat(lockFile).catch((error) => (error.code === 'ENOENT' ? null : Promise.reject(error)));
+  if (!current) return false;
+  assertRuleFile(current, 'Approval rule lock must be a regular single-link file', MAX_APPROVAL_LOCK_BYTES);
+  if (identity && !sameFileIdentity(identity, current)) return false;
+  let record;
+  try {
+    record = JSON.parse(await fs.readFile(lockFile, 'utf8'));
+  } catch {
+    return false;
+  }
+  if (record.lock_token !== lockToken) return false;
+  await fs.unlink(lockFile);
+  return true;
 }
 
 function validateRule(rule) {
