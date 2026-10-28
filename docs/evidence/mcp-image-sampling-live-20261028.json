@@ -1,0 +1,15 @@
+{
+  "verifiedAt": "2026-10-28T15:43:31.559Z",
+  "model": "qwen/qwen3.5-9b",
+  "modelWasAlreadyLoaded": true,
+  "modelVisionCapability": true,
+  "contextLength": 16384,
+  "fixture": "docs/evidence/mcp-image-sampling-ground-truth.png",
+  "fixtureBytes": 7613,
+  "fixtureSha256": "24027c903af287d86d1364f1f96ef916298c251501a0949d3ad34356f2cfa381",
+  "maxTokens": 512,
+  "temperature": 0,
+  "userImageAnswer": "red",
+  "toolResultImageAnswer": "red",
+  "modelWasLoadedOrUnloaded": false
+}
