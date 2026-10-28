@@ -81,6 +81,41 @@ test('usage ledger reads stop at the configured size limit plus one byte during 
   assert.ok((await fs.stat(store.file)).isFile());
 });
 
+test('usage ledger write failure preserves committed totals, releases its lock, and permits retry', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-write-failure-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const now = Date.parse('2026-10-28T12:00:00.000Z');
+  const firstReservation = await store.reserve({ inputTokens: 2, outputTokens: 1, limits: { max_daily_input_tokens: 100 }, now });
+  await store.settle(firstReservation, { inputTokens: 2, outputTokens: 1, now });
+  const committedRecord = await fs.readFile(store.file, 'utf8');
+
+  const probe = await fs.open(path.join(root, 'probe'), 'w');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const writeFile = fileHandlePrototype.writeFile;
+  let writeCount = 0;
+  fileHandlePrototype.writeFile = async function (...args) {
+    writeCount += 1;
+    if (writeCount === 2) throw Object.assign(new Error('simulated usage ledger write failure'), { code: 'EIO' });
+    return writeFile.apply(this, args);
+  };
+  try {
+    await assert.rejects(store.reserve({ inputTokens: 3, outputTokens: 0, limits: { max_daily_input_tokens: 100 }, now }), { code: 'EIO' });
+  } finally {
+    fileHandlePrototype.writeFile = writeFile;
+  }
+
+  assert.equal(await fs.readFile(store.file, 'utf8'), committedRecord);
+  assert.deepEqual(await fs.readdir(path.dirname(store.file)), ['budgets.json']);
+  const retry = await store.reserve({ inputTokens: 3, outputTokens: 0, limits: { max_daily_input_tokens: 100 }, now });
+  await store.settle(retry, { inputTokens: 3, outputTokens: 0, now });
+  const snapshot = await store.snapshot({ now });
+  assert.equal(snapshot.daily.input_tokens, 5);
+  assert.equal(snapshot.daily.output_tokens, 1);
+  assert.equal(snapshot.active_reservations, 0);
+});
+
 test('usage budget waits for an existing lock file instead of failing on Windows sharing errors', async (t) => {
   const root = await createTempDirectory('xyst-usage-budget-existing-lock-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
