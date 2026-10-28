@@ -3,7 +3,7 @@
 ## Bounded tool result transport — 2026-10-27
 
 - Built-in JSON tool responses now have a hard 1 MB runtime ceiling, including unrestricted mode. File reads are capped at 32 MiB, and directory listings at 5,000 entries, so large results are bounded before transport truncation; larger files must be read in bounded line chunks. Screenshot images retain the separate 8 MiB decoded-image limit.
-- Focused output-cap and unrestricted file-read regressions pass; Biome and whitespace checks pass. Exact-source hosted CI is pending.
+- Focused output-cap and unrestricted file-read regressions pass; Biome and whitespace checks pass. Exact-source run [40605155443](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40605155443) passed security and both desktop/package lifecycle jobs. Windows Node 22/24 each passed 933/955 with one known ConPTY resize failure and 21 skips; Ubuntu Node 22/24 each passed 947/955 with Bubblewrap loopback and dependent signed-MCP isolation failures and six skips. No new failure was attributed to this change.
 
 ## Signed update and revocation cache recovery — 2026-10-27
 
