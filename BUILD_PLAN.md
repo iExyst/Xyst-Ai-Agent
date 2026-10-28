@@ -75,6 +75,7 @@ Start hosted CI and independent security review in parallel as soon as the repos
 **Why fourth:** Add or polish functionality only after the security and platform baseline is stable, so new behavior does not multiply unreviewed risk.
 
 - Close remaining provider protocol/conformance gaps and representative routing evaluation; preserve manual model selection and explain fallback decisions.
+- 2026-10-28: OpenAI-compatible non-stream responses now reject non-string `finish_reason` values, matching streamed-response validation. The focused malformed-payload regression and changed-file checks pass.
 - 2026-10-28: browser reload now recovers a running/paused session, reopens pending approval cards, resumes the run event stream, and restores pause, model-switch, and budget controls. The browser smoke verified reload recovery through approval, model switching, and live budget changes; the focused API snapshot regression and changed-file Biome checks pass. Additional recovery and everyday workflow gaps remain open.
 - 2026-10-28: VS Code chat webview reload/reopen now restores the active conversation, paused/running controls, current budgets, and pending approvals while the extension keeps the existing run stream alive. Focused extension integration and package-policy checks pass; cross-platform CI is pending.
 - 2026-10-28: VS Code recovery now also restores the active model in the status bar and labels the restored run as running or paused instead of ready. Focused extension regression and changed-file lint/format checks pass; hosted CI is running.

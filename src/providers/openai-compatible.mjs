@@ -99,6 +99,8 @@ export class OpenAICompatibleProvider {
       throw new ProviderError('Provider returned an invalid assistant response', { code: 'INVALID_RESPONSE' });
     const choice = data.choices?.[0];
     if (!choice?.message) throw new ProviderError('Provider returned no assistant message', { code: 'INVALID_RESPONSE' });
+    if (choice.finish_reason !== undefined && choice.finish_reason !== null && typeof choice.finish_reason !== 'string')
+      throw new ProviderError('Provider returned an invalid finish reason', { code: 'INVALID_RESPONSE' });
     return normalizeResponse(choice.message, data.usage, choice.finish_reason);
   }
 

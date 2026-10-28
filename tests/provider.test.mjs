@@ -563,6 +563,17 @@ test('provider rejects null and non-object JSON response roots with a stable err
   }
 });
 
+test('non-streaming provider responses reject malformed finish reasons', async () => {
+  for (const finish_reason of [1, [], {}]) {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: 'http://localhost/v1',
+      model: 'x',
+      fetchImpl: async () => Response.json({ choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason }] }),
+    });
+    await assert.rejects(provider.chat([]), (error) => error.code === 'INVALID_RESPONSE' && /finish reason/.test(error.message));
+  }
+});
+
 test('non-streaming provider responses are size bounded', async () => {
   const provider = new OpenAICompatibleProvider({
     baseUrl: 'http://localhost/v1',
