@@ -427,6 +427,8 @@ function validateValue(schema, value, location) {
   }
   if (schema.enum && !schema.enum.some((candidate) => isDeepStrictEqual(candidate, value)))
     throw new Error(`${location} must match one of the allowed values`);
+  for (const branch of schema.allOf || []) validateValue(branch, value, location);
+  if (schema.type === undefined) return;
   if (schema.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${location} must be an object`);
     const propertyCount = Object.keys(value).length;

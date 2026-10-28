@@ -2635,3 +2635,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Provider and extension onboarding documentation — 2026-10-28
 
 - Existing setup docs cover loopback local-model discovery, remote HTTPS model profiles, environment and OS credential-store secrets, and provider-side billing/data handling. The maintained Hello World signed MCP example includes package build, verify, install, and enable commands; extension docs explain Linux no-network sandboxing and the host-OS permissions used elsewhere.
+
+## MCP `allOf` schema validation — 2026-10-28
+
+- MCP stdio and Streamable HTTP tool schemas accept bounded `allOf` composition, including type-free composition wrappers. Type-specific constraints still require an explicit type, avoiding silent acceptance of constraints the validator cannot apply.
+- The focused stdio and Streamable HTTP regressions pass (2/2); changed-file Biome checks and `git diff --check` pass. Additional JSON Schema composition and validation keywords remain open.

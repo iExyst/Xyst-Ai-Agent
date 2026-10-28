@@ -858,18 +858,21 @@ function normalizeSchema(schema, depth) {
     'multipleOf',
     'enum',
     'const',
+    'allOf',
   ]);
   if (Object.keys(schema).some((key) => !allowed.has(key)))
     throw mcpError('MCP tool uses an unsupported JSON Schema keyword', 'MCP_INVALID_SCHEMA');
   const type = schema.type;
+  const hasType = Object.hasOwn(schema, 'type');
+  if (!hasType && depth === 0) throw mcpError('MCP tool input schema must declare a root type', 'MCP_INVALID_SCHEMA');
   const types = Array.isArray(type) ? type : [type];
   if (
-    types.length === 0 ||
+    (hasType && types.length === 0) ||
     new Set(types).size !== types.length ||
-    types.some((item) => !['object', 'string', 'integer', 'number', 'boolean', 'array', 'null'].includes(item))
+    (hasType && types.some((item) => !['object', 'string', 'integer', 'number', 'boolean', 'array', 'null'].includes(item)))
   )
     throw mcpError('MCP tool input schema uses an unsupported type', 'MCP_INVALID_SCHEMA');
-  const result = { type };
+  const result = hasType ? { type } : {};
   for (const key of ['$schema', '$comment', 'format'])
     if (schema[key] !== undefined) {
       if (typeof schema[key] !== 'string') throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
@@ -895,6 +898,11 @@ function normalizeSchema(schema, depth) {
     result.enum = schema.enum;
   }
   if (Object.hasOwn(schema, 'const')) result.const = schema.const;
+  if (schema.allOf !== undefined) {
+    if (!Array.isArray(schema.allOf) || schema.allOf.length === 0 || schema.allOf.length > 8)
+      throw mcpError('MCP tool input schema has invalid allOf', 'MCP_INVALID_SCHEMA');
+    result.allOf = schema.allOf.map((item) => normalizeSchema(item, depth + 1));
+  }
   for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'])
     if (schema[key] !== undefined) {
       if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[key]))
