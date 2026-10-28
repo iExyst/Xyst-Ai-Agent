@@ -2534,6 +2534,38 @@ test("GitHub rate-limit errors explain primary reset and secondary retry guidanc
     assert.equal(requests, 3, "rate-limited requests are reported rather than automatically replayed");
   } finally { globalThis.fetch = originalFetch; }
 });
+test("GitHub 401 responses invalidate the cached identity and explain credential recovery", async () => {
+  const originalFetch = globalThis.fetch; const token = "ghp_xyst_revoked_token_1234567890"; let identityRequests = 0; let requests = 0;
+  const credentials = { get: async (service: string, name: string) => service === "github" && name === "personal-token" ? token : undefined };
+  globalThis.fetch = async (input) => {
+    requests++;
+    const url = String(input);
+    if (url.endsWith("/user")) {
+      identityRequests++;
+      return identityRequests === 1
+        ? Response.json({ login: "xyst", html_url: "https://github.com/xyst", type: "User" })
+        : Response.json({ message: "Bad credentials" }, { status: 401 });
+    }
+    return Response.json({ message: "Bad credentials" }, { status: 401 });
+  };
+  const provider = new GitHubProvider(credentials as never, { apiBase: "https://api.github.test" });
+  try {
+    assert.deepEqual(await provider.authenticate(), { authenticated: true, login: "xyst", url: "https://github.com/xyst", identityType: "User" });
+    await assert.rejects(provider.repository("example", "private"), (error: unknown) => error instanceof GitHubError && error.status === 401 && /invalid, expired, or revoked/.test(error.message) && /xyst credential set github personal-token/.test(error.message) && !error.message.includes(token));
+    await assert.rejects(provider.authenticate(), (error: unknown) => error instanceof GitHubError && error.status === 401);
+    assert.equal(identityRequests, 2, "the stale successful identity was discarded after the API rejected the token");
+    assert.equal(requests, 3, "credential rejection does not trigger an automatic replay");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub 404 responses do not imply that an inaccessible private resource is absent", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ message: "Not Found" }, { status: 404 });
+  const provider = new GitHubProvider({ get: async () => undefined } as never, { apiBase: "https://api.github.test" });
+  try {
+    await assert.rejects(provider.repository("example", "private"), (error: unknown) => error instanceof GitHubError && error.status === 404 && /may not exist, or it may be private and inaccessible/.test(error.message) && /check authentication and repository permissions/.test(error.message));
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("GitHub pull request review comments use guarded tools and current diff coordinates", async () => {
   const originalFetch = globalThis.fetch; const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
