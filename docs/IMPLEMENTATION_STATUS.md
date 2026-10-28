@@ -2778,3 +2778,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Modern `tools/call` requests now include a unique progress token. Stdio and Streamable HTTP accept progress only when the token matches an active request; malformed or unrelated updates are ignored without failing the call. Progress callback delivery is rate limited and capped, and displayed messages are secret-redacted, control-character cleaned, and length bounded.
 - Active browser/desktop runs show progress in the corresponding tool activity row. Focused protocol, stdio, Streamable HTTP, and agent event-forwarding regressions pass 4/4; exact-source Windows/Linux CI is pending.
+
+## MCP JSON Schema numeric equality — 2026-10-28
+
+- JSON Schema defines numeric equality by mathematical value, so `-0` and `0` compare equal, including inside arrays and objects. Xyst now uses JSON-value equality for `enum` and `const`, including nested values, instead of Node strict equality. A focused regression passes, and Biome plus `git diff --check` are clean; exact-source Windows/Linux CI is pending.

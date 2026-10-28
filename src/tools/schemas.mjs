@@ -2,7 +2,6 @@ import { MEMORY_SECTIONS } from '../memory/store.mjs';
 
 const string = { type: 'string' };
 const integer = { type: 'integer', minimum: 1 };
-import { isDeepStrictEqual } from 'node:util';
 import vm from 'node:vm';
 
 export const TOOL_SCHEMA_VERSION = 1;
@@ -596,7 +595,8 @@ function validateValue(schema, value, location, state) {
       state.referenceDepth -= 1;
     }
   }
-  if (Object.hasOwn(schema, 'const') && !isDeepStrictEqual(schema.const, value)) throw new Error(`${location} must match its fixed value`);
+  if (Object.hasOwn(schema, 'const') && !jsonSchemaValuesEqual(schema.const, value))
+    throw new Error(`${location} must match its fixed value`);
   if (Array.isArray(schema.type)) {
     const matches = schema.type.filter((type) => matchesSchemaType(type, value));
     if (matches.length === 0) throw new Error(`${location} must match one of the allowed types`);
@@ -610,7 +610,7 @@ function validateValue(schema, value, location, state) {
     }
     throw lastError;
   }
-  if (schema.enum && !schema.enum.some((candidate) => isDeepStrictEqual(candidate, value)))
+  if (schema.enum && !schema.enum.some((candidate) => jsonSchemaValuesEqual(candidate, value)))
     throw new Error(`${location} must match one of the allowed values`);
   if (typeof value === 'string' && schema.pattern !== undefined && !matchesPattern(schema.pattern, value, location, state))
     throw new Error(`${location} must match the required pattern`);
@@ -814,6 +814,25 @@ function canonicalJson(value) {
       .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
       .join(',')}}`;
   return JSON.stringify(value);
+}
+
+function jsonSchemaValuesEqual(left, right) {
+  if (typeof left === 'number' && typeof right === 'number') return left === right;
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right))
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => jsonSchemaValuesEqual(item, right[index]))
+    );
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => Object.hasOwn(right, key) && jsonSchemaValuesEqual(left[key], right[key]))
+  );
 }
 
 function matchesSchemaType(type, value) {

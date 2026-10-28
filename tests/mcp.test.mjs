@@ -557,6 +557,20 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.doesNotMatch(JSON.stringify(events), /process\.execPath/);
 });
 
+test('MCP JSON Schema enum and const compare JSON numbers mathematically', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      enum_value: { enum: [{ nested: 0 }] },
+      const_value: { const: { nested: 0 } },
+    },
+  };
+  assert.deepEqual(validateArguments(schema, { enum_value: { nested: -0 }, const_value: { nested: -0 } }), {
+    enum_value: { nested: -0 },
+    const_value: { nested: -0 },
+  });
+});
+
 test('modern MCP stdio progress notifications are correlated and surfaced to the active tool call', async (t) => {
   const root = await createTempDirectory('xyst-mcp-progress-');
   const manager = new StdioMcpManager({ config: managerConfig({ progressTool: true }), workspaceRoot: root });
