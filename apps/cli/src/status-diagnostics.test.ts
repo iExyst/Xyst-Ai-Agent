@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { desktopModelSnapshot } from "./desktop-model-snapshot.js";
 
 const cliEntry = fileURLToPath(new URL("./index.ts", import.meta.url));
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -62,6 +63,19 @@ test("status and desktop snapshot report corrupt SQLite without changing it or s
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("desktop model snapshot preserves LM Studio loaded instances for the renderer model dock", () => {
+  const model = {
+    type: "llm" as const, publisher: "qwen", key: "qwen/qwen3.5-9b", display_name: "Qwen3.5 9B",
+    size_bytes: 1_000_000, loaded_instances: [{ id: "qwen/qwen3.5-9b:2", config: { context_length: 16_384 } }],
+    max_context_length: 262_144, capabilities: { trained_for_tool_use: true }
+  };
+  assert.deepEqual(desktopModelSnapshot(model), {
+    key: "qwen/qwen3.5-9b", name: "Qwen3.5 9B", type: "llm", sizeBytes: 1_000_000,
+    quantization: undefined, maxContext: 262_144, capabilities: { trained_for_tool_use: true },
+    loaded_instances: [{ id: "qwen/qwen3.5-9b:2", config: { context_length: 16_384 } }]
+  });
 });
 
 test("agent help exits before initializing the runtime or creating a session", () => {
