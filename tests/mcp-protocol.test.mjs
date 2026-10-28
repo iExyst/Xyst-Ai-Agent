@@ -84,6 +84,29 @@ test('MCP list results validate tool, resource, template, and prompt definitions
     assert.throws(() => validateMcpResultType(result, { ...options, method }), { code: 'MCP_INVALID_RESPONSE' });
 });
 
+test('MCP discovery validates advertised capabilities and instructions', () => {
+  const options = { protocolVersion: '2026-07-28', serverName: 'fixture', method: 'server/discover' };
+  const valid = {
+    resultType: 'complete',
+    cacheScope: 'public',
+    ttlMs: 0,
+    supportedVersions: ['2026-07-28'],
+    instructions: 'Read-only search tools',
+    capabilities: {
+      tools: { listChanged: true, vendorOption: 'extension field' },
+      extensions: { 'io.example/cap': { enabled: true } },
+    },
+  };
+  assert.equal(validateMcpResultType(valid, options), valid);
+  for (const result of [
+    { ...valid, capabilities: { tools: { listChanged: 'yes' } } },
+    { ...valid, capabilities: { extensions: { 'io.example/cap': true } } },
+    { ...valid, capabilities: { resources: { subscribe: 'yes' } } },
+    { ...valid, instructions: 1 },
+  ])
+    assert.throws(() => validateMcpResultType(result, options), { code: 'MCP_INVALID_RESPONSE' });
+});
+
 test('MCP modern resource and prompt results require result types while legacy results remain compatible', () => {
   for (const method of [
     'server/discover',

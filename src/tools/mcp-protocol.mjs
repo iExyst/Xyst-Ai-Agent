@@ -44,7 +44,8 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
     method === 'server/discover' &&
     (!Array.isArray(result.supportedVersions) ||
       !result.supportedVersions.every((version) => typeof version === 'string') ||
-      !isRecord(result.capabilities))
+      !isServerCapabilities(result.capabilities) ||
+      !isOptionalString(result.instructions))
   )
     throw mcpError(`MCP server '${serverName}' returned invalid discovery metadata`, 'MCP_INVALID_RESPONSE');
   if (method === 'tools/call') validateToolCallResult(result, { protocolVersion, serverName });
@@ -165,6 +166,31 @@ function isToolDefinition(value) {
     isOptionalToolAnnotations(value.annotations) &&
     isOptionalIcons(value.icons)
   );
+}
+
+function isServerCapabilities(value) {
+  if (!isRecord(value)) return false;
+  if (value.completions !== undefined && !isRecord(value.completions)) return false;
+  if (value.logging !== undefined && !isRecord(value.logging)) return false;
+  const booleanFlags = {
+    tools: ['listChanged'],
+    resources: ['listChanged', 'subscribe'],
+    prompts: ['listChanged'],
+  };
+  for (const [name, flags] of Object.entries(booleanFlags)) {
+    const capability = value[name];
+    if (
+      capability !== undefined &&
+      (!isRecord(capability) || flags.some((flag) => capability[flag] !== undefined && typeof capability[flag] !== 'boolean'))
+    )
+      return false;
+  }
+  for (const name of ['experimental', 'extensions']) {
+    const capabilities = value[name];
+    if (capabilities !== undefined && (!isRecord(capabilities) || Object.values(capabilities).some((settings) => !isRecord(settings))))
+      return false;
+  }
+  return true;
 }
 
 function isResourceDefinition(value) {
