@@ -3,12 +3,12 @@
 ## MCP modern result-type conformance — 2026-10-28
 
 - Modern discovery, tool, resource, and prompt method responses now require the schema's `resultType`, and unsupported result control flow continues to fail closed. Legacy protocol responses keep their omitted-field compatibility.
-- Focused protocol validation passes 4/4; focused stdio and Streamable HTTP integration regressions pass 4/4; focused API, signed-package, and current-protocol HTTP fixtures pass 4/4; changed-file Biome checks pass. Hosted Ubuntu run [40610707673](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40610707673) identified stale modern fixtures, which now return `resultType: complete`; exact-source rerun is pending. Full MCP method and field schema validation remains open. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
+- Focused protocol validation passes 4/4; focused stdio and Streamable HTTP integration regressions pass 4/4; focused API, signed-package, and current-protocol HTTP fixtures pass 4/4; changed-file Biome checks pass. Hosted run [40611216609](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40611216609) for `79c8892` confirms the fixture fixes on the exact source. Security and both desktop package lifecycle jobs pass; Ubuntu matrices show only the two known Bubblewrap isolation failures, and Windows matrices show only the known ConPTY failure. Full MCP method and field schema validation remains open. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
 
 ## Windows atomic-replacement cleanup warning — 2026-10-28
 
 - If Windows installs a replacement but cannot remove the old-file backup, `atomicWriteFile` treats the write as successful, preserves the recovery backup, and reports a persistence warning. Session writes forward that warning while advancing their in-memory revision, so callers do not report failure after the new data is already visible.
-- The focused fault-injection regression passes (1/1); Biome and whitespace checks pass. Hosted run [40609176908](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40609176908) for the preceding commit passed security, formatting, and lint. Its Node matrices retain the known Windows ConPTY and Ubuntu Bubblewrap isolation failures; desktop package jobs were still running when last inspected. This warning-policy follow-up is awaiting hosted CI.
+- The focused fault-injection regression passes (1/1); Biome and whitespace checks pass. Hosted run [40611216609](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40611216609) verifies this behavior on the exact source; security and both desktop package lifecycle jobs pass. Only the previously documented ConPTY and Bubblewrap test-runner limitations remain in the Node matrices.
 
 ## Bounded tool result transport — 2026-10-27
 
