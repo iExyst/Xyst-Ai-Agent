@@ -4425,6 +4425,12 @@ test("MCP sampling forwards bounded image pixels to LM Studio vision input", asy
   await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "AA==", mimeType: "image/svg+xml" } }], maxTokens: 16 }), /does not support image MIME type/);
   await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "not base64", mimeType: "image/png" } }], maxTokens: 16 }), /Invalid Base64 string/);
   await assert.rejects(() => sample({ messages: [{ role: "user", content: { type: "image", data: "A".repeat(7_000_000), mimeType: "image/png" } }], maxTokens: 16 }), /exceeds the 5 MiB limit/);
+  const fourMiBImage = "A".repeat(Math.ceil((4 * 1024 * 1024) / 3) * 4);
+  await assert.rejects(() => sample({ messages: [{ role: "user", content: [
+    { type: "image", data: fourMiBImage, mimeType: "image/png" },
+    { type: "image", data: fourMiBImage, mimeType: "image/png" },
+    { type: "image", data: fourMiBImage, mimeType: "image/png" }
+  ] }], maxTokens: 16 }), /10 MiB request limit/);
 });
 
 test("MCP sampling preserves image content returned by a request-scoped tool", async () => {

@@ -24,6 +24,17 @@ function asObject(value: unknown): JsonObject | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : undefined;
 }
 
+function isCanonicalBase64(value: string): boolean {
+  if (!value || value.length % 4 !== 0) return false;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  for (let index = 0; index < value.length - padding; index++) {
+    const code = value.charCodeAt(index);
+    if (!((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code === 43 || code === 47)) return false;
+  }
+  const decoded = Buffer.from(value, "base64");
+  return decoded.toString("base64") === value;
+}
+
 function readText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(readText).join("");
@@ -90,7 +101,7 @@ export function createMcpSamplingHandler(provider: SamplingProvider, selectedMod
       if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mimeType)) throw new Error(`MCP sampling does not support image MIME type: ${block.mimeType}`);
       const data = block.data;
       if (data.length > Math.ceil(samplingImageLimitBytes / 3) * 4) throw new Error("An MCP sampling image exceeds the 5 MiB limit");
-      if (!data || data.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) throw new Error("MCP sampling image data must be valid base64");
+      if (!isCanonicalBase64(data)) throw new Error("MCP sampling image data must be valid base64");
       const bytes = Buffer.from(data, "base64").byteLength;
       if (bytes > samplingImageLimitBytes) throw new Error("An MCP sampling image exceeds the 5 MiB limit");
       imageBytes += bytes;
