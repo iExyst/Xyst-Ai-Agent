@@ -514,12 +514,32 @@ test("Hugging Face context metadata is read from a pinned and bounded config fil
 test("SQLite migrations persist sessions and resolve config from most specific source", async () => withTemp(async (root) => {
   const path = join(root, "state.sqlite");
   let store = new XystStore(path); const config = new ConfigStore(store); let sessions = new SessionStore(store);
-  config.set("global", "inference.temperature", 0.3); config.set("project", "inference.temperature", 0.7, "repo-1"); config.set("session", "inference.temperature", 0.1, "session-1");
-  assert.deepEqual(config.resolve("inference.temperature", { project: "repo-1", session: "session-1" }), { value: 0.1, source: "session", scopeId: "session-1" });
-  assert.equal(config.reset("session", "inference.temperature", "session-1"), true);
-  assert.deepEqual(config.resolve("inference.temperature", { project: "repo-1", session: "session-1" }), { value: 0.7, source: "project", scopeId: "repo-1" });
-  assert.equal(config.reset("project", "inference.temperature", "repo-1"), true);
-  assert.deepEqual(config.resolve("inference.temperature", { project: "repo-1", session: "session-1" }), { value: 0.3, source: "global", scopeId: "" });
+  const scopes = { project: "repo-1", mission: "mission-1", agent: "agent-1", session: "session-1" };
+  config.set("global", "inference.temperature", 0.3);
+  config.set("project", "inference.temperature", 0.4, scopes.project);
+  config.set("mission", "inference.temperature", 0.5, scopes.mission);
+  config.set("agent", "inference.temperature", 0.6, scopes.agent);
+  config.set("session", "inference.temperature", 0.7, scopes.session);
+  const portableConfig = config.export();
+  for (const [source, scopeId, expected] of [
+    ["session", scopes.session, 0.7],
+    ["agent", scopes.agent, 0.6],
+    ["mission", scopes.mission, 0.5],
+    ["project", scopes.project, 0.4],
+    ["global", "", 0.3]
+  ] as const) {
+    assert.deepEqual(config.resolve("inference.temperature", scopes), { value: expected, source, scopeId });
+    if (source !== "global") assert.equal(config.reset(source, "inference.temperature", scopeId), true);
+  }
+  assert.deepEqual(Object.keys(portableConfig).sort(), ["agent:agent-1", "global:", "mission:mission-1", "project:repo-1", "session:session-1"]);
+  assert.equal(portableConfig["session:session-1"]?.["inference.temperature"], 0.7);
+  for (const [scope, scopeId] of [["global", ""], ["project", scopes.project], ["mission", scopes.mission], ["agent", scopes.agent], ["session", scopes.session]] as const) {
+    config.resetScope(scope, scopeId);
+  }
+  config.import(portableConfig);
+  assert.deepEqual(config.resolve("inference.temperature", scopes), { value: 0.7, source: "session", scopeId: scopes.session });
+  assert.equal(config.reset("session", "inference.temperature", scopes.session), true);
+  assert.deepEqual(config.resolve("inference.temperature", scopes), { value: 0.6, source: "agent", scopeId: scopes.agent });
   assert.equal(config.resetScope("global"), 1); assert.equal(config.resolve("inference.temperature"), undefined);
   const id = sessions.create("persistence"); sessions.addMessage(id, "user", "hello");
   const version = store.db.prepare("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").get() as { version: number };
