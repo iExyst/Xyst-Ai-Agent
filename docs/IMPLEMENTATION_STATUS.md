@@ -2580,3 +2580,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## MCP resource content one-of validation — 2026-10-28
 
 - Resource contents now reject responses that provide both text and blob representations. The focused MCP protocol suite passes 8/8 and changed-file lint/format checks pass.
+
+## Project memory write-failure recovery — 2026-10-28
+
+- An injected atomic-write EIO regression proves the previous record remains byte-identical, the writer lock is removed, and a later append succeeds. The focused test passes; broader persistence-boundary injection remains open.

@@ -945,6 +945,29 @@ test('memory lock contention fails closed without overwriting the current docume
   assert.deepEqual(memory.sections.conventions, []);
 });
 
+test('memory write failure preserves the committed document and releases the writer lock', async (t) => {
+  const root = await createTempDirectory('xyst-memory-write-failure-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new MemoryStore(root);
+  await store.append('conventions', 'committed before injected failure');
+  const original = await fs.readFile(store.filePath, 'utf8');
+  const failingStore = new MemoryStore(root, {
+    writeJson: async () => {
+      throw Object.assign(new Error('simulated atomic persistence failure'), { code: 'EIO' });
+    },
+  });
+
+  await assert.rejects(failingStore.append('conventions', 'must not persist'), { code: 'EIO' });
+  assert.equal(await fs.readFile(store.filePath, 'utf8'), original);
+  await assert.rejects(fs.lstat(store.lockPath), { code: 'ENOENT' });
+
+  await store.append('conventions', 'retry after failed write');
+  assert.deepEqual(
+    (await store.read()).sections.conventions.map((item) => item.text),
+    ['committed before injected failure', 'retry after failed write'],
+  );
+});
+
 test('memory lock cleanup preserves a replacement lock owned by another writer', async (t) => {
   const root = await createTempDirectory('xyst-memory-lock-replacement-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
