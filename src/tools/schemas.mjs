@@ -11,6 +11,149 @@ export const TOOL_SCHEMA_VERSION = 1;
 export const MCP_JSON_SCHEMA_DIALECT = 'https://json-schema.org/draft/2020-12/schema';
 export const MCP_SCHEMA_REF = Symbol('mcpSchemaRef');
 export const MCP_SCHEMA_DYNAMIC_REF = Symbol('mcpSchemaDynamicRef');
+const MCP_SCHEMA_RESOLVER_BY_ROOT = new WeakMap();
+
+export function createMcpSchemaResolver(rootSchema) {
+  const invalid = (message) => Object.assign(new Error(message), { code: 'MCP_INVALID_SCHEMA' });
+  if (!rootSchema || typeof rootSchema !== 'object' || Array.isArray(rootSchema)) throw invalid('MCP schema root must be an object');
+
+  let rootId = 'https://xyst.invalid/.well-known/mcp-schema.json';
+  if (rootSchema.$id !== undefined) {
+    if (typeof rootSchema.$id !== 'string') throw invalid('MCP schema has an invalid root $id');
+    try {
+      const parsed = new URL(rootSchema.$id);
+      if (parsed.hash) throw new Error('fragment');
+      rootId = parsed.href;
+    } catch {
+      throw invalid('MCP schema has an invalid root $id');
+    }
+  }
+
+  const resources = new Map();
+  const resourceBySchema = new WeakMap();
+  const visited = new WeakMap();
+  const rootResource = { id: rootId, schema: rootSchema, anchors: new Map() };
+  resources.set(rootId, rootResource);
+  let schemaCount = 0;
+
+  const visit = (schema, inheritedResource, depth) => {
+    if (typeof schema === 'boolean') return;
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) throw invalid('MCP schema is invalid');
+    if (depth > 32 || ++schemaCount > 512) throw invalid('MCP schema resource index exceeds its limit');
+    const previousResource = visited.get(schema);
+    if (previousResource) {
+      if (previousResource !== inheritedResource) throw invalid('MCP schema object is reused across resource scopes');
+      return;
+    }
+
+    let resource = inheritedResource;
+    if (schema !== rootSchema && schema.$id !== undefined) {
+      if (typeof schema.$id !== 'string') throw invalid('MCP schema has an invalid nested $id');
+      let identifier;
+      try {
+        identifier = new URL(schema.$id, inheritedResource.id);
+      } catch {
+        throw invalid('MCP schema has an invalid nested $id');
+      }
+      if (identifier.hash) throw invalid('MCP schema nested $id cannot contain a fragment');
+      const id = identifier.href;
+      if (resources.has(id)) throw invalid('MCP schema resource identifiers must be unique');
+      resource = { id, schema, anchors: new Map() };
+      resources.set(id, resource);
+    }
+    visited.set(schema, resource);
+    resourceBySchema.set(schema, resource);
+
+    const addAnchor = (name) => {
+      if (typeof name !== 'string') return;
+      if (resource.anchors.has(name) && resource.anchors.get(name) !== schema)
+        throw invalid('MCP schema contains duplicate anchors in one resource');
+      resource.anchors.set(name, schema);
+    };
+    addAnchor(schema.$anchor);
+    addAnchor(schema.$dynamicAnchor);
+
+    const visitMap = (value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      for (const child of Object.values(value)) visit(child, resource, depth + 1);
+    };
+    for (const keyword of ['$defs', 'definitions', 'properties', 'patternProperties', 'dependentSchemas']) visitMap(schema[keyword]);
+    if (schema.dependencies && typeof schema.dependencies === 'object' && !Array.isArray(schema.dependencies))
+      for (const child of Object.values(schema.dependencies)) if (!Array.isArray(child)) visit(child, resource, depth + 1);
+    for (const keyword of [
+      'additionalProperties',
+      'unevaluatedProperties',
+      'propertyNames',
+      'additionalItems',
+      'unevaluatedItems',
+      'contains',
+      'not',
+      'if',
+      'then',
+      'else',
+      'contentSchema',
+    ])
+      if (schema[keyword] !== undefined) visit(schema[keyword], resource, depth + 1);
+    if (schema.items !== undefined) {
+      if (Array.isArray(schema.items)) for (const child of schema.items) visit(child, resource, depth + 1);
+      else visit(schema.items, resource, depth + 1);
+    }
+    for (const keyword of ['prefixItems', 'allOf', 'anyOf', 'oneOf'])
+      if (Array.isArray(schema[keyword])) for (const child of schema[keyword]) visit(child, resource, depth + 1);
+  };
+  visit(rootSchema, rootResource, 0);
+
+  const resolve = (fromSchema, reference) => {
+    if (typeof reference !== 'string') throw invalid('MCP schema reference must be a string');
+    const resource = resourceBySchema.get(fromSchema) || rootResource;
+    let url;
+    try {
+      url = new URL(reference, resource.id);
+    } catch {
+      throw invalid('Only same-document MCP schema references are supported');
+    }
+    const fragment = url.hash;
+    url.hash = '';
+    const targetResource = resources.get(url.href);
+    if (!targetResource) throw invalid('MCP schema reference target is not a declared same-document resource');
+    if (!fragment) return targetResource.schema;
+    let pointer;
+    try {
+      pointer = decodeURIComponent(fragment.slice(1));
+    } catch {
+      throw invalid('MCP schema reference fragment is invalid');
+    }
+    if (!pointer.startsWith('/')) {
+      const anchor = targetResource.anchors.get(pointer);
+      if (!anchor) throw invalid('MCP schema reference anchor was not found');
+      return anchor;
+    }
+    let current = targetResource.schema;
+    for (const encoded of pointer.slice(1).split('/')) {
+      if (/~(?![01])/.test(encoded)) throw invalid('MCP schema JSON Pointer is invalid');
+      const key = encoded.replace(/~1/g, '/').replace(/~0/g, '~');
+      if (!current || typeof current !== 'object' || !Object.hasOwn(current, key))
+        throw invalid('MCP schema reference target was not found');
+      current = current[key];
+    }
+    return current;
+  };
+
+  const sameResource = (left, right) => resourceBySchema.get(left) === resourceBySchema.get(right);
+  return Object.freeze({ resolve, sameResource, resourceCount: resources.size });
+}
+
+export function resolveMcpSchemaReference(rootSchema, fromSchema, reference, { dynamic = false } = {}) {
+  let resolver = MCP_SCHEMA_RESOLVER_BY_ROOT.get(rootSchema);
+  if (!resolver) {
+    resolver = createMcpSchemaResolver(rootSchema);
+    MCP_SCHEMA_RESOLVER_BY_ROOT.set(rootSchema, resolver);
+  }
+  const target = resolver.resolve(fromSchema, reference);
+  if (dynamic && !resolver.sameResource(fromSchema, target))
+    throw Object.assign(new Error('MCP $dynamicRef cannot cross schema resource boundaries'), { code: 'MCP_INVALID_SCHEMA' });
+  return target;
+}
 
 const PLATFORM_TIMEOUT = Object.freeze({ kind: 'platform_operation' });
 const DEFAULT_EXECUTION_POLICY = Object.freeze({ timeout: PLATFORM_TIMEOUT, sandbox: 'not_applicable' });

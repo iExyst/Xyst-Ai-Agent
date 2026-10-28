@@ -12,6 +12,7 @@ import {
   MCP_SCHEMA_DYNAMIC_REF,
   MCP_JSON_SCHEMA_DIALECT,
   MCP_SCHEMA_REF,
+  resolveMcpSchemaReference,
   resolveToolTimeoutMs,
   TOOL_SCHEMA_VERSION,
   validateMcpToolOutput,
@@ -979,72 +980,6 @@ function mcpTimeoutPolicy(serverName) {
   };
 }
 
-function resolveLocalSchemaReference(rootSchema, reference) {
-  if (reference === '#') return rootSchema;
-  if (!reference.startsWith('#/')) {
-    let anchor;
-    try {
-      anchor = decodeURIComponent(reference.slice(1));
-    } catch {
-      throw mcpError('MCP tool input schema has an invalid $ref anchor', 'MCP_INVALID_SCHEMA');
-    }
-    if (!/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(anchor)) throw mcpError('Only local JSON Schema references are supported', 'MCP_INVALID_SCHEMA');
-    const pending = [{ schema: rootSchema, depth: 0 }];
-    const visited = new WeakSet();
-    let target = null;
-    let count = 0;
-    while (pending.length) {
-      const { schema, depth } = pending.pop();
-      if (!schema || typeof schema !== 'object' || Array.isArray(schema) || visited.has(schema)) continue;
-      visited.add(schema);
-      if (++count > 512 || depth > 32) throw mcpError('MCP tool schema anchor search exceeds its limit', 'MCP_INVALID_SCHEMA');
-      if (schema.$anchor === anchor || schema.$dynamicAnchor === anchor) {
-        if (target) throw mcpError('MCP tool input schema contains duplicate $anchor values', 'MCP_INVALID_SCHEMA');
-        target = schema;
-      }
-      const pushSchema = (value) => pending.push({ schema: value, depth: depth + 1 });
-      for (const keyword of ['$defs', 'definitions', 'properties', 'patternProperties', 'dependentSchemas', 'dependencies'])
-        if (schema[keyword] && typeof schema[keyword] === 'object' && !Array.isArray(schema[keyword]))
-          for (const child of Object.values(schema[keyword])) pushSchema(child);
-      for (const keyword of [
-        'additionalProperties',
-        'unevaluatedProperties',
-        'propertyNames',
-        'items',
-        'additionalItems',
-        'unevaluatedItems',
-        'contains',
-        'not',
-        'if',
-        'then',
-        'else',
-        'contentSchema',
-      ])
-        if (schema[keyword] !== undefined) pushSchema(schema[keyword]);
-      for (const keyword of ['prefixItems', 'allOf', 'anyOf', 'oneOf'])
-        if (Array.isArray(schema[keyword])) for (const child of schema[keyword]) pushSchema(child);
-      if (Array.isArray(schema.items)) for (const child of schema.items) pushSchema(child);
-    }
-    if (!target) throw mcpError('MCP tool input schema $ref target was not found', 'MCP_INVALID_SCHEMA');
-    return target;
-  }
-  let pointer;
-  try {
-    pointer = decodeURIComponent(reference.slice(1));
-  } catch {
-    throw mcpError('MCP tool input schema has an invalid $ref pointer', 'MCP_INVALID_SCHEMA');
-  }
-  let current = rootSchema;
-  for (const encoded of pointer.slice(1).split('/')) {
-    if (/~(?![01])/.test(encoded)) throw mcpError('MCP tool input schema has an invalid $ref pointer', 'MCP_INVALID_SCHEMA');
-    const key = encoded.replace(/~1/g, '/').replace(/~0/g, '~');
-    if (!current || typeof current !== 'object' || !Object.hasOwn(current, key))
-      throw mcpError('MCP tool input schema $ref target was not found', 'MCP_INVALID_SCHEMA');
-    current = current[key];
-  }
-  return current;
-}
-
 function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema = schema, refStack = new Set(), cache = new WeakMap()) {
   if (typeof schema === 'boolean') return schema;
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) throw mcpError('MCP schema is invalid', 'MCP_INVALID_SCHEMA');
@@ -1131,23 +1066,23 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     throw mcpError('MCP tool input schema has invalid definitions', 'MCP_INVALID_SCHEMA');
   if (schema.$ref !== undefined) {
     if (typeof schema.$ref !== 'string') throw mcpError('MCP schema has an invalid $ref', 'MCP_INVALID_SCHEMA');
-    const target = resolveLocalSchemaReference(rootSchema, schema.$ref);
+    const target = resolveMcpSchemaReference(rootSchema, schema, schema.$ref);
     result[MCP_SCHEMA_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
   }
   if (schema.$dynamicRef !== undefined) {
     if (typeof schema.$dynamicRef !== 'string') throw mcpError('MCP schema has an invalid $dynamicRef', 'MCP_INVALID_SCHEMA');
-    const target = resolveLocalSchemaReference(rootSchema, schema.$dynamicRef);
+    const target = resolveMcpSchemaReference(rootSchema, schema, schema.$dynamicRef, { dynamic: true });
     result[MCP_SCHEMA_DYNAMIC_REF] = normalizeSchema(target, depth + 1, budget, rootSchema, refStack, cache);
   }
   if (schema.$id !== undefined) {
     let identifier;
     try {
-      identifier = new URL(schema.$id);
+      if (typeof schema.$id !== 'string') throw new Error('type');
+      identifier = depth === 0 ? new URL(schema.$id) : new URL(schema.$id, 'https://xyst.invalid/.well-known/mcp-schema.json');
     } catch {
-      throw mcpError('MCP tool input schema has an invalid root $id', 'MCP_INVALID_SCHEMA');
+      throw mcpError('MCP tool input schema has an invalid $id', 'MCP_INVALID_SCHEMA');
     }
-    if (depth !== 0 || typeof schema.$id !== 'string' || identifier.hash)
-      throw mcpError('MCP tool input schema only supports an absolute root $id without a fragment', 'MCP_INVALID_SCHEMA');
+    if (identifier.hash) throw mcpError('MCP tool input schema $id cannot contain a fragment', 'MCP_INVALID_SCHEMA');
     result.$id = schema.$id;
   }
   const type = schema.type;

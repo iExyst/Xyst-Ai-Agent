@@ -85,6 +85,11 @@ const sendMethodResult = (request, result) => {
       required: ['value'],
       additionalProperties: false,
     };
+    result.tools[0].inputSchema.$defs.NestedResource = {
+      $id: 'nested/child.json',
+      $defs: { ShortText: { type: 'string', minLength: 2 } },
+    };
+    result.tools[0].inputSchema.properties.nested_resource = { $ref: 'nested/child.json#/$defs/ShortText' };
     result.tools[0].inputSchema.properties.dynamic_anchor_text = { $ref: '#DynamicText' };
     result.tools[0].inputSchema.properties.dynamic_ref_text = { $dynamicRef: '#DynamicText' };
     result.tools[0].inputSchema.properties.dynamic_ref_tree = { $dynamicRef: '#DynamicNode' };
@@ -284,6 +289,8 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   const definition = manager.definitions[0];
   assert.equal(definition.parameters.$schema, 'https://json-schema.org/draft/2020-12/schema');
   assert.equal(definition.parameters.$id, 'https://schemas.example.test/echo');
+  assert.equal(validateArguments(definition.parameters, { text: 'hello', nested_resource: 'ok' }).nested_resource, 'ok');
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', nested_resource: 'x' }), /characters/);
   assert.deepEqual(definition.parameters.properties.format_metadata, {
     type: 'string',
     format: 'email',
@@ -1191,8 +1198,10 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
           required: ['value'],
           additionalProperties: false,
         },
+        NestedResource: { $id: 'nested/child.json', $defs: { ShortText: { type: 'string', minLength: 2 } } },
         Region: { $dynamicAnchor: 'Region', type: 'string', 'x-mcp-header': 'Region' },
       };
+      result.tools[0].inputSchema.properties.nested_resource = { $ref: 'nested/child.json#/$defs/ShortText' };
       result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
       result.tools[0].inputSchema.properties.region = { $dynamicRef: '#Region' };
       result.tools[0].inputSchema.properties.dynamic_ref_tree = { $dynamicRef: '#DynamicNode' };
@@ -1376,6 +1385,14 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
     /boolean/,
   );
   assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_text: 'short' }).ref_text, 'short');
+  assert.equal(
+    validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', nested_resource: 'ok' }).nested_resource,
+    'ok',
+  );
+  assert.throws(
+    () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', nested_resource: 'x' }),
+    /characters/,
+  );
   assert.deepEqual(
     validateArguments(definitions[0].parameters, {
       text: 'hello',
