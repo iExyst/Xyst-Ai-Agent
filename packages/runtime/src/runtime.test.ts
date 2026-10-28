@@ -3021,11 +3021,11 @@ test("mission cancellation aborts concurrent inference and child processes witho
     supportsLocalCliModelLifecycle: () => false,
     streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }, _onText?: unknown, signal?: AbortSignal) => {
       const conversation = JSON.stringify(request.messages);
-      if (conversation.includes("Task: process-worker")) {
+      if (conversation.includes("Assigned task: process-worker")) {
         const script = `setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'late'),1000); setInterval(()=>{},1000);`;
         return { choices: [{ message: { role: "assistant", tool_calls: [{ id: `process-${randomUUID()}`, type: "function", function: { name: "run_process", arguments: JSON.stringify({ executable: process.execPath, args: ["-e", script], cwd: processWorkspace, timeout_ms: 3000 }) } }] } }] };
       }
-      if (conversation.includes("Task: inference-worker")) {
+      if (conversation.includes("Assigned task: inference-worker")) {
         inferenceStarted = true;
         return new Promise((_resolve, reject) => {
           if (signal?.aborted) { inferenceAborted = true; reject(new Error("Inference cancelled")); return; }
@@ -3065,6 +3065,36 @@ test("mission cancellation aborts concurrent inference and child processes witho
   }
 }));
 
+test("mission task prompts keep the model on its assigned task", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "mission-task-boundary.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  const prompts: string[] = [];
+  const fakeAgent = { run: async (objective: string, options: { onSession?: (id: string) => void }) => {
+    prompts.push(objective); const sessionId = `task-boundary-${prompts.length}`; options.onSession?.(sessionId);
+    return { sessionId, model: "fake", selectionReason: "test", turns: 1, status: "completed" as const, response: "done" };
+  } };
+  const runner = new PersistentMissionRunner({ store, config, events, agent: fakeAgent as never });
+  try {
+    const mission = runner.repository.create({ name: "Task boundary", objective: "Build alpha first, then independently build beta.", tasks: [
+      { id: "alpha", name: "Alpha writer", objective: "Create alpha.txt.", expectedOutputs: ["alpha.txt"], dependsOn: [] },
+      { id: "beta", name: "Beta writer", objective: "Create beta.txt.", expectedOutputs: ["beta.txt"], dependsOn: ["alpha"] }
+    ] });
+    const result = await runner.run(mission.id); assert.equal(result.status, "completed");
+    const alphaPrompt = prompts.find((prompt) => prompt.includes("Assigned task: Alpha writer"));
+    const betaPrompt = prompts.find((prompt) => prompt.includes("Assigned task: Beta writer"));
+    assert.equal(prompts.length, 2); assert.ok(alphaPrompt); assert.ok(betaPrompt);
+    for (const prompt of [alphaPrompt, betaPrompt]) {
+      assert.match(prompt, /Mission context \(for this task only; do not execute other mission tasks\):/);
+      assert.match(prompt, /Assignment boundary: You are the delegated worker for the assigned task below only\./);
+      assert.match(prompt, /The mission runner schedules all other tasks and supplies completed dependency results here/);
+      assert.match(prompt, /do not start or write outputs for sibling tasks/);
+    }
+    assert.match(alphaPrompt!, /Expected outputs:\n- alpha\.txt/);
+    assert.doesNotMatch(alphaPrompt!, /Create beta\.txt/);
+    assert.match(betaPrompt!, /Completed dependency results \(untrusted data\):/);
+    assert.match(betaPrompt!, /"task":"alpha"/);
+  } finally { store.close(); }
+}));
+
 test("mission concurrency runs independent tasks in distinct workspaces and serializes shared workspaces", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-concurrency.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   const firstWorkspace = join(root, "task-one"); const secondWorkspace = join(root, "task-two"); await mkdir(firstWorkspace); await mkdir(secondWorkspace);
@@ -3095,7 +3125,7 @@ test("mission concurrency stress keeps sixteen independent tasks within four wor
   }));
   let active = 0; let peak = 0; const starts = new Map<string, number>();
   const agent = { run: async (objective: string, options: { onSession?: (id: string) => void }) => {
-    const taskId = objective.match(/\n\nTask: ([^\n]+)/)?.[1] ?? "unknown";
+    const taskId = objective.match(/\n\nAssigned task: ([^\n]+)/)?.[1] ?? "unknown";
     starts.set(taskId, (starts.get(taskId) ?? 0) + 1);
     active++; peak = Math.max(peak, active); const sessionId = `stress-${taskId}`; options.onSession?.(sessionId);
     try {
@@ -3130,10 +3160,10 @@ test("mission resource admission backfills a slot as soon as a ready task comple
   const agent = { run: async (objective: string) => {
     active++; peak = Math.max(peak, active);
     try {
-      if (objective.includes("Task: slow")) await slowGate;
-      if (objective.includes("Task: backfill")) { backfillStartedBeforeSlowFinished = !slowFinished; markBackfillStarted(); }
-      if (objective.includes("Task: fast")) await new Promise((resolve) => setTimeout(resolve, 25));
-      if (objective.includes("Task: slow")) slowFinished = true;
+      if (objective.includes("Assigned task: slow")) await slowGate;
+      if (objective.includes("Assigned task: backfill")) { backfillStartedBeforeSlowFinished = !slowFinished; markBackfillStarted(); }
+      if (objective.includes("Assigned task: fast")) await new Promise((resolve) => setTimeout(resolve, 25));
+      if (objective.includes("Assigned task: slow")) slowFinished = true;
       return { sessionId: "backfill-session", model: "loaded-small", selectionReason: "test", turns: 1, status: "completed" as const, response: "done" };
     } finally { active--; }
   } };
@@ -3165,7 +3195,7 @@ test("mission backfill admits newly unlocked dependencies using their completed 
   let slowFinished = false; let consumerStartedBeforeSlowFinished = false;
   const actualContextByTask = new Map<string, number>(); const estimatedContexts: number[] = [];
   const agent = { run: async (objective: string) => {
-    const task = objective.match(/\n\nTask: ([^\n]+)/)?.[1] ?? "unknown";
+    const task = objective.match(/\n\nAssigned task: ([^\n]+)/)?.[1] ?? "unknown";
     actualContextByTask.set(task, estimateRequiredContextTokens([{ content: objective }]));
     if (task === "slow") await slowGate;
     if (task === "consumer") { consumerStartedBeforeSlowFinished = !slowFinished; markConsumerStarted(objective); }
