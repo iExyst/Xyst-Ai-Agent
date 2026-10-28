@@ -23,7 +23,12 @@ import { buildBubblewrapArgs, bubblewrapLauncherEnvironment, findBubblewrap, val
 import { waitForBubblewrapStart } from '../platform/bubblewrap-status.mjs';
 import { redactSecrets } from '../platform/redaction.mjs';
 import { isReadOnlySandbox, requiresProcessIsolation, resolveSandboxMode } from '../platform/sandbox-modes.mjs';
-import { validateMcpInitializeResult, validateMcpJsonRpcResponse, validateMcpResultType } from './mcp-protocol.mjs';
+import {
+  validateMcpInitializeResult,
+  validateMcpJsonRpcResponse,
+  validateMcpProgressNotification,
+  validateMcpResultType,
+} from './mcp-protocol.mjs';
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -301,6 +306,7 @@ export class StdioMcpManager {
       ...context,
       headerParameters: metadata.headerParameters || [],
       outputSchema: metadata.outputSchema,
+      onProgress: (progress) => context.onProgress?.({ ...progress, tool: name }),
     });
   }
 
@@ -628,22 +634,36 @@ class McpStdioSession {
     return result;
   }
 
-  async callTool(originalName, args, { signal, outputSchema } = {}) {
+  async callTool(originalName, args, { signal, outputSchema, onProgress } = {}) {
     const params = { name: originalName, arguments: args };
-    if (this.protocolVersion === MODERN_VERSION) params._meta = modernMeta();
-    const result = await this.#request('tools/call', params, this.timeoutMs, this.protocolVersion, { signal });
+    const progressToken = this.protocolVersion === MODERN_VERSION ? randomUUID() : null;
+    if (this.protocolVersion === MODERN_VERSION) params._meta = { ...modernMeta(), progressToken };
+    const result = await this.#request('tools/call', params, this.timeoutMs, this.protocolVersion, { signal, onProgress, progressToken });
     if (!result || typeof result !== 'object' || Array.isArray(result))
       throw mcpError(`MCP server '${this.name}' returned an invalid tool result`, 'MCP_INVALID_RESPONSE');
     return validateMcpToolOutput(outputSchema, result);
   }
 
-  #request(method, params, timeoutMs = this.timeoutMs, protocolVersion = this.protocolVersion, { signal } = {}) {
+  #request(method, params, timeoutMs = this.timeoutMs, protocolVersion = this.protocolVersion, { signal, onProgress, progressToken } = {}) {
     if (this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded)
       return Promise.reject(mcpError(`MCP server '${this.name}' is unavailable`, 'MCP_SERVER_UNAVAILABLE'));
     if (signal?.aborted) return Promise.reject(mcpError(`MCP call '${method}' was cancelled`, 'MCP_CANCELLED'));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const pending = { id, resolve, reject, timer: null, method, protocolVersion, signal, onAbort: null };
+      const pending = {
+        id,
+        resolve,
+        reject,
+        timer: null,
+        method,
+        protocolVersion,
+        signal,
+        onAbort: null,
+        onProgress,
+        progressToken,
+        progressAt: 0,
+        progressCount: 0,
+      };
       const cancel = (reason, code, message) => {
         if (this.pending.get(id) !== pending) return;
         clearTimeout(pending.timer);
@@ -767,6 +787,22 @@ class McpStdioSession {
   #handleServerNotification(message) {
     const method = message.method;
     const params = message.params && typeof message.params === 'object' && !Array.isArray(message.params) ? message.params : {};
+    if (method === 'notifications/progress' && this.protocolVersion === MODERN_VERSION) {
+      const pending = [...this.pending.values()].find(
+        (entry) => entry.progressToken !== null && entry.progressToken === params.progressToken,
+      );
+      if (!pending?.onProgress || pending.progressCount++ >= 1000) return;
+      try {
+        const progress = validateMcpProgressNotification(message, pending.progressToken);
+        const now = Date.now();
+        if (now - pending.progressAt < 100) return;
+        pending.progressAt = now;
+        pending.onProgress(progress);
+      } catch {
+        // A malformed or unrelated out-of-band notification does not fail an otherwise valid call.
+      }
+      return;
+    }
     const subscriptionId = params._meta?.['io.modelcontextprotocol/subscriptionId'];
     if (method === 'notifications/subscriptions/acknowledged') {
       const subscription = this.subscription;

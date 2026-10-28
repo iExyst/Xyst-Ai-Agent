@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateMcpInitializeResult, validateMcpResultType } from '../src/tools/mcp-protocol.mjs';
+import { validateMcpInitializeResult, validateMcpProgressNotification, validateMcpResultType } from '../src/tools/mcp-protocol.mjs';
 
 test('MCP legacy initialize responses require protocol capabilities and server implementation fields', () => {
   const valid = {
@@ -287,4 +287,27 @@ test('MCP result type validation rejects unsupported control flow and unknown mo
       { code },
     );
   }
+});
+
+test('MCP progress notifications require a valid matching token and protocol field types', () => {
+  const message = {
+    jsonrpc: '2.0',
+    method: 'notifications/progress',
+    params: { progressToken: 'request-1', progress: 2, total: 4, message: 'Downloading' },
+  };
+  assert.deepEqual(validateMcpProgressNotification(message, 'request-1'), {
+    progress: 2,
+    total: 4,
+    message: 'Downloading',
+  });
+  assert.deepEqual(validateMcpProgressNotification({ ...message, params: { progressToken: 7, progress: 1 } }, 7), { progress: 1 });
+  for (const invalid of [
+    { ...message, method: 'notifications/other' },
+    { ...message, params: { ...message.params, progressToken: 'another-request' } },
+    { ...message, params: { ...message.params, progress: '2' } },
+    { ...message, params: { ...message.params, total: Number.POSITIVE_INFINITY } },
+    { ...message, params: { ...message.params, message: 4 } },
+    { ...message, params: { ...message.params, _meta: { 'invalid key': true } } },
+  ])
+    assert.throws(() => validateMcpProgressNotification(invalid, 'request-1'), { code: 'MCP_INVALID_RESPONSE' });
 });

@@ -2210,6 +2210,25 @@ export class AgentRuntime {
                 : {}),
             },
             mcpServers: selectedMcpServers,
+            onProgress: ({ progress, total, message }) => {
+              this.#emit({
+                type: 'tool_progress',
+                session_id: working.id,
+                tool: call.name,
+                tool_call_id: call.id,
+                progress,
+                ...(total === undefined ? {} : { total }),
+                ...(message === undefined
+                  ? {}
+                  : {
+                      message: redactSecrets(message)
+                        .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 240),
+                    }),
+              });
+            },
           });
           await this.lifecycleHooks.run(
             'post_tool',

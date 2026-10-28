@@ -9,7 +9,13 @@ import {
   deepFreeze,
   validateMcpToolOutput,
 } from './schemas.mjs';
-import { validateMcpInitializeResult, validateMcpJsonRpcResponse, validateMcpResultType } from './mcp-protocol.mjs';
+import { randomUUID } from 'node:crypto';
+import {
+  validateMcpInitializeResult,
+  validateMcpJsonRpcResponse,
+  validateMcpProgressNotification,
+  validateMcpResultType,
+} from './mcp-protocol.mjs';
 
 const VERSION = '2026-07-28';
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -191,9 +197,10 @@ export class StreamableHttpMcpSession {
     return result;
   }
 
-  async callTool(name, args, { signal, headerParameters = [], outputSchema } = {}) {
+  async callTool(name, args, { signal, headerParameters = [], outputSchema, onProgress } = {}) {
     const params = { name, arguments: args };
-    if (this.version === VERSION) params._meta = modernMeta();
+    const progressToken = this.version === VERSION ? randomUUID() : null;
+    if (this.version === VERSION) params._meta = { ...modernMeta(), progressToken };
     const extraHeaders = {};
     if (this.version === VERSION) {
       extraHeaders['Mcp-Name'] = encodeHeaderValue(name);
@@ -203,7 +210,7 @@ export class StreamableHttpMcpSession {
         if (value !== undefined) extraHeaders[`Mcp-Param-${headerName}`] = encodeHeaderValue(String(value));
       }
     }
-    const result = await this.request('tools/call', params, { signal, extraHeaders });
+    const result = await this.request('tools/call', params, { signal, extraHeaders, onProgress, progressToken });
     if (!result || typeof result !== 'object' || Array.isArray(result))
       throw mcpError('MCP server returned an invalid tool result', 'MCP_INVALID_RESPONSE');
     return validateMcpToolOutput(outputSchema, result);
@@ -221,6 +228,8 @@ export class StreamableHttpMcpSession {
       allowError = false,
       extraHeaders = {},
       recoveryAttempt = false,
+      onProgress,
+      progressToken,
     } = {},
   ) {
     if (this.closed) throw mcpError(`MCP server '${this.name}' is closed`, 'MCP_SERVER_CLOSED');
@@ -237,6 +246,15 @@ export class StreamableHttpMcpSession {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
     const abort = () => controller.abort(signal.reason);
+    let progressAt = 0;
+    let progressCount = 0;
+    const reportProgress = (value) => {
+      if (!onProgress || progressCount++ >= 1000 || Date.now() - progressAt < 100) return;
+      progressAt = Date.now();
+      try {
+        onProgress(value);
+      } catch {}
+    };
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
     try {
@@ -256,6 +274,8 @@ export class StreamableHttpMcpSession {
           allowError,
           extraHeaders,
           recoveryAttempt: true,
+          onProgress,
+          progressToken,
         });
       }
       if (!response.ok) {
@@ -273,7 +293,7 @@ export class StreamableHttpMcpSession {
       if (contentType === 'application/json') message = await readJson(response);
       else if (contentType === 'text/event-stream') {
         try {
-          message = (await readSse(response, MAX_BODY, id)).message;
+          message = (await readSse(response, MAX_BODY, id, { progressToken, onProgress: reportProgress })).message;
         } catch (error) {
           const lastEventId = error[SSE_LAST_EVENT_ID];
           if (!RESUMABLE_STREAMABLE.has(protocolVersion) || !lastEventId) throw error;
@@ -283,7 +303,10 @@ export class StreamableHttpMcpSession {
             method === 'initialize' && protocolVersion !== VERSION
               ? validateSessionId(response.headers.get('mcp-session-id'))
               : sessionIdForRequest;
-          message = await this.#resumeStream(id, protocolVersion, resumeSessionId, lastEventId, controller.signal);
+          message = await this.#resumeStream(id, protocolVersion, resumeSessionId, lastEventId, controller.signal, {
+            progressToken,
+            onProgress: reportProgress,
+          });
         }
       }
       validateMcpJsonRpcResponse(message, id);
@@ -316,7 +339,7 @@ export class StreamableHttpMcpSession {
     }
   }
 
-  async #resumeStream(expectedId, protocolVersion, sessionId, initialEventId, signal) {
+  async #resumeStream(expectedId, protocolVersion, sessionId, initialEventId, signal, { progressToken, onProgress } = {}) {
     let lastEventId = initialEventId;
     for (let attempt = 0; attempt < MAX_SSE_RESUMPTIONS; attempt += 1) {
       const headers = new Headers({ ...this.headers, Accept: 'text/event-stream' });
@@ -340,7 +363,7 @@ export class StreamableHttpMcpSession {
         throw mcpError('MCP server did not resume the event stream', 'MCP_INVALID_RESPONSE');
       }
       try {
-        return (await readSse(response, MAX_BODY, expectedId)).message;
+        return (await readSse(response, MAX_BODY, expectedId, { progressToken, onProgress })).message;
       } catch (error) {
         const nextEventId = error[SSE_LAST_EVENT_ID];
         if (!nextEventId || nextEventId === lastEventId || attempt === MAX_SSE_RESUMPTIONS - 1) throw error;
@@ -1073,7 +1096,7 @@ async function readBounded(response, max) {
   }
 }
 
-async function readSse(response, max, expectedId) {
+async function readSse(response, max, expectedId, { progressToken = null, onProgress = null } = {}) {
   if (!response.body) throw mcpError('MCP event stream has no body', 'MCP_INVALID_RESPONSE');
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -1098,7 +1121,10 @@ async function readSse(response, max, expectedId) {
       } catch {
         throw mcpError('MCP event stream contained invalid JSON', 'MCP_INVALID_RESPONSE');
       }
-      return message?.jsonrpc === '2.0' && message.id === expectedId ? { message, lastEventId } : null;
+      if (message?.jsonrpc === '2.0' && message.id === expectedId) return { message, lastEventId };
+      if (message?.method === 'notifications/progress' && progressToken !== null)
+        onProgress?.(validateMcpProgressNotification(message, progressToken));
+      return null;
     }
     const separator = line.indexOf(':');
     const field = separator < 0 ? line : line.slice(0, separator);

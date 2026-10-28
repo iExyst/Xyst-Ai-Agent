@@ -1487,6 +1487,16 @@ async function submitPrompt(prompt) {
           if (data.tool_call_id) activityRows.set(`${data.tool_call_id}:detail`, detail);
         }
       }
+      if (event.type === 'tool_progress') {
+        const row = activityRows.get(data.tool_call_id);
+        if (row && row.dataset.status !== 'complete' && row.dataset.status !== 'failed' && row.dataset.status !== 'tool_denied') {
+          const progress = Number.isFinite(data.progress) ? Number(data.progress.toFixed(2)).toLocaleString() : '?';
+          const total = Number.isFinite(data.total) ? ` / ${Number(data.total.toFixed(2)).toLocaleString()}` : '';
+          const message = typeof data.message === 'string' && data.message ? ` · ${data.message}` : '';
+          row.textContent = `Running · ${data.tool} · ${progress}${total}${message}`;
+          row.dataset.status = 'working';
+        }
+      }
       if (event.type === 'tool_finished') {
         const row = activityRows.get(data.tool_call_id);
         if (row) {

@@ -81,6 +81,57 @@ test('agent scopes MCP tools to a persisted session selection and allows resetti
   );
 });
 
+test('agent forwards sanitized MCP progress updates into the active run event stream', async (t) => {
+  const root = await createTempDirectory('xyst-agent-mcp-progress-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const definition = structuredClone(TOOL_DEFINITIONS.read_file);
+  definition.name = 'mcp__docs__lookup';
+  definition._mcp = { server: 'docs', operation: 'tool' };
+  const mcpManager = {
+    initialize: async () => {},
+    definitions: [definition],
+    has: (name) => name === definition.name,
+    call: async (_name, _args, context) => {
+      context.onProgress({ progress: 3, total: 5, message: 'Reading token=progress-secret' });
+      return { content: [{ type: 'text', text: 'Finished' }] };
+    },
+  };
+  const events = [];
+  let requestCount = 0;
+  const runtime = new AgentRuntime({
+    config: config(),
+    workspaceRoot: root,
+    sessionStore: new SessionStore(root),
+    mcpManager,
+    onEvent: (event) => events.push(event),
+    fetchImpl: async () => {
+      requestCount += 1;
+      if (requestCount === 1)
+        return Response.json({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [{ type: 'function', function: { name: 'mcp__docs__lookup', arguments: '{"path":"guide.md"}' } }],
+              },
+            },
+          ],
+        });
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'The lookup finished.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+
+  const result = await runtime.run({ prompt: 'Look up the guide.', approveTool: async () => true });
+  const progress = events.find((event) => event.type === 'tool_progress');
+  assert.equal(result.status, 'complete');
+  assert.deepEqual(
+    { tool: progress.tool, progress: progress.progress, total: progress.total, message: progress.message },
+    { tool: 'mcp__docs__lookup', progress: 3, total: 5, message: 'Reading token=[REDACTED]' },
+  );
+});
+
 test('agent correlates tool results with provider-generated normalized tool-call IDs', async (t) => {
   const root = await createTempDirectory('xyst-agent-normalized-tool-id-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

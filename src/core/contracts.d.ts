@@ -380,6 +380,14 @@ export type AgentEvent =
   | (SessionEventBase & { type: 'tool_grant_created'; tool: string; grant_id: string; expires_at: string })
   | (SessionEventBase & { type: 'tool_started'; tool: string; tool_call_id: string })
   | (SessionEventBase & {
+      type: 'tool_progress';
+      tool: string;
+      tool_call_id: string;
+      progress: number;
+      total?: number;
+      message?: string;
+    })
+  | (SessionEventBase & {
       type: 'untrusted_content_signal';
       tool: string;
       detector_version: 'xyst-patterns-1' | 'xyst-patterns-2' | 'xyst-patterns-3';

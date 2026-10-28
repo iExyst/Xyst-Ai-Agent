@@ -93,6 +93,25 @@ export function validateMcpJsonRpcResponse(message, expectedId) {
   return message;
 }
 
+/** Validate and correlate an MCP progress notification with an active request. */
+export function validateMcpProgressNotification(message, expectedToken) {
+  if (!isRecord(message) || message.jsonrpc !== '2.0' || message.method !== 'notifications/progress' || !isRecord(message.params))
+    throw mcpError('MCP server emitted an invalid progress notification', 'MCP_INVALID_RESPONSE');
+  const { progressToken, progress, total, message: detail, _meta } = message.params;
+  const validToken = typeof progressToken === 'string' || Number.isSafeInteger(progressToken);
+  if (
+    !validToken ||
+    !Object.is(progressToken, expectedToken) ||
+    typeof progress !== 'number' ||
+    !Number.isFinite(progress) ||
+    (total !== undefined && (typeof total !== 'number' || !Number.isFinite(total))) ||
+    (detail !== undefined && typeof detail !== 'string') ||
+    !isOptionalMeta(_meta, true)
+  )
+    throw mcpError('MCP server emitted invalid or uncorrelated progress data', 'MCP_INVALID_RESPONSE');
+  return { progress, ...(total === undefined ? {} : { total }), ...(detail === undefined ? {} : { message: detail }) };
+}
+
 function rejectUnsupportedResultType(resultType, { serverName, method }) {
   if (resultType === 'input_required')
     throw mcpError(

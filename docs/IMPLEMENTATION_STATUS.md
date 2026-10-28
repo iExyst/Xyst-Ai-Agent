@@ -2773,3 +2773,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Run [40749477976](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40749477976) exposed two regressions fixed in the next revision: the browser needed the new model-fallback module added to the same-origin GUI allowlist, and the built-in retry-task UUID schema needed an explicit assertion after JSON Schema `format` became annotation-only. Focused API and schema regressions pass, and the browser smoke now completes locally.
 - That run's two other Linux failures are hosted Bubblewrap capability limits: loopback setup is denied, which prevents the required signed MCP isolation case. The Ubuntu lanes passed lint/format, CLI workflow, extension-package validation, and routing/agent/injection evaluations. Exact-source hosted revalidation of the fixes remains required.
+
+## Modern MCP progress notifications — 2026-10-28
+
+- Modern `tools/call` requests now include a unique progress token. Stdio and Streamable HTTP accept progress only when the token matches an active request; malformed or unrelated updates are ignored without failing the call. Progress callback delivery is rate limited and capped, and displayed messages are secret-redacted, control-character cleaned, and length bounded.
+- Active browser/desktop runs show progress in the corresponding tool activity row. Focused protocol, stdio, Streamable HTTP, and agent event-forwarding regressions pass 4/4; exact-source Windows/Linux CI is pending.
