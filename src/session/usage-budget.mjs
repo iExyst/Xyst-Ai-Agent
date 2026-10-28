@@ -239,8 +239,11 @@ export class UsageBudgetStore {
       throw Object.assign(new Error('Timed out waiting for usage budget ledger lock; inspect .agent/usage/budgets.lock before recovery'), {
         code: 'BUDGET_LEDGER_LOCKED',
       });
+    const lockRecord = JSON.stringify({ lock_id: randomUUID(), pid: process.pid, started_at: new Date().toISOString() });
+    let lockIdentity;
     try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+      lockIdentity = await handle.stat();
+      await handle.writeFile(lockRecord);
       const state = await this.#read();
       let result;
       try {
@@ -261,7 +264,18 @@ export class UsageBudgetStore {
       return result;
     } finally {
       await handle.close().catch(() => {});
-      await fs.rm(this.lock, { force: true }).catch(() => {});
+      if (lockIdentity) {
+        const current = await fs.lstat(this.lock).catch(() => null);
+        const stableIdentity = Number.isFinite(lockIdentity.ino) && lockIdentity.ino !== 0;
+        if (
+          current?.isFile() &&
+          !current.isSymbolicLink() &&
+          (!stableIdentity || (current.dev === lockIdentity.dev && current.ino === lockIdentity.ino))
+        ) {
+          const currentRecord = await fs.readFile(this.lock, 'utf8').catch(() => null);
+          if (currentRecord === lockRecord) await fs.rm(this.lock, { force: true }).catch(() => {});
+        }
+      }
     }
   }
 }

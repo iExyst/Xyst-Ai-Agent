@@ -65,6 +65,10 @@
 - The shared token/cost ledger now reads through the capped file-handle helper, stops at 4 MiB plus one byte, and verifies that the opened record and current path retain the same file version before decoding. Concurrent growth or replacement fails closed instead of risking unbounded allocation or stale limit accounting.
 - Focused ledger recovery and injected-growth regressions pass 3/3; changed-file Biome and whitespace checks pass. Exact-source run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108) exercised the regression on Windows and Ubuntu under Node 22/24; only the existing host capability failures remain in the wider matrices.
 
+## Usage-ledger replacement-lock protection — 2026-10-28
+
+- Usage-ledger cleanup now removes only the uniquely recorded lock it acquired, and compares the original file identity when available. An injected replacement-writer regression passes; other persistence-boundary fault injection remains open.
+
 ## Bounded session record reads — 2026-10-28
 
 - Session records now use the shared capped file-handle reader and stop at `MAX_SESSION_EXPORT_BYTES + 1`, even if a record grows after its initial metadata checks. Reads also revalidate the opened inode and file version before parsing so concurrent replacement or mutation fails closed.

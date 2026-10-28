@@ -92,6 +92,37 @@ test('usage budget waits for an existing lock file instead of failing on Windows
   await assert.rejects(fs.access(store.file), { code: 'ENOENT' });
 });
 
+test('usage budget lock cleanup preserves a replacement lock owned by another writer', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-lock-replacement-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const rename = fs.rename;
+  let replaced = false;
+  let replacementUnavailable;
+  fs.rename = async (source, destination) => {
+    const result = await rename(source, destination);
+    if (!replaced && path.resolve(destination) === path.resolve(store.file)) {
+      try {
+        await fs.rm(store.lock);
+        await fs.writeFile(store.lock, 'replacement budget writer lock');
+        replaced = true;
+      } catch (error) {
+        if (process.platform === 'win32' && ['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) replacementUnavailable = error.code;
+        else throw error;
+      }
+    }
+    return result;
+  };
+  try {
+    await store.reserve({ inputTokens: 1, outputTokens: 0, limits: { max_daily_input_tokens: 10 } });
+  } finally {
+    fs.rename = rename;
+  }
+  if (replacementUnavailable) return t.skip(`Open lock replacement is unavailable: ${replacementUnavailable}`);
+  assert.equal(replaced, true);
+  assert.equal(await fs.readFile(store.lock, 'utf8'), 'replacement budget writer lock');
+});
+
 test('daily reservations enforce the shared cap across independent processes', async (t) => {
   const root = await createTempDirectory('xyst-usage-budget-processes-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
