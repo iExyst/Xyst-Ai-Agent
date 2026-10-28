@@ -2,7 +2,7 @@
 
 ## MCP list-result schema conformance — 2026-10-28
 
-- MCP tool, resource, resource-template, and prompt list responses validate required arrays and definition fields, including JSON Schema object input schemas, optional prompt arguments, pagination cursors, annotations, icons, and resource metadata. Discovery validates known capability flags/maps and optional instructions; resource text/blob alternative fields are type-checked. `tools/call.structuredContent` accepts any JSON value (including arrays, scalars, and `null`) as the official schema specifies.
+- MCP tool, resource, resource-template, and prompt list responses validate required arrays and definition fields, including JSON Schema object input schemas, optional prompt arguments, pagination cursors, annotations, icons, and metadata objects. Discovery validates known capability flags/maps and optional instructions; resource text/blob alternative fields are type-checked. `tools/call.structuredContent` accepts any JSON value (including arrays, scalars, and `null`) as the official schema specifies.
 - Focused protocol and MCP transport/integration suites pass 36 tests with one expected Linux sandbox capability skip; changed-file Biome checks pass. Hosted CI for this source is pending. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
 
 ## MCP result-shape conformance — 2026-10-28

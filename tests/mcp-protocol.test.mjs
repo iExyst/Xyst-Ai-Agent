@@ -103,6 +103,7 @@ test('MCP discovery validates advertised capabilities and instructions', () => {
     { ...valid, capabilities: { extensions: { 'io.example/cap': true } } },
     { ...valid, capabilities: { resources: { subscribe: 'yes' } } },
     { ...valid, instructions: 1 },
+    { ...valid, _meta: [] },
   ])
     assert.throws(() => validateMcpResultType(result, options), { code: 'MCP_INVALID_RESPONSE' });
 });

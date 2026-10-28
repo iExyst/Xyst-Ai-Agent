@@ -20,6 +20,8 @@ const RESULT_TYPE_METHODS = new Set([
 
 /** Reject modern MCP control-flow results that Xyst does not yet implement. */
 export function validateMcpResultType(result, { protocolVersion, serverName, method }) {
+  if (isRecord(result) && !isOptionalMeta(result._meta))
+    throw mcpError(`MCP server '${serverName}' returned invalid result metadata during ${method}`, 'MCP_INVALID_RESPONSE');
   if (
     protocolVersion === MODERN_PROTOCOL_VERSION &&
     isRecord(result) &&
@@ -139,7 +141,7 @@ function validatePromptResult(result, serverName) {
 }
 
 function isContentBlock(value) {
-  if (!isRecord(value)) return false;
+  if (!isRecord(value) || !isOptionalMeta(value._meta)) return false;
   if (value.type === 'text') return typeof value.text === 'string' && isOptionalAnnotations(value.annotations);
   if (value.type === 'image' || value.type === 'audio')
     return typeof value.data === 'string' && typeof value.mimeType === 'string' && isOptionalAnnotations(value.annotations);
@@ -149,7 +151,12 @@ function isContentBlock(value) {
 }
 
 function isResourceContents(value) {
-  if (!isRecord(value) || typeof value.uri !== 'string' || (value.mimeType !== undefined && typeof value.mimeType !== 'string'))
+  if (
+    !isRecord(value) ||
+    !isOptionalMeta(value._meta) ||
+    typeof value.uri !== 'string' ||
+    (value.mimeType !== undefined && typeof value.mimeType !== 'string')
+  )
     return false;
   return (typeof value.text === 'string' || typeof value.blob === 'string') && isOptionalString(value.text) && isOptionalString(value.blob);
 }
@@ -157,6 +164,7 @@ function isResourceContents(value) {
 function isToolDefinition(value) {
   return (
     isRecord(value) &&
+    isOptionalMeta(value._meta) &&
     typeof value.name === 'string' &&
     isRecord(value.inputSchema) &&
     value.inputSchema.type === 'object' &&
@@ -196,6 +204,7 @@ function isServerCapabilities(value) {
 function isResourceDefinition(value) {
   return (
     isRecord(value) &&
+    isOptionalMeta(value._meta) &&
     typeof value.name === 'string' &&
     typeof value.uri === 'string' &&
     isOptionalString(value.title) &&
@@ -210,6 +219,7 @@ function isResourceDefinition(value) {
 function isResourceTemplate(value) {
   return (
     isRecord(value) &&
+    isOptionalMeta(value._meta) &&
     typeof value.name === 'string' &&
     typeof value.uriTemplate === 'string' &&
     isOptionalString(value.title) &&
@@ -223,6 +233,7 @@ function isResourceTemplate(value) {
 function isPromptDefinition(value) {
   return (
     isRecord(value) &&
+    isOptionalMeta(value._meta) &&
     typeof value.name === 'string' &&
     isOptionalString(value.title) &&
     isOptionalString(value.description) &&
@@ -242,6 +253,7 @@ function isPromptDefinition(value) {
 
 function isResourceLink(value) {
   return (
+    isOptionalMeta(value._meta) &&
     typeof value.uri === 'string' &&
     typeof value.name === 'string' &&
     isOptionalString(value.title) &&
@@ -255,6 +267,10 @@ function isResourceLink(value) {
 
 function isOptionalString(value) {
   return value === undefined || typeof value === 'string';
+}
+
+function isOptionalMeta(value) {
+  return value === undefined || isRecord(value);
 }
 
 function isOptionalIcons(value) {
