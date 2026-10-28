@@ -89,6 +89,7 @@
 - Worktree lease and subagent slot acquisition failures now verify the acquired file identity and random lock token before cleanup, preserving replacement lock files. Focused fault-injection regressions pass for both paths.
 - Shared application-update and extension-feed cache locks now verify a random lock token as well as file identity before cleanup. A focused replacement-lock regression passes.
 - Persistent approval-rule locks now carry random ownership tokens; cleanup verifies the token and file identity. A focused same-identity replacement regression passes.
+- Architect review-lock acquisition failure cleanup now verifies the unique token and file identity before removal. Its injected same-identity replacement regression passes.
 
 ## Bounded session record reads — 2026-10-28
 

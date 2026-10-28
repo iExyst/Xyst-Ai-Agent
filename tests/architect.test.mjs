@@ -84,6 +84,34 @@ test('Architect stores redacted review reports and removes its run lock', async 
   await assert.rejects(fs.stat(path.join(workspaceRoot, '.agent', 'architect', 'review.lock')), { code: 'ENOENT' });
 });
 
+test('Architect lock acquisition failure preserves a replacement record with the same file identity', async (t) => {
+  const workspaceRoot = await createTempDirectory('xyst-architect-lock-replacement-');
+  t.after(() => fs.rm(workspaceRoot, { recursive: true, force: true }));
+  const lockPath = path.join(workspaceRoot, '.agent', 'architect', 'review.lock');
+  const service = new ArchitectReviewService({ config: { architect: {} }, workspaceRoot, review: async () => ({ status: 'complete' }) });
+  const originalOpen = fs.open;
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] !== lockPath || args[1] !== 'wx') return handle;
+    return {
+      writeFile: (...writeArgs) => handle.writeFile(...writeArgs),
+      sync: async () => {
+        await handle.sync();
+        await fs.writeFile(lockPath, JSON.stringify({ token: 'replacement-lock' }));
+        throw Object.assign(new Error('injected sync failure'), { code: 'EIO' });
+      },
+      stat: () => handle.stat(),
+      close: () => handle.close(),
+    };
+  };
+  try {
+    await assert.rejects(service.runOnce(), { code: 'EIO' });
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.equal(JSON.parse(await fs.readFile(lockPath, 'utf8')).token, 'replacement-lock');
+});
+
 test('Architect stores reviewer failures as bounded reports', async (t) => {
   const workspaceRoot = await createTempDirectory('xyst-architect-failure-');
   t.after(() => fs.rm(workspaceRoot, { recursive: true, force: true }));

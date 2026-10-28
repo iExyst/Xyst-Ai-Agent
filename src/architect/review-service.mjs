@@ -349,8 +349,14 @@ async function acquireReviewLock(lockPath) {
         continue;
       }
       const current = await fs.lstat(lockPath).catch(() => null);
-      if (opened && current?.isFile() && !current.isSymbolicLink() && opened.dev === current.dev && opened.ino === current.ino)
-        await fs.rm(lockPath).catch(() => {});
+      if (opened && current?.isFile() && !current.isSymbolicLink() && opened.dev === current.dev && opened.ino === current.ino) {
+        try {
+          const currentRecord = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+          if (currentRecord.token === token) await fs.rm(lockPath).catch(() => {});
+        } catch {
+          // Preserve the path when lock ownership cannot be confirmed.
+        }
+      }
       throw error;
     }
   }
