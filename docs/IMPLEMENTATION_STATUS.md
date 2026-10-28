@@ -3,7 +3,7 @@
 ## Stale file edit concurrency detection — 2026-10-28
 
 - A same-inode content change during `edit_file` open/read previously could be reported as a missing `old_string`. The tool now compares nanosecond size/mtime/ctime snapshots around the read and returns `STALE_FILE` without writing when the source changes. If the concurrent version exceeds the configured read limit, it retains the specific size-limit error.
-- Focused stale-edit and concurrent-growth regressions pass 2/2; Biome formatting and `git diff --check` pass. The failing exact-source hosted run was [40625153880](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40625153880); hosted confirmation of this fix is pending.
+- Focused stale-edit and concurrent-growth regressions pass 2/2; Biome formatting and `git diff --check` pass. Exact-source run [40625965176](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40625965176) passed this regression on Windows Node 22/24 and Ubuntu Node 22/24. Its only matrix failures are the documented hosted ConPTY and Bubblewrap capability limits.
 
 
 ## Interrupted Windows file replacement recovery — 2026-10-28
@@ -18,9 +18,9 @@
 
 ## Windows development installer rebuild — 2026-10-28
 
-- Exact-source hosted run [40623314399](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40623314399), source commit `25e14def82007717c947b084279747210dace0a4`, built the Windows NSIS installer and passed its install/verify/uninstall lifecycle, packaged AppContainer helper smoke, native desktop smoke, and workspace symlink preflight. SHA-256: `eda73d1c6e9e8ffef81094563cb0eaff30a08595a5d275dc9a9ced4dc110cc80`. Installer is `NotSigned`; this remains a development artifact.
-- Exact-source hosted run [40623314399](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40623314399) for commit `25e14def82007717c947b084279747210dace0a4` passed Ubuntu 24.04 DEB install/upgrade/rollback/purge and AppImage Xvfb smokes. The current local DEB is 54,859,240 bytes (SHA-256 `6da53c064691af09bfc927b0a3984e2904e38af3740e1355f26f322381f99a89`); AppImage is 128,207,352 bytes (SHA-256 `b4156d675e93507a37a342bb7bcb3b5debea0dec5cfa4c26c72f638823cd5449`). These are unsigned development artifacts in `dist/dev/linux/`.
-- In exact-source run [40623314399](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40623314399), the security/dependency job passed. Node matrices retain only the known ConPTY initialization failure on Windows and Bubblewrap network-namespace setup plus dependent signed-MCP isolation failures on Ubuntu. The packages are unsigned development artifacts and do not qualify a release.
+- Exact-source hosted run [40625965176](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40625965176), source commit `42850d52b62b3c7f657178aa687088740454c5cf`, built the Windows NSIS installer and passed its install/verify/uninstall lifecycle, packaged AppContainer helper smoke, native desktop smoke, and workspace symlink preflight. SHA-256: `44e54bfb7384feb4c9271382366a829a30b97d3adb9d6ab772b080a8481c7eaf`. Installer is `NotSigned`; this remains a development artifact.
+- Exact-source hosted run [40625965176](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40625965176) for commit `42850d52b62b3c7f657178aa687088740454c5cf` passed Ubuntu 24.04 DEB install/upgrade/rollback/purge and AppImage Xvfb smokes. The current local DEB is 54,859,510 bytes (SHA-256 `8b294eaeecb483737ea2acf693141972e34bf264d42e79fa373d77ba96bf6cd8`); AppImage is 128,207,352 bytes (SHA-256 `6184be80daaa1429cf55c0789e4aae7429a85fdec82430ff7c8ffee8f607777f`). These are unsigned development artifacts in `dist/dev/linux/`.
+- In exact-source run [40625965176](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40625965176), the security/dependency job passed. Windows Node 22/24 each passed 943/965 with 21 skips and one ConPTY failure; Ubuntu Node 22/24 each passed 957/965 with six skips and two Bubblewrap-dependent failures. No stale-edit regression remains in the hosted matrix. Packages are unsigned development artifacts and do not qualify a release.
 
 ## Compaction cancellation boundary — 2026-10-28
 
