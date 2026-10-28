@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## Atomic temp-file collision cleanup — 2026-10-28
+
+- `atomicWriteFile()` now cleans up its temporary path only after successfully creating it with exclusive open. A collision that fails `open(..., 'wx')` leaves the pre-existing file untouched.
+- The focused platform-files suite passes 7/7 with two expected Windows directory-flush skips. Changed-file Biome and whitespace checks pass. Exact-source hosted confirmation is pending; development package artifacts must be rebuilt from the commit containing this fix before they represent the current source.
+
 ## Exact-head CI and current Linux desktop artifacts — 2026-10-28
 
 - Hosted run [40641570096](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40641570096) ran against `e1e8dd969f0fae1123b576522f6d5954c4496ec9`. Security passed, and the Ubuntu desktop job passed the DEB lifecycle, rollback, AppImage Xvfb smoke, native desktop checks, and Rust formatting. It uploaded `xyst-linux-deb` and `xyst-linux-appimage` artifacts from this exact head. The Windows desktop job was still building the NSIS installer at 2026-10-28 06:32 UTC; its current-head package result is pending.

@@ -20,6 +20,7 @@ export async function atomicWriteFile(
   } = {},
 ) {
   const temporary = `${destination}.${randomUUID()}.tmp`;
+  let ownsTemporary = false;
   try {
     const existing = await fs.lstat(destination).catch((error) => {
       if (error.code === 'ENOENT') return null;
@@ -28,6 +29,7 @@ export async function atomicWriteFile(
     if (existing && !existing.isFile()) throw new Error('Atomic write destination must be a regular file');
     const destinationMode = existing ? existing.mode & 0o777 : null;
     const handle = await fs.open(temporary, 'wx', destinationMode ?? mode);
+    ownsTemporary = true;
     try {
       // Replacing a source file must not silently remove executable or
       // read permissions. New files still use the caller's private default.
@@ -59,7 +61,7 @@ export async function atomicWriteFile(
       throw error;
     }
   } catch (error) {
-    await fs.rm(temporary, { force: true }).catch(() => {});
+    if (ownsTemporary) await fs.rm(temporary, { force: true }).catch(() => {});
     throw error;
   }
 }

@@ -60,6 +60,30 @@ test('atomic writes keep the old destination when flushing the temporary file fa
   }
 });
 
+test('atomic writes preserve a temporary-path collision when exclusive creation fails', async (t) => {
+  const root = await createTempDirectory('xyst-atomic-write-temp-collision-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const destination = path.join(root, 'settings.json');
+  const open = fs.open;
+  let collisionPath;
+  fs.open = async (filePath, flags, ...args) => {
+    if (filePath.startsWith(`${destination}.`) && filePath.endsWith('.tmp') && flags === 'wx') {
+      collisionPath = filePath;
+      const collision = await open(filePath, 'wx');
+      await collision.writeFile('pre-existing file');
+      await collision.close();
+      throw Object.assign(new Error('simulated exclusive-create collision'), { code: 'EEXIST' });
+    }
+    return open(filePath, flags, ...args);
+  };
+  try {
+    await assert.rejects(atomicWriteFile(destination, 'replacement'), { code: 'EEXIST' });
+    assert.equal(await fs.readFile(collisionPath, 'utf8'), 'pre-existing file');
+  } finally {
+    fs.open = open;
+  }
+});
+
 test('atomic writes report committed content when Linux directory flushing fails', async (t) => {
   if (process.platform === 'win32') {
     t.skip('Directory handles cannot be flushed portably through Node on Windows');
