@@ -3891,6 +3891,67 @@ test("independent stdio MCP server negotiates sampling tools and completes a too
   } finally { await connection.close(); }
 }));
 
+test("independent HTTP MCP server negotiates sampling tools and completes a tool-result round trip", async () => withTemp(async (root) => {
+  const serverPath = join(root, "http-sampling-server.mjs"); const readyPath = join(root, "http-sampling-ready.json");
+  await writeFile(serverPath, [
+    `import { createServer } from "node:http";`,
+    `import { writeFile } from "node:fs/promises";`,
+    `import { McpServer } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/sdk/server/mcp.js"))};`,
+    `import { StreamableHTTPServerTransport } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/sdk/server/streamableHttp.js"))};`,
+    'const server = new McpServer({ name: "independent-http-sampling-fixture", version: "1.0.0" });',
+    'server.tool("exercise_sampling", "Exercise client sampling with a server-owned lookup tool", {}, async () => {',
+    '  const tools = [{ name: "wiki.lookup", description: "Find documentation", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }];',
+    '  const messages = [{ role: "user", content: { type: "text", text: "Find React documentation" } }];',
+    '  const first = await server.server.createMessage({ messages, maxTokens: 64, tools, toolChoice: { mode: "required" } });',
+    '  if (first.content?.type !== "tool_use") throw new Error("Client did not return a sampling tool use");',
+    '  const second = await server.server.createMessage({ messages: [...messages, { role: "assistant", content: first.content }, { role: "user", content: { type: "tool_result", toolUseId: first.content.id, content: [{ type: "text", text: "Server lookup found three React articles" }] } }], maxTokens: 64, tools, toolChoice: { mode: "auto" } });',
+    '  return { content: [{ type: "text", text: JSON.stringify({ capabilities: server.server.getClientCapabilities(), first, second }) }] };',
+    '});',
+    'const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => crypto.randomUUID() });',
+    'await server.connect(transport);',
+    'const http = createServer(async (req, res) => {',
+    '  let body = ""; for await (const chunk of req) body += chunk;',
+    '  let parsed; try { parsed = body ? JSON.parse(body) : undefined; } catch { res.writeHead(400).end("invalid JSON"); return; }',
+    '  try { await transport.handleRequest(req, res, parsed); } catch (error) { if (!res.headersSent) res.writeHead(500).end(String(error)); }',
+    '});',
+    'http.listen(0, "127.0.0.1", async () => { await writeFile(process.argv[2], JSON.stringify({ port: http.address().port })); });',
+    'process.on("SIGTERM", () => { void transport.close().finally(() => http.close(() => process.exit(0))); });'
+  ].join("\n"));
+
+  const child = spawn(process.execPath, [serverPath, readyPath], { cwd: root, stdio: "ignore" });
+  let connection: Awaited<ReturnType<typeof createMcpTools>> | undefined;
+  try {
+    let port: number | undefined;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (child.exitCode !== null) throw new Error(`HTTP MCP fixture exited early with ${child.exitCode}`);
+      try { port = (JSON.parse(await readFileAsync(readyPath, "utf8")) as { port: number }).port; break; } catch { await new Promise((resolve) => setTimeout(resolve, 20)); }
+    }
+    assert.ok(port, "independent HTTP MCP fixture should announce its loopback port");
+    const modelRequests: Array<{ messages: unknown[]; tools: unknown[]; tool_choice?: string }> = [];
+    const sample = createMcpSamplingHandler({
+      chat: async () => { throw new Error("sampling with tools must use chatWithTools"); },
+      chatWithTools: async (request: typeof modelRequests[number]) => {
+        modelRequests.push(request);
+        if (modelRequests.length === 1) return { choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [{ id: "http-call-1", type: "function", function: { name: "xyst_mcp_tool_0", arguments: JSON.stringify({ query: "React" }) } }] } }] };
+        return { choices: [{ finish_reason: "stop", message: { content: "Found three React articles", tool_calls: [] } }] };
+      }
+    }, "qwen/local", "qwen/local:2");
+    connection = await createMcpTools(new AccessController(), [{ id: "sampling", transport: "streamable-http", url: `http://127.0.0.1:${port}/mcp` }], { get: async () => undefined }, root, undefined, { sample });
+    const call = connection.tools.mcp_sampling_exercise_sampling;
+    assert.ok(call, "independent HTTP sampling server tool should be exposed");
+    const response = await call.execute({}) as { result: { content: Array<{ text: string }> } };
+    const report = JSON.parse(response.result.content[0]!.text) as { capabilities: { sampling?: { tools?: unknown } }; first: { content: { type: string; name?: string; input?: unknown } }; second: { content: { type: string; text?: string } } };
+    assert.ok(report.capabilities.sampling?.tools, "client must advertise request-scoped sampling tools over HTTP");
+    assert.equal(report.first.content.type, "tool_use"); assert.equal(report.first.content.name, "wiki.lookup");
+    assert.deepEqual(report.first.content.input, { query: "React" });
+    assert.equal(report.second.content.type, "text"); assert.equal(report.second.content.text, "Found three React articles");
+    assert.deepEqual(modelRequests[1]?.messages.at(-1), { role: "tool", tool_call_id: "http-call-1", content: "Server lookup found three React articles" });
+  } finally {
+    await connection?.close();
+    if (child.exitCode === null) { child.kill(); await new Promise<void>((resolve) => { child.once("exit", () => resolve()); setTimeout(resolve, 1000).unref(); }); }
+  }
+}));
+
 test("automatic model switching retries once on another installed local model", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "switch.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.autoSelect", true); config.set("global", "models.automaticSwitching", true);
