@@ -410,6 +410,20 @@ export function validateArguments(schema, input) {
 function validateValue(schema, value, location) {
   if (schema === true) return;
   if (schema === false) throw new Error(`${location} is not allowed`);
+  if (Array.isArray(schema.type)) {
+    const matches = schema.type.filter((type) => matchesSchemaType(type, value));
+    if (matches.length === 0) throw new Error(`${location} must match one of the allowed types`);
+    let lastError;
+    for (const type of matches) {
+      try {
+        validateValue({ ...schema, type }, value, location);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
   if (schema.enum && !schema.enum.some((candidate) => isDeepStrictEqual(candidate, value)))
     throw new Error(`${location} must match one of the allowed values`);
   if (schema.type === 'object') {
@@ -455,6 +469,15 @@ function validateValue(schema, value, location) {
       throw new Error(`${location} must contain between ${schema.minItems || 0} and ${schema.maxItems ?? 'unlimited'} items`);
     for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`);
   } else throw new Error(`Unsupported tool schema type '${schema.type}'`);
+}
+
+function matchesSchemaType(type, value) {
+  if (type === 'null') return value === null;
+  if (type === 'object') return value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (type === 'array') return Array.isArray(value);
+  if (type === 'integer') return Number.isInteger(value);
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
+  return typeof value === type;
 }
 
 function countCodePoints(value) {

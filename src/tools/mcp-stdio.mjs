@@ -847,7 +847,12 @@ function normalizeSchema(schema, depth) {
   if (Object.keys(schema).some((key) => !allowed.has(key)))
     throw mcpError('MCP tool uses an unsupported JSON Schema keyword', 'MCP_INVALID_SCHEMA');
   const type = schema.type;
-  if (!['object', 'string', 'integer', 'number', 'boolean', 'array', 'null'].includes(type))
+  const types = Array.isArray(type) ? type : [type];
+  if (
+    types.length === 0 ||
+    new Set(types).size !== types.length ||
+    types.some((item) => !['object', 'string', 'integer', 'number', 'boolean', 'array', 'null'].includes(item))
+  )
     throw mcpError('MCP tool input schema uses an unsupported type', 'MCP_INVALID_SCHEMA');
   const result = { type };
   for (const key of ['title', 'description'])
@@ -863,7 +868,7 @@ function normalizeSchema(schema, depth) {
   }
   for (const key of ['minimum', 'maximum'])
     if (schema[key] !== undefined) {
-      if (!['integer', 'number'].includes(type) || !Number.isFinite(schema[key]))
+      if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[key]))
         throw mcpError('MCP tool input schema has invalid numeric bounds', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
@@ -871,7 +876,7 @@ function normalizeSchema(schema, depth) {
     if (schema[key] !== undefined) {
       if (!Number.isInteger(schema[key]) || schema[key] < 0 || schema[key] > 1_000_000)
         throw mcpError('MCP tool input schema has invalid size bounds', 'MCP_INVALID_SCHEMA');
-      if ((key.endsWith('Length') && type !== 'string') || (key.endsWith('Items') && type !== 'array'))
+      if ((key.endsWith('Length') && !types.includes('string')) || (key.endsWith('Items') && !types.includes('array')))
         throw mcpError('MCP tool input schema has bounds for the wrong type', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
@@ -881,7 +886,7 @@ function normalizeSchema(schema, depth) {
     throw mcpError('MCP tool input schema has inconsistent string bounds', 'MCP_INVALID_SCHEMA');
   if (result.minItems !== undefined && result.maxItems !== undefined && result.minItems > result.maxItems)
     throw mcpError('MCP tool input schema has inconsistent array bounds', 'MCP_INVALID_SCHEMA');
-  if (type === 'object') {
+  if (types.includes('object')) {
     if (depth !== 0 && (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)))
       throw mcpError('Nested MCP objects require explicit properties', 'MCP_INVALID_SCHEMA');
     if (
@@ -911,17 +916,13 @@ function normalizeSchema(schema, depth) {
         throw mcpError('MCP object schema has invalid additionalProperties', 'MCP_INVALID_SCHEMA');
       result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1);
     }
-  } else if (type === 'array') {
+  } else if (['properties', 'required', 'additionalProperties'].some((key) => schema[key] !== undefined)) {
+    throw mcpError('MCP scalar schema contains object keywords', 'MCP_INVALID_SCHEMA');
+  }
+  if (types.includes('array')) {
     if (schema.items === undefined) throw mcpError('MCP array schema requires an items schema', 'MCP_INVALID_SCHEMA');
     result.items = normalizeSchema(schema.items, depth + 1);
-  } else if (
-    schema.properties !== undefined ||
-    schema.required !== undefined ||
-    schema.items !== undefined ||
-    schema.additionalProperties !== undefined
-  ) {
-    throw mcpError('MCP scalar schema contains object or array keywords', 'MCP_INVALID_SCHEMA');
-  }
+  } else if (schema.items !== undefined) throw mcpError('MCP scalar schema contains an items keyword', 'MCP_INVALID_SCHEMA');
   return result;
 }
 
