@@ -2694,3 +2694,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - Stdio and Streamable HTTP MCP tool schemas now preserve and validate `unevaluatedProperties`. Runtime validation propagates evaluated property names from successful `allOf`, `anyOf`, and `oneOf` branches before applying the unevaluated-property rule. Focused valid/invalid regressions pass on both transports; exact-source hosted confirmation is pending.
 
 - MCP schema validation now propagates evaluated item indexes through successful composition, `prefixItems`, `items`, and matching `contains` entries before applying `unevaluatedItems`. Both stdio and Streamable HTTP integration fixtures accept declared tuple entries and reject unknown trailing entries. Focused tests pass 2/2; changed-file Biome and whitespace checks pass. Exact-source Windows/Linux workflow [40724763442](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40724763442) is running.
+
+## MCP legacy schema definitions compatibility — 2026-10-28
+
+- Both MCP transports now accept the draft-07 `definitions` container and resolve bounded local JSON Pointer references into it, while preserving fail-closed behavior for recursive and external references. Anchor lookup traverses the container too.
+- Focused stdio and Streamable HTTP schema tests pass 2/2, including valid and invalid references. Changed-file Biome and whitespace checks pass; exact-source hosted CI is pending.

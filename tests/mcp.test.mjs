@@ -67,13 +67,17 @@ const sendMethodResult = (request, result) => {
       allOf: [
         { type: 'array', prefixItems: [{ const: 'head' }] },
         { type: 'array', contains: { const: 'keep' } },
+        { anyOf: [{ contains: { const: 'keep' } }, { contains: { const: 'other' } }] },
+        { oneOf: [{ contains: { const: 'keep' } }, { contains: { const: 'other' } }] },
       ],
       unevaluatedItems: false,
     };
     result.tools[0].inputSchema.$defs = { ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 } };
+    result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
     result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
     result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
     result.tools[0].inputSchema.properties.ref_anchor = { $ref: '#ShortTextAnchor' };
+    result.tools[0].inputSchema.properties.legacy_ref_text = { $ref: '#/definitions/LegacyShortText' };
   }
   if (${legacy ? 'false' : 'true'}) {
     result.resultType ||= 'complete';
@@ -340,6 +344,8 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_tight: 'longer' }), /characters/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'ok' }).ref_anchor, 'ok');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'x' }), /characters/);
+  assert.equal(validateArguments(definition.parameters, { text: 'hello', legacy_ref_text: 'ok' }).legacy_ref_text, 'ok');
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', legacy_ref_text: 'x' }), /characters/);
   assert.deepEqual(
     validateArguments(definition.parameters, {
       text: 'hello',
@@ -1072,6 +1078,8 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
         allOf: [
           { type: 'array', prefixItems: [{ const: 'head' }] },
           { type: 'array', contains: { const: 'keep' } },
+          { anyOf: [{ contains: { const: 'keep' } }, { contains: { const: 'other' } }] },
+          { oneOf: [{ contains: { const: 'keep' } }, { contains: { const: 'other' } }] },
         ],
         unevaluatedItems: false,
       };
@@ -1079,10 +1087,12 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
         ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 },
         Region: { type: 'string', 'x-mcp-header': 'Region' },
       };
+      result.tools[0].inputSchema.definitions = { LegacyShortText: { type: 'string', minLength: 2 } };
       result.tools[0].inputSchema.properties.region = { $ref: '#/$defs/Region' };
       result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
       result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
       result.tools[0].inputSchema.properties.ref_anchor = { $ref: '#ShortTextAnchor' };
+      result.tools[0].inputSchema.properties.legacy_ref_text = { $ref: '#/definitions/LegacyShortText' };
     }
     if (
       ['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(
@@ -1253,6 +1263,14 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_tight: 'longer' }), /characters/);
   assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_anchor: 'ok' }).ref_anchor, 'ok');
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_anchor: 'x' }), /characters/);
+  assert.equal(
+    validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', legacy_ref_text: 'ok' }).legacy_ref_text,
+    'ok',
+  );
+  assert.throws(
+    () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', legacy_ref_text: 'x' }),
+    /characters/,
+  );
   assert.deepEqual(
     validateArguments(definitions[0].parameters, {
       text: 'hello',

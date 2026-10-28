@@ -995,7 +995,7 @@ function resolveLocalSchemaReference(rootSchema, reference) {
         target = schema;
       }
       const pushSchema = (value) => pending.push({ schema: value, depth: depth + 1 });
-      for (const keyword of ['$defs', 'properties', 'patternProperties', 'dependentSchemas'])
+      for (const keyword of ['$defs', 'definitions', 'properties', 'patternProperties', 'dependentSchemas'])
         if (schema[keyword] && typeof schema[keyword] === 'object' && !Array.isArray(schema[keyword]))
           for (const child of Object.values(schema[keyword])) pushSchema(child);
       for (const keyword of [
@@ -1045,6 +1045,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     '$comment',
     '$anchor',
     '$defs',
+    'definitions',
     '$ref',
     'type',
     'title',
@@ -1102,6 +1103,14 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     (!schema.$defs || typeof schema.$defs !== 'object' || Array.isArray(schema.$defs) || Object.keys(schema.$defs).length > 64)
   )
     throw mcpError('MCP tool input schema has invalid $defs', 'MCP_INVALID_SCHEMA');
+  if (
+    schema.definitions !== undefined &&
+    (!schema.definitions ||
+      typeof schema.definitions !== 'object' ||
+      Array.isArray(schema.definitions) ||
+      Object.keys(schema.definitions).length > 64)
+  )
+    throw mcpError('MCP tool input schema has invalid definitions', 'MCP_INVALID_SCHEMA');
   if (schema.$ref !== undefined) {
     if (typeof schema.$ref !== 'string' || refStack.has(schema.$ref))
       throw mcpError('MCP tool input schema has an invalid or recursive $ref', 'MCP_INVALID_SCHEMA');
@@ -1109,7 +1118,9 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     const nextRefStack = new Set(refStack);
     nextRefStack.add(schema.$ref);
     const normalizedTarget = normalizeSchema(target, depth + 1, budget, rootSchema, nextRefStack);
-    const sibling = Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$ref' && key !== '$defs'));
+    const sibling = Object.fromEntries(
+      Object.entries(schema).filter(([key]) => key !== '$ref' && key !== '$defs' && key !== 'definitions'),
+    );
     if (Object.keys(sibling).length === 0) return normalizedTarget;
     return {
       allOf: [normalizedTarget, normalizeSchema(sibling, depth + 1, budget, rootSchema, refStack)],
