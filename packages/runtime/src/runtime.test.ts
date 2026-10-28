@@ -1927,6 +1927,30 @@ test("GitHub release and Actions artifact downloads stay within profile paths an
   } finally { globalThis.fetch = originalFetch; }
 }));
 
+test("authorized GitHub workflow dispatch uses the requested workflow ref and inputs", async () => {
+  const originalFetch = globalThis.fetch; const requests: Array<{ url: string; method: string; body?: unknown }> = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input); const method = init?.method ?? "GET"; const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    requests.push({ url, method, ...(body === undefined ? {} : { body }) });
+    return new Response(null, { status: 204 });
+  };
+  const provider = new GitHubProvider({ get: async () => undefined } as never, { apiBase: "https://api.github.test" });
+  try {
+    const enabled = createGitHubTools(new AccessController(), provider, { writesEnabled: true, mergeAuthorized: false });
+    assert.deepEqual(await enabled.github_workflow_dispatch!.execute({ owner: "example", repo: "project", workflow: "workflows/verify.yml", ref: "feature/dispatch", inputs: { suite: "runtime", dry_run: "true" } }), { dispatched: true });
+    assert.deepEqual(requests, [{
+      url: "https://api.github.test/repos/example/project/actions/workflows/workflows%2Fverify.yml/dispatches",
+      method: "POST",
+      body: { ref: "feature/dispatch", inputs: { suite: "runtime", dry_run: "true" } }
+    }]);
+    const writesDisabled = createGitHubTools(new AccessController(), provider, { writesEnabled: false, mergeAuthorized: false });
+    await assert.rejects(writesDisabled.github_workflow_dispatch!.execute({ owner: "example", repo: "project", workflow: "workflows/verify.yml", ref: "main" }), /write actions are disabled/);
+    const restricted = createGitHubTools(new AccessController({ mode: "restricted", network: true, integrations: true, externalActions: false }), provider, { writesEnabled: true, mergeAuthorized: false });
+    await assert.rejects(restricted.github_workflow_dispatch!.execute({ owner: "example", repo: "project", workflow: "workflows/verify.yml", ref: "main" }), /denies externalActions/);
+    assert.equal(requests.length, 1, "disabled or restricted dispatch must not reach GitHub");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("GitHub issue labels and pull request updates require enabled external writes", async () => {
   const originalFetch = globalThis.fetch; const requests: Array<{ url: string; method: string; body?: unknown }> = [];
   globalThis.fetch = async (input, init) => {
