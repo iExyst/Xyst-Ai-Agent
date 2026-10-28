@@ -16,6 +16,9 @@ The stored scope and scope ID are returned with the effective value. A missing s
 xyst config get model.default
 xyst config get model.default my-project-id
 xyst config get integrations.github.writeEnabled mission <mission-id>
+xyst config set model.default '"publisher/model-key"' project my-project-id
+xyst config set orchestration.maxConcurrency 3 project my-project-id
+xyst mission plan "Review this repository" --project my-project-id
 xyst config set browser.headless false global
 xyst config set orchestration.maxConcurrency 4 global
 xyst config set models.remoteFallbackUrl '"https://inference.example.com"' global
@@ -31,6 +34,8 @@ xyst config import settings.json
 `config export` returns a JSON object grouped by `scope:scope-id`. Export and import omit an entire setting when its key or a nested object key looks credential-related (token, secret, password, credential, API key, authorization, or cookie), or a string contains a bearer/basic credential, URL user-info, or a credential query parameter. This avoids exporting partial integration objects that could no longer be used safely. Actual credentials belong in the operating system credential vault and are resolved when the feature runs. Import preserves other stored values but does not turn unknown keys into active features; use the table below for settings currently consumed by the runtime. Remove one override with `config reset <key> [scope] [scope-id]`; resolution then uses the next more general scope or the runtime default. `config reset-all [scope] [scope-id]` clears all overrides in that exact scope. The desktop Settings view can reset global overrides; scoped overrides and device-local appearance preferences remain.
 
 `config import <file>` reads through the active filesystem access profile and rejects files larger than 1 MiB. In restricted mode, the file must be under an allowed read root.
+
+`mission plan <objective> --project <project-id>` resolves the project's settings while planning and saves the project ID in the returned mission definition. The mission runner then uses that project context for project-scoped configuration during task execution. Explicit command-line planning options such as `--model` and `--max-concurrency` take precedence over saved settings.
 
 ## Credential storage
 

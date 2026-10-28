@@ -74,14 +74,15 @@ export class MissionPlanner {
     const trimmedObjective = objective.trim();
     if (!trimmedObjective || trimmedObjective.length > 8000) throw new Error("Mission objective must contain 1–8,000 characters");
     if (options.signal?.aborted) throw new Error("Mission planning was cancelled");
-    const delegationEnabled = this.deps.config.resolve<boolean>("orchestration.delegation.enabled")?.value !== false;
-    const networkAccess = options.projectId && this.deps.config.resolve<boolean>("network.enabled", { project: options.projectId })?.value === false
+    const scopes = options.projectId ? { project: options.projectId } : {};
+    const delegationEnabled = this.deps.config.resolve<boolean>("orchestration.delegation.enabled", scopes)?.value !== false;
+    const networkAccess = this.deps.config.resolve<boolean>("network.enabled", scopes)?.value === false
       ? this.deps.access.restrictCapabilities({ network: true }) : this.deps.access;
     networkAccess.assertCapability("network");
     const inventory = await this.deps.provider.models(options.signal);
     const llms = inventory.filter((model) => model.type === "llm");
-    const savedModel = this.deps.config.resolve<string>("model.default")?.value;
-    const autoSelect = this.deps.config.resolve<boolean>("model.autoSelect")?.value ?? true;
+    const savedModel = this.deps.config.resolve<string>("model.default", scopes)?.value;
+    const autoSelect = this.deps.config.resolve<boolean>("model.autoSelect", scopes)?.value ?? true;
     let planningModel = options.model ?? savedModel ?? "";
     let selectionReason = options.model ? "explicit mission-planning model" : savedModel ? "configured default model" : "";
     let planningEntry: LMStudioModel;
@@ -95,7 +96,7 @@ export class MissionPlanner {
       planningEntry = found;
     }
 
-    const configuredConcurrency = options.maxConcurrency ?? this.deps.config.resolve<number>("orchestration.maxConcurrency")?.value ?? 2;
+    const configuredConcurrency = options.maxConcurrency ?? this.deps.config.resolve<number>("orchestration.maxConcurrency", scopes)?.value ?? 2;
     const requestedConcurrency = delegationEnabled ? configuredConcurrency : 1;
     if (!Number.isInteger(requestedConcurrency) || requestedConcurrency < 1 || requestedConcurrency > 8) throw new Error("Mission concurrency must be an integer from 1 to 8");
     const usableMemoryBytes = Math.max(0, Math.min(freemem(), totalmem() * 0.75) - 1_500_000_000);
@@ -138,6 +139,7 @@ export class MissionPlanner {
       name: options.name?.trim() || parsed.name,
       objective: trimmedObjective,
       ...(options.workspace ? { workspace: options.workspace } : {}),
+      ...(options.projectId ? { projectId: options.projectId } : {}),
       model: planningModel,
       agents: parsed.agents,
       tasks: parsed.tasks,

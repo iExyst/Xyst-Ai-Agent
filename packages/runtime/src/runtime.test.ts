@@ -104,6 +104,56 @@ test("mission planner returns a validated review draft and applies concurrency l
   } finally { store.close(); }
 }));
 
+test("mission planning applies and preserves project-scoped model, delegation, and concurrency settings", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "planner-project-scope.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "global-model"); config.set("global", "orchestration.delegation.enabled", false); config.set("global", "orchestration.maxConcurrency", 1); config.set("global", "network.enabled", false);
+  config.set("project", "model.default", "project-model", "project-a"); config.set("project", "orchestration.delegation.enabled", true, "project-a"); config.set("project", "orchestration.maxConcurrency", 3, "project-a"); config.set("project", "network.enabled", true, "project-a");
+  let requestedModel = ""; let requestedConcurrency = 0; let systemPrompt = ""; let modelListCalls = 0;
+  const provider = {
+    models: async () => { modelListCalls++; return ["global-model", "project-model"].map((key) => ({ type: "llm", key, size_bytes: 1_000_000_000, loaded_instances: [] })); },
+    structuredOutput: async (request: { model: string; messages: Array<{ role: string; content: string }>; }) => {
+      requestedModel = request.model;
+      const userMessage = request.messages.find((message) => message.role === "user")?.content ?? "{}";
+      requestedConcurrency = Number(JSON.parse(userMessage).resourceLimit.maxConcurrency);
+      systemPrompt = request.messages.find((message) => message.role === "system")?.content ?? "";
+      return { choices: [{ message: { content: JSON.stringify({ name: "Project plan", agents: [], tasks: [
+        { id: "first", name: "First", objective: "First step", dependsOn: [], expectedOutputs: ["first"], completionCriteria: "First output exists", workspaceMode: "shared" },
+        { id: "second", name: "Second", objective: "Second step", dependsOn: ["first"], expectedOutputs: ["second"], completionCriteria: "Second output exists", workspaceMode: "shared" }
+      ] }) } }] };
+    }
+  };
+  try {
+    const result = await new MissionPlanner({ provider: provider as never, config, access: new AccessController(), events }).plan("Two dependent steps", { projectId: "project-a" });
+    assert.equal(requestedModel, "project-model");
+    assert.equal(requestedConcurrency, 3);
+    assert.match(systemPrompt, /Create a practical task graph/);
+    assert.equal(result.definition.projectId, "project-a");
+    assert.equal(result.definition.maxConcurrency, result.resources.effectiveConcurrency);
+    assert.equal(result.definition.tasks?.length, 2);
+    const restricted = new AccessController({ mode: "restricted", readRoots: [], writeRoots: [], allowedExecutables: [], network: false, integrations: true, backgroundJobs: true, externalActions: true });
+    await assert.rejects(new MissionPlanner({ provider: provider as never, config, access: restricted, events }).plan("Two dependent steps", { projectId: "project-a" }), /denies network/);
+    assert.equal(modelListCalls, 1, "a project override cannot widen the active access profile");
+  } finally { store.close(); }
+}));
+
+test("mission planner honors a project override for automatic model selection", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "planner-project-auto-select.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.autoSelect", false); config.set("project", "model.autoSelect", true, "project-a");
+  let requestedModel = "";
+  const provider = {
+    models: async () => [{ type: "llm", key: "available-model", size_bytes: 1_000_000_000, loaded_instances: [] }],
+    structuredOutput: async (request: { model: string }) => {
+      requestedModel = request.model;
+      return { choices: [{ message: { content: JSON.stringify({ name: "One step", agents: [], tasks: [{ id: "main", name: "Complete", objective: "Do it", dependsOn: [], expectedOutputs: ["result"], completionCriteria: "Result exists", workspaceMode: "shared" }] }) } }] };
+    }
+  };
+  try {
+    const result = await new MissionPlanner({ provider: provider as never, config, access: new AccessController(), events }).plan("One atomic objective", { projectId: "project-a" });
+    assert.equal(requestedModel, "available-model");
+    assert.equal(result.definition.projectId, "project-a");
+  } finally { store.close(); }
+}));
+
 test("mission planner rejects unavailable models and invalid dependency graphs", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "planner-invalid.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   const inventory = [{ type: "llm", key: "test-model", size_bytes: 1, loaded_instances: [] }];

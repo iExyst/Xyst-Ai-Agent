@@ -17,6 +17,7 @@ import { parseChatOptions } from "./chat-options.js";
 import { parseResponsesRequest } from "./responses-options.js";
 import { installMissionService, missionServiceStatus, uninstallMissionService, type MissionServiceSpec } from "./mission-service.js";
 import { getMissionTemplate, MISSION_TEMPLATES } from "./mission-templates.js";
+import { MISSION_PLAN_USAGE, parseMissionPlanArguments } from "./mission-plan-options.js";
 import { createAgentUserMessage } from "./attachments.js";
 import { closeWebhookServer, parseGitHubWebhookOptions, startGitHubWebhookServer } from "./webhook-server.js";
 
@@ -256,7 +257,7 @@ Usage: xyst [--json] <command>
   agent chat [--session id] [--model key] [--max-turns 1-50] [--attach path]...  Start an interactive saved chat; enter /compact or /exit
   agent list [mission-id]
   agent reconcile <session-id> <tool-call-id> completed|retry
-  mission plan <objective> [--name NAME] [--workspace PATH] [--model KEY] [--max-concurrency 1-8]
+  mission plan <objective> [--name NAME] [--workspace PATH] [--project ID] [--model KEY] [--max-concurrency 1-8]
   mission create <definition.json> | list | show <id> | rename <id> <name> | fork <id> [name] | export <id> [path] | delete <id> | workspaces [id]
   mission templates | template <template-id>  List or load an executable workflow definition
   mission task configure <mission-id> <task-id> [--model <key>|--inherit-model] [--max-turns <1-50>|--inherit-max-turns]
@@ -769,18 +770,10 @@ try {
   }
   else if (command === "mission") {
     if (subcommand === "plan") {
-      let name: string | undefined; let workspace: string | undefined; let model: string | undefined; let maxConcurrency: number | undefined;
-      const objectiveParts: string[] = [];
-      for (let index = 0; index < rest.length; index++) {
-        const token = rest[index]!;
-        if (["--name", "--workspace", "--model", "--max-concurrency"].includes(token)) {
-          const value = rest[++index]; if (!value) fail(`${token} requires a value`);
-          if (token === "--name") name = value; else if (token === "--workspace") workspace = value; else if (token === "--model") model = value; else maxConcurrency = Number(value);
-        } else objectiveParts.push(token);
-      }
-      const objective = objectiveParts.join(" ").trim(); if (!objective) fail("Usage: mission plan <objective> [--name NAME] [--workspace PATH] [--model KEY] [--max-concurrency 1-8]");
-      runtime.access.assertCapability("network");
-      output(await runtime.missionPlanner.plan(objective, { ...(name ? { name } : {}), ...(workspace ? { workspace } : {}), ...(model ? { model } : {}), ...(maxConcurrency !== undefined ? { maxConcurrency } : {}), signal: controller.signal }));
+      let planArgs: ReturnType<typeof parseMissionPlanArguments>;
+      try { planArgs = parseMissionPlanArguments(rest); } catch (error) { fail(error instanceof Error ? error.message : MISSION_PLAN_USAGE); }
+      const { objective, ...planOptions } = planArgs!;
+      output(await runtime.missionPlanner.plan(objective, { ...planOptions, signal: controller.signal }));
     } else if (subcommand === "create") {
       if (!rest[0]) fail("Usage: mission create <definition.json>");
       output(runtime.missions.repository.create(JSON.parse(await readFile(rest[0], "utf8"))));
