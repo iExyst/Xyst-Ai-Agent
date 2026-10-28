@@ -1,3 +1,5 @@
+import { supportedSettingScopes } from "@xyst/runtime/setting-scopes";
+
 export const scopedSettingKeys = [
   "access.profile", "integrations.github.apiBaseUrl", "model.default", "model.autoSelect",
   "models.automaticLoading", "models.automaticUnloading", "models.idleUnloadSeconds", "models.remoteFallback",
@@ -18,6 +20,9 @@ export const scopedSettingKeys = [
 
 export const settingScopes = ["global", "project", "mission", "agent", "session"] as const;
 export type DesktopSettingScope = typeof settingScopes[number];
+export function scopesForDesktopSetting(key: string): DesktopSettingScope[] {
+  return supportedSettingScopes(key);
+}
 
 export const settingApplyWhen: Record<typeof scopedSettingKeys[number], string> = {
   "access.profile": "Next CLI or agent operation",

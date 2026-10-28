@@ -876,11 +876,23 @@ test("known settings reject invalid values and imports roll back atomically", as
     assert.throws(() => config.set("global", "tools.maxParallelReads", 0), /tools.maxParallelReads must be an integer from 1 through 8/);
     config.set("global", "tools.maxParallelReads", 5);
     assert.equal(config.resolve<number>("tools.maxParallelReads")?.value, 5);
+    config.set("mission", "orchestration.maxConcurrency", 2, "mission-a");
+    assert.equal(config.resolve<number>("orchestration.maxConcurrency", { mission: "mission-a" })?.value, 2);
+    assert.throws(() => config.set("project", "access.profile", { mode: "restricted" }, "project-a"), /access.profile does not support the project scope/);
+    assert.throws(() => config.set("session", "updates.enabled", true, "session-a"), /updates.enabled does not support the session scope/);
+    assert.throws(() => config.set("session", "orchestration.maxConcurrency", 2, "session-a"), /orchestration.maxConcurrency does not support the session scope/);
+    config.set("session", "custom.extensionSetting", true, "session-a");
+    assert.equal(config.resolve<boolean>("custom.extensionSetting", { session: "session-a" })?.value, true, "generic extension settings retain generic scoped storage");
+    config.set("global", "updates.enabled", false);
+    store.db.prepare("INSERT INTO settings(scope,scope_id,key,value_json,updated_at) VALUES('project','legacy-project','updates.enabled','true',?)").run(new Date().toISOString());
+    assert.deepEqual(config.resolve("updates.enabled", { project: "legacy-project" }), { value: false, source: "global", scopeId: "" }, "legacy inert scoped values do not become effective");
+    assert.equal(config.export()["project:legacy-project"]?.["updates.enabled"], undefined, "portable exports omit legacy values at unsupported scopes");
     assert.throws(() => config.set("global", "orchestration.delegation.enabled", "no"), /orchestration.delegation.enabled must be true or false/);
     assert.throws(() => config.set("global", "autonomy.externalActionApproval", "no"), /autonomy.externalActionApproval must be true or false/);
     assert.throws(() => config.set("global", "network.enabled", "no"), /network.enabled must be true or false/);
     assert.throws(() => config.set("global", "notifications.enabled", "no"), /notifications.enabled must be true or false/);
     assert.throws(() => config.import({ "global:": { "inference.topP": 0.8, "orchestration.maxConcurrency": 0 } }), /orchestration.maxConcurrency must be an integer/);
+    assert.throws(() => config.import({ "global:": { "inference.topP": 0.8 }, "project:project-a": { "updates.enabled": true } }), /updates.enabled does not support the project scope/);
     assert.deepEqual(config.resolve("inference.temperature"), { value: 0.5, source: "global", scopeId: "" });
     assert.equal(config.resolve("inference.topP"), undefined);
   } finally { store.close(); }

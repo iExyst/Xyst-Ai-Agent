@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { validateSettingScope, validateSettingValue } from "./settings-schema.js";
+import { supportedSettingScopes, validateSettingContext, validateSettingScope, validateSettingValue } from "./settings-schema.js";
 
 const migrations = [
   `CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -159,7 +159,7 @@ export class ConfigStore {
 
   set(scope: SettingScope, key: string, value: unknown, scopeId = ""): void {
     if (!key.trim() || key.length > 200) throw new Error("Setting key must contain 1–200 characters");
-    validateSettingScope(scope, scopeId); validateSettingValue(key, value);
+    validateSettingScope(scope, scopeId); validateSettingContext(key, scope); validateSettingValue(key, value);
     this.store.db.prepare(`INSERT INTO settings(scope, scope_id, key, value_json, updated_at)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(scope, scope_id, key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`)
       .run(scope, scopeId, key, JSON.stringify(value), new Date().toISOString());
@@ -176,6 +176,7 @@ export class ConfigStore {
   resolve<T>(key: string, scopes: Partial<Record<SettingScope, string>> = {}): EffectiveSetting<T> | undefined {
     const order: SettingScope[] = ["session", "agent", "mission", "project", "global"];
     for (const scope of order) {
+      if (!supportedSettingScopes(key).includes(scope)) continue;
       const scopeId = scopes[scope] ?? "";
       const row = this.store.db.prepare("SELECT value_json FROM settings WHERE scope=? AND scope_id=? AND key=?").get(scope, scopeId, key) as { value_json: string } | undefined;
       if (row) { const value = JSON.parse(row.value_json) as T; validateSettingValue(key, value); return { value, source: scope, scopeId }; }
@@ -187,6 +188,7 @@ export class ConfigStore {
     const rows = this.store.db.prepare("SELECT scope, scope_id, key, value_json FROM settings ORDER BY scope, scope_id, key").all() as Array<{ scope: string; scope_id: string; key: string; value_json: string }>;
     const result: Record<string, Record<string, unknown>> = {};
     for (const row of rows) {
+      if (!supportedSettingScopes(row.key).includes(row.scope as SettingScope)) continue;
       const value = JSON.parse(row.value_json) as unknown;
       if (sensitiveSettingKey.test(row.key) || containsSensitiveSettingField(value)) continue;
       const bucket = `${row.scope}:${row.scope_id}`;

@@ -7,7 +7,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lmStudioIntegrationsSchema, mcpServersSchema } from "@xyst/runtime";
-import { scopedSettingKeys, settingScopes } from "./setting-keys.js";
+import { scopedSettingKeys, scopesForDesktopSetting, settingScopes } from "./setting-keys.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const projectRoot = process.env.XYST_ROOT ?? (app.isPackaged ? join(app.getPath("documents"), "Xyst") : resolve(here, "../../.."));
@@ -219,6 +219,7 @@ function registerIpc(): void {
       const key = String(payload?.key ?? ""); const scope = String(payload?.scope ?? ""); const scopeId = String(payload?.scopeId ?? "").trim();
       if (!(scopedSettingKeys as readonly string[]).includes(key)) throw new Error("Choose a documented Xyst setting key");
       if (!(settingScopes as readonly string[]).includes(scope)) throw new Error("Choose global, project, mission, agent, or session scope");
+      if (!scopesForDesktopSetting(key).includes(scope as typeof settingScopes[number])) throw new Error(`${key} does not support ${scope} scope`);
       if (scope.length > 0 && scope !== "global" && (!scopeId.trim() || scopeId.length > 500)) throw new Error("The selected scope requires an ID of 1–500 characters");
       if (scope === "global" && scopeId) throw new Error("Global scope does not accept a scope ID");
       const scopedArgs = scope === "global" ? ["global"] : [scope, scopeId];

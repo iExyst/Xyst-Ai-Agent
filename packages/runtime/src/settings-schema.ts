@@ -1,5 +1,7 @@
 import type { SettingScope } from "./storage.js";
 import { lmStudioIntegrationsSchema } from "./providers/lm-studio-integrations.js";
+import { validateSettingContext } from "./setting-scopes.js";
+export { supportedSettingScopes, validateSettingContext } from "./setting-scopes.js";
 
 const ocrLanguages = new Set(["eng", "fra", "deu", "spa"]);
 
