@@ -94,7 +94,7 @@ Saved plans appear in the conversation. In the browser/desktop and VS Code inter
 
 ## Choose how much autonomy to use
 
-Fresh installations default to **Unrestricted**. Xyst AI Assistant skips its own approval prompts and configured limits, can use shell/process tools, and can read or write across paths available to the current operating-system account. This setting does not grant administrator/root privileges. The provider's context and output limits still apply.
+Fresh installations default to **Unrestricted**. Xyst AI Assistant skips its own approval prompts and configurable budgets, can use shell/process tools, and can read or write across paths available to the current operating-system account. Hard operational limits still apply: file reads/edits/writes are capped at 32 MiB, directory listings return at most 5,000 entries after scanning 50,000 names, JSON tool results are capped at 1 MB, and screenshots at 8 MiB decoded. Directory listing honors run cancellation. This setting does not grant administrator/root privileges; provider context/output limits also apply.
 
 Unrestricted mode sends raw task and tool content to the selected model during the active run. When a session is saved, Xyst AI Assistant redacts recognizable credential patterns in the persisted copy without changing the active run's in-memory context. This is best-effort pattern matching: arbitrary or encoded secrets can be missed, and legacy session files are not rewritten until a later save. Use a local model or review sensitive content before allowing it to reach a remote provider.
 

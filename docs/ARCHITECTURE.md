@@ -21,7 +21,7 @@ CLI / local API / browser GUI / VS Code extension
 
 `node src/cli.mjs serve` starts an authenticated HTTP control plane bound to `127.0.0.1`. It creates a fresh in-memory bearer token for each process and writes a one-time JSON bootstrap record to stdout; a desktop host should capture that pipe privately. The API rejects non-loopback peers, unexpected Host headers, and browser origins absent from `api.allowed_origins`. It exposes run creation/status/cancel, resumable server-sent events, pending approval responses, and session list/detail. Provider calls, tools, persistence, and permission decisions remain in `AgentRuntime` and its stores.
 
-The user-level `tools.autonomy = "unrestricted"` profile exposes machine-wide files and process execution without app-level approval, deny-rule, or secret-filter checks. It also inherits the full OS-user environment. This profile cannot elevate the process beyond OS account permissions and cannot be enabled by project config. The `assisted` profile retains workspace and secret-safety policy.
+The user-level `tools.autonomy = "unrestricted"` profile exposes machine-wide files and process execution without app-level approval, deny-rule, or secret-filter checks. It also inherits the full OS-user environment. Runtime ceilings still bound file reads/edits/writes to 32 MiB, listings to 5,000 returned entries after scanning at most 50,000 names, JSON tool results to 1 MB, and screenshots to 8 MiB decoded; listings honor cancellation. This profile cannot elevate the process beyond OS account permissions and cannot be enabled by project config. The `assisted` profile retains workspace and secret-safety policy.
 
 ## Module contracts
 
