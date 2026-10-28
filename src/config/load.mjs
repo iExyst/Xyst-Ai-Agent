@@ -89,6 +89,19 @@ function validateProjectCannotElevate(userConfig, projectConfig, runtimeOverride
         !(projectApprovals[key] || []).every((item) => (userConfig.approvals?.[key] || []).includes(item)),
     );
   const effectiveUserConfig = { ...userConfig, sandbox: deepMerge(userConfig.sandbox || {}, runtimeOverrides.sandbox || {}) };
+  // A workspace is untrusted input. Keep model endpoints, credential references,
+  // provider discovery, and automatic embedding disclosure under user control.
+  const controlsModelProvider =
+    projectConfig.models !== undefined ||
+    projectConfig.default_model !== undefined ||
+    projectConfig.review_model !== undefined ||
+    projectConfig.plan_model !== undefined ||
+    projectConfig.compact_model !== undefined ||
+    projectConfig.routing !== undefined;
+  const controlsDiscovery = projectConfig.local_servers !== undefined || projectConfig.discovery !== undefined;
+  const controlsSearchProvider = projectConfig.web_search !== undefined;
+  const controlsSemanticDisclosure =
+    projectConfig.retrieval?.semantic !== undefined || projectConfig.retrieval?.auto_context !== undefined;
   const sandboxTargets = [null, ...SANDBOX_PROCESS_TOOLS];
   const weakensSandbox = sandboxTargets.some((toolName) => {
     const userMode = resolveSandboxMode(effectiveUserConfig, toolName);
@@ -98,6 +111,10 @@ function validateProjectCannotElevate(userConfig, projectConfig, runtimeOverride
   if (
     broadensTools ||
     weakensSandbox ||
+    controlsModelProvider ||
+    controlsDiscovery ||
+    controlsSearchProvider ||
+    controlsSemanticDisclosure ||
     projectConfig.mcp !== undefined ||
     projectConfig.skills !== undefined ||
     projectConfig.hooks !== undefined ||
@@ -108,7 +125,7 @@ function validateProjectCannotElevate(userConfig, projectConfig, runtimeOverride
     projectConfig.memory?.global_enabled !== undefined
   )
     throw new Error(
-      'Project config may not enable Architect, elevate tool access, define MCP servers, skills, or application update trust roots, configure observability exporters, or weaken the user-configured sandbox; configure these settings in the user config',
+      'Project config may not enable Architect, elevate tool access, define MCP servers, skills, or application update trust roots, configure observability exporters, or weaken the user-configured sandbox; it may not define or select model profiles, configure provider discovery or search, or enable semantic retrieval or automatic context disclosure; configure these settings in the user config',
     );
 }
 

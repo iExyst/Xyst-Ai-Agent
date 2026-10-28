@@ -10,7 +10,7 @@ Move Xyst from a feature-complete development build to a supportable, security-r
 
 ### Execution timing
 
-Hosted CI is now green for the exact supported Windows/Linux x64 source revision. The highest-priority open work is independent security review. The three redacted credential-like detections in the separate `codex/integrate-green-prs-58-71` history have been triaged as false positives from a deterministic sample response and a runtime model-ID fixture; no credential rotation or history rewrite is indicated by those matches. Schedule native Ubuntu/Wayland and supported-client acceptance against a stable candidate. Signing, update-feed control, revocation operations, and final signed-installer verification remain release-stage gates.
+Hosted CI is green for the previous supported Windows/Linux x64 source revision. A targeted source review identified a high-impact project-config trust-boundary issue; a local candidate now keeps provider profiles, model selection/routing, discovery/search integrations, and semantic data disclosure under user config. Its focused configuration tests pass, but it still needs exact-source hosted CI and independent review. The three redacted credential-like detections in the separate `codex/integrate-green-prs-58-71` history were triaged as deterministic sample/model-ID fixtures; no credential rotation or history rewrite is indicated by those matches. Native Ubuntu/Wayland acceptance, signing, update-feed control, revocation operations, and final signed-installer verification remain release-stage gates.
 
 ### 0. Establish a reviewable baseline and release scope
 

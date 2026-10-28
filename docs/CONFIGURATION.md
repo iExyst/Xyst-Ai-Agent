@@ -6,7 +6,7 @@ Configuration merges in this order, from lowest to highest precedence:
 | --- | --- | --- |
 | 1 | Built-in defaults | Always present; includes the first-run Unrestricted automation profile. |
 | 2 | User TOML | User-wide model, tool, security, and product settings. |
-| 3 | Workspace `.xyst.toml` | Project defaults, subject to user-policy checks; it cannot add user-trusted integrations or weaken an explicitly configured user sandbox/Assisted profile. |
+| 3 | Workspace `.xyst.toml` | Non-provider project defaults, subject to user-policy checks; provider profiles and selection, model routing, provider discovery/search, and semantic data disclosure stay under user control. Project settings cannot weaken an explicitly configured user sandbox/Assisted profile. |
 | 4 | User runtime sidecar at `<config.toml>.runtime.json` | Allowlisted settings explicitly saved through the authenticated local API. Most settings apply to new runs; autonomy and sandbox changes can also be queued for active runs while every run is paused, then take effect at the next safe checkpoint after resume. |
 | 5 | `XYST__...` environment variables | Final configuration layer; nested names use `__` separators, for example `XYST__BUDGETS__MAX_TURNS=12`. |
 | 6 | Invocation-specific CLI options | Override only the corresponding run/command input and only for that invocation. They do not rewrite configuration. A CLI option cannot weaken a user-required sandbox or runtime hard denial. |
