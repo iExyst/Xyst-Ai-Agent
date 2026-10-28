@@ -2,14 +2,14 @@
 
 ## Windows development installer rebuild — 2026-10-28
 
-- `pnpm build:desktop:windows-installer` completed from source commit `36a8b94`; the NSIS installer is 29,154,464 bytes with SHA-256 `b2c795d0e666c405025223232ddaf1959eb4f96437f5664a0be05394b5ffed31`. It is `NotSigned`. No fresh local install smoke was run; hosted run [40617017783](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40617017783) passed the Windows desktop package lifecycle job from that source. The development artifact and checksum are in local `dist/dev/`.
+- `pnpm build:desktop:windows-installer` completed from source commit `8f23da0`; the NSIS installer is 29,158,222 bytes with SHA-256 `0e490cfcde4b7a7341f2279f2573eb1c518fc8d9de6f3a89891940409665e1e7`. It is `NotSigned`. No fresh local install smoke was run; hosted package lifecycle verification for this source is pending. The development artifact and checksum are in local `dist/dev/`.
 - The same hosted run built the Ubuntu 24.04 DEB (54,859,246 bytes; SHA-256 `7afce5cb3bd62fd6111ea3a41d9c3d57315a924a8ca803b8c1348862b3fedf52`) and AppImage (128,207,352 bytes; SHA-256 `3038662eff34c4fa8a10b911a242db02a602b5c27d182a55aa9def8ded2badbf`). The hosted Ubuntu desktop/package lifecycle job passed. Both artifacts and their hashes are copied into local `dist/dev/`.
 - These package artifacts match source commit `36a8b94`. Refresh them after hosted verification of the compaction cancellation fix below before reusing them as current-source development builds.
 
 ## Compaction cancellation boundary — 2026-10-28
 
 - Compaction checks its abort signal after usage settlement and before persisting trimmed history. A provider that ignores cancellation can no longer cause the old transcript to be archived and removed after the user cancels. If cancellation lands during archive creation, cleanup removes the unreferenced archive before propagating cancellation.
-- Focused compaction suite passes 7/7 and changed-file Biome checks pass. Exact-source hosted CI is pending.
+- Focused compaction suite passes 7/7 and changed-file Biome checks pass. Exact-source hosted run [40619405721](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40619405721) is pending.
 
 ## MCP list-result schema conformance — 2026-10-28
 
