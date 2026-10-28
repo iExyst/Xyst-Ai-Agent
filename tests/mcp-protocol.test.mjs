@@ -157,6 +157,8 @@ test('MCP list results validate tool, resource, template, and prompt definitions
     ['resources/list', { ...cache, resources: [{ name: 'trailing percent escape', uri: 'file:///report%' }] }],
     ['resources/list', { ...cache, resources: [{ name: 'short percent escape', uri: 'file:///report%2' }] }],
     ['resources/list', { ...cache, resources: [{ name: 'non-hex percent escape', uri: 'file:///report%zz' }] }],
+    ['resources/list', { ...cache, resources: [{ name: 'unescaped pipe', uri: 'https://example.test/report|draft' }] }],
+    ['resources/list', { ...cache, resources: [{ name: 'backslash separator', uri: 'https://example.test\\report' }] }],
     ['resources/list', { ...cache, resources: [{ name: 'negative size', uri: 'file:///report.txt', size: -1 }] }],
     ['resources/list', { ...cache, resources: [{ name: 'fractional size', uri: 'file:///report.txt', size: 1.5 }] }],
     ['resources/templates/list', { ...cache, resourceTemplates: [{ name: 'missing template' }] }],

@@ -383,7 +383,13 @@ function isOutputSchema(value) {
 }
 
 function isUri(value) {
-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim() || /\s/.test(value) || /%(?![\da-f]{2})/i.test(value))
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value !== value.trim() ||
+    /[^\x21-\x7e]|[<>"{}|\\^`]/.test(value) ||
+    /%(?![\da-f]{2})/i.test(value)
+  )
     return false;
   try {
     return Boolean(new URL(value).protocol);
