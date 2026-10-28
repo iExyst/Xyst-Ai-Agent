@@ -19,6 +19,7 @@ import { installMissionService, missionServiceStatus, uninstallMissionService, t
 import { getMissionTemplate, MISSION_TEMPLATES } from "./mission-templates.js";
 import { MISSION_PLAN_USAGE, parseMissionPlanArguments } from "./mission-plan-options.js";
 import { createAgentUserMessage } from "./attachments.js";
+import { desktopModelSnapshot } from "./desktop-model-snapshot.js";
 import { closeWebhookServer, parseGitHubWebhookOptions, startGitHubWebhookServer } from "./webhook-server.js";
 
 const args = process.argv.slice(2);
@@ -592,7 +593,7 @@ try {
     ] as const;
     const settings = Object.fromEntries(settingKeys.map((key) => [key, runtime.config.resolve(key) ?? { key, configured: false }]));
     const [modelsResult, browserResult, systemResourcesResult] = await Promise.all([
-      lm.models(controller.signal).then((models) => ({ models: models.map((model) => ({ key: model.key, name: model.display_name, type: model.type, sizeBytes: model.size_bytes, quantization: model.quantization?.name, maxContext: model.max_context_length, capabilities: model.capabilities, loaded_instances: model.loaded_instances })) })).catch((error) => ({ models: [] as Array<Record<string, unknown>>, modelsError: error instanceof Error ? error.message : String(error) })),
+      lm.models(controller.signal).then((models) => ({ models: models.map(desktopModelSnapshot) })).catch((error) => ({ models: [] as Array<Record<string, unknown>>, modelsError: error instanceof Error ? error.message : String(error) })),
       Promise.all([runtime.browser.status(), Promise.resolve(settings["browser.automation.enabled"]), Promise.resolve(settings["browser.headless"]), Promise.resolve(settings["browser.maxDownloadBytes"])]).then(([browser, enabled, headless, maxDownloadBytes]) => ({ browser, enabled, headless, maxDownloadBytes })).catch(() => ({})),
       runtime.resourceStats().catch((error) => ({ error: error instanceof Error ? error.message : String(error) }))
     ]);
