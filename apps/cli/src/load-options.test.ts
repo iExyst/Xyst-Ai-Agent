@@ -184,7 +184,12 @@ test("mission service definitions preserve executable paths and restart policy",
   assert.match(unit, /TimeoutStopSec=infinity/);
   const windows = renderWindowsMissionTaskScript({ ...spec, daemonArguments }, "install");
   assert.match(windows, /-AtLogOn/);
+  assert.match(windows, /-StartWhenAvailable/);
+  assert.match(windows, /-RestartCount 5/);
+  assert.match(windows, /-RestartInterval \(New-TimeSpan -Minutes 1\)/);
   assert.match(windows, /-MultipleInstances IgnoreNew/);
+  assert.match(windows, /-ExecutionTimeLimit \(\[TimeSpan\]::Zero\)/);
+  assert.match(windows, /-LogonType Interactive -RunLevel Limited/);
   assert.match(windows, /Register-ScheduledTask/);
   assert.match(windows, /--webhook-host/);
   assert.match(windows, /--webhook-path/);
