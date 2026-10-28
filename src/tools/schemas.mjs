@@ -421,10 +421,8 @@ function validateValue(schema, value, location) {
       else if (schema.additionalProperties !== undefined) validateValue(schema.additionalProperties, child, `${location}.${key}`);
   } else if (schema.type === 'string') {
     if (typeof value !== 'string') throw new Error(`${location} must be a string`);
-    if (
-      (schema.minLength !== undefined && value.length < schema.minLength) ||
-      (schema.maxLength !== undefined && value.length > schema.maxLength)
-    )
+    const length = countCodePoints(value);
+    if ((schema.minLength !== undefined && length < schema.minLength) || (schema.maxLength !== undefined && length > schema.maxLength))
       throw new Error(`${location} must be between ${schema.minLength || 0} and ${schema.maxLength ?? 'unlimited'} characters`);
     if (schema.maxBytes !== undefined && Buffer.byteLength(value) > schema.maxBytes)
       throw new Error(`${location} must be no larger than ${schema.maxBytes} UTF-8 bytes`);
@@ -457,6 +455,12 @@ function validateValue(schema, value, location) {
       throw new Error(`${location} must contain between ${schema.minItems || 0} and ${schema.maxItems ?? 'unlimited'} items`);
     for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`);
   } else throw new Error(`Unsupported tool schema type '${schema.type}'`);
+}
+
+function countCodePoints(value) {
+  let count = 0;
+  for (const _character of value) count++;
+  return count;
 }
 
 export function deepFreeze(value) {
