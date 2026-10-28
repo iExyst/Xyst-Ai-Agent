@@ -65,6 +65,20 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
   rejectUnsupportedResultType(result.resultType, { serverName, method });
 }
 
+/** Validate the required fields of the legacy MCP initialize response. */
+export function validateMcpInitializeResult(result, { serverName }) {
+  if (
+    !isRecord(result) ||
+    typeof result.protocolVersion !== 'string' ||
+    !isServerCapabilities(result.capabilities) ||
+    !isImplementation(result.serverInfo) ||
+    !isOptionalString(result.instructions) ||
+    !isOptionalMeta(result._meta)
+  )
+    throw mcpError(`MCP server '${serverName}' returned an invalid initialize response`, 'MCP_INVALID_RESPONSE');
+  return result;
+}
+
 function rejectUnsupportedResultType(resultType, { serverName, method }) {
   if (resultType === 'input_required')
     throw mcpError(

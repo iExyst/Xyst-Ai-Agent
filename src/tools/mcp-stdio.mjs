@@ -14,7 +14,7 @@ import { buildBubblewrapArgs, bubblewrapLauncherEnvironment, findBubblewrap, val
 import { waitForBubblewrapStart } from '../platform/bubblewrap-status.mjs';
 import { redactSecrets } from '../platform/redaction.mjs';
 import { isReadOnlySandbox, requiresProcessIsolation, resolveSandboxMode } from '../platform/sandbox-modes.mjs';
-import { validateMcpResultType } from './mcp-protocol.mjs';
+import { validateMcpInitializeResult, validateMcpResultType } from './mcp-protocol.mjs';
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -428,11 +428,14 @@ class McpStdioSession {
       return MODERN_VERSION;
     }
 
-    const initialized = await this.#request('initialize', {
-      protocolVersion: LEGACY_VERSIONS[0],
-      capabilities: {},
-      clientInfo: CLIENT_INFO,
-    });
+    const initialized = validateMcpInitializeResult(
+      await this.#request('initialize', {
+        protocolVersion: LEGACY_VERSIONS[0],
+        capabilities: {},
+        clientInfo: CLIENT_INFO,
+      }),
+      { serverName: this.name },
+    );
     const selected = initialized?.protocolVersion;
     if (!LEGACY_VERSIONS.includes(selected))
       throw mcpError('MCP server negotiated an unsupported protocol version', 'MCP_VERSION_UNSUPPORTED');

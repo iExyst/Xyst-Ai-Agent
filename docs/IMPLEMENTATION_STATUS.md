@@ -10,6 +10,10 @@
 - MCP template-list results now reject unmatched RFC 6570 braces as `MCP_INVALID_RESPONSE` before tool registration. Runtime expansion continues to use the vendored RFC 6570 implementation. The focused protocol suite passes 8/8 and template integration regressions pass 2/2. Exact-source hosted confirmation is pending, and full schema parity remains open.
 - RFC 6570 variable-name parsing now accepts legal hyphen and tilde characters. The integration test expands a hyphenated query variable successfully.
 
+## Legacy MCP initialize response validation — 2026-10-28
+
+- Stdio and HTTP legacy handshakes now validate the required protocol version, capabilities, server implementation metadata, and optional instructions before using them. Focused shape regressions and the stdio fallback, legacy HTTP+SSE, and Streamable HTTP recovery integrations pass. Full MCP field-level conformance remains open; see the [official 2025-11-25 schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-11-25/schema.json).
+
 ## MCP discovery extension-key validation — 2026-10-28
 
 - Discovery responses now reject extension capability keys without a valid namespaced prefix, as required by the pinned schema. The focused protocol suite passes 8/8; exact-source hosted confirmation is pending.

@@ -1,6 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateMcpResultType } from '../src/tools/mcp-protocol.mjs';
+import { validateMcpInitializeResult, validateMcpResultType } from '../src/tools/mcp-protocol.mjs';
+
+test('MCP legacy initialize responses require protocol capabilities and server implementation fields', () => {
+  const valid = {
+    protocolVersion: '2025-11-25',
+    capabilities: { tools: { listChanged: true }, experimental: { 'vendor.feature': {} } },
+    serverInfo: { name: 'fixture', version: '1.0.0', websiteUrl: 'https://example.test/' },
+    instructions: 'Use the search tool for documentation.',
+  };
+  assert.equal(validateMcpInitializeResult(valid, { serverName: 'fixture' }), valid);
+  for (const invalid of [
+    { ...valid, protocolVersion: null },
+    { ...valid, capabilities: [] },
+    { ...valid, capabilities: { tools: { listChanged: 'yes' } } },
+    { ...valid, serverInfo: { name: 'fixture' } },
+    { ...valid, serverInfo: { name: 'fixture', version: '1', websiteUrl: '/relative' } },
+    { ...valid, instructions: 1 },
+    { ...valid, _meta: [] },
+  ])
+    assert.throws(() => validateMcpInitializeResult(invalid, { serverName: 'fixture' }), { code: 'MCP_INVALID_RESPONSE' });
+  for (const missing of [
+    (({ protocolVersion: _version, ...value }) => value)(valid),
+    (({ capabilities: _capabilities, ...value }) => value)(valid),
+    (({ serverInfo: _info, ...value }) => value)(valid),
+  ])
+    assert.throws(() => validateMcpInitializeResult(missing, { serverName: 'fixture' }), { code: 'MCP_INVALID_RESPONSE' });
+});
 
 test('MCP result type validation accepts complete and legacy results', () => {
   const complete = { resultType: 'complete', content: [] };

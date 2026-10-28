@@ -1,5 +1,5 @@
 import { resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, deepFreeze } from './schemas.mjs';
-import { validateMcpResultType } from './mcp-protocol.mjs';
+import { validateMcpInitializeResult, validateMcpResultType } from './mcp-protocol.mjs';
 
 const VERSION = '2026-07-28';
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -85,14 +85,17 @@ export class StreamableHttpMcpSession {
 
   async #initializeLegacy({ signal } = {}) {
     this.sessionId = null;
-    const initialized = await this.request(
-      'initialize',
-      {
-        protocolVersion: LEGACY[0],
-        capabilities: {},
-        clientInfo: CLIENT,
-      },
-      { protocolVersion: LEGACY[0], methodHeader: false, signal },
+    const initialized = validateMcpInitializeResult(
+      await this.request(
+        'initialize',
+        {
+          protocolVersion: LEGACY[0],
+          capabilities: {},
+          clientInfo: CLIENT,
+        },
+        { protocolVersion: LEGACY[0], methodHeader: false, signal },
+      ),
+      { serverName: this.name },
     );
     if (!LEGACY.includes(initialized?.protocolVersion))
       throw mcpError('MCP server negotiated an unsupported protocol version', 'MCP_VERSION_UNSUPPORTED');
