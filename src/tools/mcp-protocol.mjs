@@ -1,4 +1,14 @@
 const MODERN_PROTOCOL_VERSION = '2026-07-28';
+const RESULT_TYPE_METHODS = new Set([
+  'server/discover',
+  'tools/list',
+  'tools/call',
+  'resources/list',
+  'resources/templates/list',
+  'resources/read',
+  'prompts/list',
+  'prompts/get',
+]);
 
 /** Reject modern MCP control-flow results that Xyst does not yet implement. */
 export function validateMcpResultType(result, { protocolVersion, serverName, method }) {
@@ -9,6 +19,12 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
     result.resultType !== 'complete'
   )
     rejectUnsupportedResultType(result.resultType, { serverName, method });
+  if (
+    protocolVersion === MODERN_PROTOCOL_VERSION &&
+    RESULT_TYPE_METHODS.has(method) &&
+    (!isRecord(result) || typeof result.resultType !== 'string')
+  )
+    throw mcpError(`MCP server '${serverName}' omitted the required result type during ${method}`, 'MCP_INVALID_RESPONSE');
   if (method === 'tools/call') validateToolCallResult(result, { protocolVersion, serverName });
   if (protocolVersion !== MODERN_PROTOCOL_VERSION || !result || typeof result !== 'object' || Array.isArray(result)) return result;
   if (!Object.hasOwn(result, 'resultType') || result.resultType === 'complete') return result;

@@ -46,6 +46,26 @@ test('MCP tool-call results validate content blocks and standard flags', () => {
   );
 });
 
+test('MCP modern resource and prompt results require result types while legacy results remain compatible', () => {
+  for (const method of [
+    'server/discover',
+    'tools/list',
+    'resources/list',
+    'resources/templates/list',
+    'resources/read',
+    'prompts/list',
+    'prompts/get',
+  ]) {
+    assert.throws(() => validateMcpResultType({}, { protocolVersion: '2026-07-28', serverName: 'fixture', method }), {
+      code: 'MCP_INVALID_RESPONSE',
+    });
+    const result = { resultType: 'complete' };
+    assert.equal(validateMcpResultType(result, { protocolVersion: '2026-07-28', method }), result);
+    const legacy = {};
+    assert.equal(validateMcpResultType(legacy, { protocolVersion: '2025-11-25', method }), legacy);
+  }
+});
+
 test('MCP result type validation rejects unsupported control flow and unknown modern results', () => {
   for (const [resultType, code] of [
     ['input_required', 'MCP_INTERACTIVE_INPUT_UNSUPPORTED'],

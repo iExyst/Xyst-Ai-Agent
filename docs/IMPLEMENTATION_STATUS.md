@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## MCP modern result-type conformance — 2026-10-28
+
+- Modern discovery, tool, resource, and prompt method responses now require the schema's `resultType`, and unsupported result control flow continues to fail closed. Legacy protocol responses keep their omitted-field compatibility.
+- Focused protocol validation passes 4/4; focused stdio and Streamable HTTP integration regressions pass 4/4; changed-file Biome checks pass. Full MCP method and field schema validation remains open. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json). Exact-source hosted CI is pending.
+
 ## Windows atomic-replacement cleanup warning — 2026-10-28
 
 - If Windows installs a replacement but cannot remove the old-file backup, `atomicWriteFile` treats the write as successful, preserves the recovery backup, and reports a persistence warning. Session writes forward that warning while advancing their in-memory revision, so callers do not report failure after the new data is already visible.
