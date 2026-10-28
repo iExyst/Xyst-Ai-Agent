@@ -507,6 +507,15 @@ test('machine filesystem scope enables approved absolute-path automation without
   await assert.rejects(broad.call('read_file', { path: '.env' }), /secret-safety policy/);
 });
 
+test('directory listing stops promptly when its tool call is cancelled', async (t) => {
+  const root = await createTempDirectory('xyst-list-dir-cancel-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const tools = createBuiltinTools({ workspaceRoot: root, config: { tools: { autonomy: 'unrestricted' } } });
+  const controller = new AbortController();
+  controller.abort(Object.assign(new Error('Listing cancelled'), { code: 'CANCELLED' }));
+  await assert.rejects(tools.call('list_dir', { path: '.' }, { signal: controller.signal }), { code: 'CANCELLED' });
+});
+
 test('unrestricted autonomy exposes all machine paths and returns unredacted file content', async (t) => {
   const root = await createTempDirectory('xyst-unrestricted-tools-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -19,6 +19,7 @@ const DEFAULT_FILE_LIMIT = 1_000_000;
 const MAX_TOOL_RESULT_BYTES = 1_000_000;
 const MAX_TOOL_FILE_READ_BYTES = 32 * 1024 * 1024;
 const MAX_TOOL_LIST_ENTRIES = 5_000;
+const MAX_TOOL_LIST_SCANNED_ENTRIES = 50_000;
 
 export function createBuiltinTools({
   workspaceRoot,
@@ -72,7 +73,7 @@ export function createBuiltinTools({
 
   const execute = {
     read_file: async (args) => readFile(workspaceRoot, args, config),
-    list_dir: async (args) => listDir(workspaceRoot, args, config),
+    list_dir: async (args, context) => listDir(workspaceRoot, args, config, context),
     search_files: async (args) => searchFiles(workspaceRoot, args, config),
     propose_memory: async (args) => {
       const item = await memoryStore.append(args.section, args.text, { source: 'agent-proposal' });
@@ -267,7 +268,7 @@ async function readBoundedFile(handle, maxBytes) {
   return Buffer.concat(chunks, bytesRead);
 }
 
-async function listDir(root, args, config) {
+async function listDir(root, args, config, context = {}) {
   if (!isUnrestricted(config) && isSensitivePath(args.path))
     throw new Error('Listing protected paths is blocked by the secret-safety policy');
   const base = await resolveToolPath(root, args.path, { mustExist: true, machineScope: machineScope(config) });
@@ -280,14 +281,23 @@ async function listDir(root, args, config) {
     throw new Error('Recursive directory listing is disabled in configuration');
   const entries = [];
   const pending = [base];
+  let scannedEntries = 0;
+  let scanLimitReached = false;
   const maxEntries = Math.min(
     isUnrestricted(config) ? MAX_TOOL_LIST_ENTRIES : (config.tools?.max_list_entries ?? 500),
     MAX_TOOL_LIST_ENTRIES,
   );
-  while (pending.length && entries.length < maxEntries) {
+  while (pending.length && entries.length < maxEntries && !scanLimitReached) {
+    throwIfToolAborted(context.signal);
     const current = pending.shift();
     const directory = await fs.opendir(current);
     for await (const item of directory) {
+      throwIfToolAborted(context.signal);
+      if (scannedEntries >= MAX_TOOL_LIST_SCANNED_ENTRIES) {
+        scanLimitReached = true;
+        break;
+      }
+      scannedEntries += 1;
       if (!isUnrestricted(config) && isIgnoredName(item.name)) continue;
       const absolute = path.join(current, item.name);
       const relative = displayToolPath(root, absolute);
@@ -296,7 +306,8 @@ async function listDir(root, args, config) {
       if (entries.length >= maxEntries) break;
     }
   }
-  return { entries, truncated: pending.length > 0 || entries.length >= maxEntries };
+  if (scannedEntries >= MAX_TOOL_LIST_SCANNED_ENTRIES && pending.length > 0) scanLimitReached = true;
+  return { entries, truncated: scanLimitReached || pending.length > 0 || entries.length >= maxEntries };
 }
 
 async function writeFile(root, args, config, context = {}) {
@@ -445,6 +456,9 @@ function toolOutputLimit(config) {
 }
 function toolFileLimit(config, configured) {
   return Math.min(isUnrestricted(config) ? MAX_TOOL_FILE_READ_BYTES : configured, MAX_TOOL_FILE_READ_BYTES);
+}
+function throwIfToolAborted(signal) {
+  if (signal?.aborted) throw signal.reason || Object.assign(new Error('Tool call cancelled'), { code: 'CANCELLED' });
 }
 
 async function atomicWrite(filePath, content, options) {
