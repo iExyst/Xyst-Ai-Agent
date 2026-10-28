@@ -67,6 +67,7 @@ test('MCP modern result metadata and schema URI fields validate against protocol
         websiteUrl: 'https://example.test/',
         icons: [{ src: 'data:image/png;base64,AAAA' }],
       },
+      'com.example/trace_id': 'trace-123',
     },
   };
   assert.equal(validateMcpResultType(result, options), result);
@@ -76,8 +77,10 @@ test('MCP modern result metadata and schema URI fields validate against protocol
     });
   }
   assert.throws(() => validateMcpResultType({ ...result, _meta: [] }, options), { code: 'MCP_INVALID_RESPONSE' });
+  for (const key of ['bad-/name', '123.example/name', 'com..example/name', 'prefix/name/extra', 'prefix/name-'])
+    assert.throws(() => validateMcpResultType({ ...result, _meta: { [key]: 'value' } }, options), { code: 'MCP_INVALID_RESPONSE' });
 
-  const legacy = { content: [], _meta: { 'io.modelcontextprotocol/serverInfo': 'legacy extension data' } };
+  const legacy = { content: [], _meta: { 'bad-/name': 'legacy extension data' } };
   assert.equal(validateMcpResultType(legacy, { ...options, protocolVersion: '2025-11-25' }), legacy);
 });
 

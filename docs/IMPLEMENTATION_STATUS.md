@@ -2,8 +2,8 @@
 
 ## MCP binary payload validation — 2026-10-28
 
-- MCP image/audio data and blob resource contents now enforce canonical base64 byte strings from the pinned `2026-07-28` schema. Malformed characters, padding, and pad bits are rejected before the result is passed to tool or resource handling.
-- The focused MCP protocol suite passes 8/8; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending. Broader MCP schema conformance remains open.
+- MCP image/audio data and blob resource contents enforce canonical base64 byte strings from the pinned `2026-07-28` schema. Malformed characters, padding, and pad bits are rejected before the result is passed to tool or resource handling. Exact-source run [40657161271](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40657161271) passed these protocol regressions on Windows and Ubuntu under Node 22/24.
+- Modern MCP metadata now validates the schema's prefix/name grammar at the result, tool, resource, prompt, and content levels. Legacy metadata remains compatible. The focused MCP protocol suite passes 8/8; changed-file Biome and whitespace checks pass. Exact-source hosted confirmation for this metadata change is pending; broader MCP schema conformance remains open.
 
 ## Cross-platform source archive line endings and browser theme smoke — 2026-10-28
 

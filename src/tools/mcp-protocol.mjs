@@ -20,10 +20,8 @@ const RESULT_TYPE_METHODS = new Set([
 
 /** Reject modern MCP control-flow results that Xyst does not yet implement. */
 export function validateMcpResultType(result, { protocolVersion, serverName, method }) {
-  if (
-    isRecord(result) &&
-    !(protocolVersion === MODERN_PROTOCOL_VERSION ? isOptionalResultMeta(result._meta) : isOptionalMeta(result._meta))
-  )
+  const modern = protocolVersion === MODERN_PROTOCOL_VERSION;
+  if (isRecord(result) && !(modern ? isOptionalResultMeta(result._meta) : isOptionalMeta(result._meta)))
     throw mcpError(`MCP server '${serverName}' returned invalid result metadata during ${method}`, 'MCP_INVALID_RESPONSE');
   if (
     protocolVersion === MODERN_PROTOCOL_VERSION &&
@@ -54,12 +52,12 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
   )
     throw mcpError(`MCP server '${serverName}' returned invalid discovery metadata`, 'MCP_INVALID_RESPONSE');
   if (method === 'tools/call') validateToolCallResult(result, { protocolVersion, serverName });
-  if (method === 'tools/list') validateToolsListResult(result, serverName);
-  if (method === 'resources/list') validateResourcesListResult(result, serverName);
-  if (method === 'resources/templates/list') validateResourceTemplatesListResult(result, serverName);
-  if (method === 'resources/read') validateResourceReadResult(result, serverName);
-  if (method === 'prompts/list') validatePromptsListResult(result, serverName);
-  if (method === 'prompts/get') validatePromptResult(result, serverName);
+  if (method === 'tools/list') validateToolsListResult(result, serverName, modern);
+  if (method === 'resources/list') validateResourcesListResult(result, serverName, modern);
+  if (method === 'resources/templates/list') validateResourceTemplatesListResult(result, serverName, modern);
+  if (method === 'resources/read') validateResourceReadResult(result, serverName, modern);
+  if (method === 'prompts/list') validatePromptsListResult(result, serverName, modern);
+  if (method === 'prompts/get') validatePromptResult(result, serverName, modern);
   if (protocolVersion !== MODERN_PROTOCOL_VERSION || !result || typeof result !== 'object' || Array.isArray(result)) return result;
   if (!Object.hasOwn(result, 'resultType') || result.resultType === 'complete') return result;
   rejectUnsupportedResultType(result.resultType, { serverName, method });
@@ -87,76 +85,81 @@ function validateToolCallResult(result, { protocolVersion, serverName }) {
     throw mcpError(`MCP server '${serverName}' omitted the required tool result type`, 'MCP_INVALID_RESPONSE');
   if (result.isError !== undefined && typeof result.isError !== 'boolean')
     throw mcpError(`MCP server '${serverName}' returned an invalid tool error flag`, 'MCP_INVALID_RESPONSE');
-  if (!result.content.every(isContentBlock))
+  if (!result.content.every((content) => isContentBlock(content, protocolVersion === MODERN_PROTOCOL_VERSION)))
     throw mcpError(`MCP server '${serverName}' returned an invalid content block`, 'MCP_INVALID_RESPONSE');
 }
 
-function validateToolsListResult(result, serverName) {
-  if (!isRecord(result) || !isOptionalString(result.nextCursor) || !Array.isArray(result.tools) || !result.tools.every(isToolDefinition))
+function validateToolsListResult(result, serverName, modern) {
+  if (
+    !isRecord(result) ||
+    !isOptionalString(result.nextCursor) ||
+    !Array.isArray(result.tools) ||
+    !result.tools.every((tool) => isToolDefinition(tool, modern))
+  )
     throw mcpError(`MCP server '${serverName}' returned invalid tool definitions`, 'MCP_INVALID_RESPONSE');
 }
 
-function validateResourcesListResult(result, serverName) {
+function validateResourcesListResult(result, serverName, modern) {
   if (
     !isRecord(result) ||
     !isOptionalString(result.nextCursor) ||
     !Array.isArray(result.resources) ||
-    !result.resources.every(isResourceDefinition)
+    !result.resources.every((resource) => isResourceDefinition(resource, modern))
   )
     throw mcpError(`MCP server '${serverName}' returned invalid resource definitions`, 'MCP_INVALID_RESPONSE');
 }
 
-function validateResourceTemplatesListResult(result, serverName) {
+function validateResourceTemplatesListResult(result, serverName, modern) {
   if (
     !isRecord(result) ||
     !isOptionalString(result.nextCursor) ||
     !Array.isArray(result.resourceTemplates) ||
-    !result.resourceTemplates.every(isResourceTemplate)
+    !result.resourceTemplates.every((template) => isResourceTemplate(template, modern))
   )
     throw mcpError(`MCP server '${serverName}' returned invalid resource templates`, 'MCP_INVALID_RESPONSE');
 }
 
-function validatePromptsListResult(result, serverName) {
+function validatePromptsListResult(result, serverName, modern) {
   if (
     !isRecord(result) ||
     !isOptionalString(result.nextCursor) ||
     !Array.isArray(result.prompts) ||
-    !result.prompts.every(isPromptDefinition)
+    !result.prompts.every((prompt) => isPromptDefinition(prompt, modern))
   )
     throw mcpError(`MCP server '${serverName}' returned invalid prompt definitions`, 'MCP_INVALID_RESPONSE');
 }
 
-function validateResourceReadResult(result, serverName) {
-  if (!isRecord(result) || !Array.isArray(result.contents) || !result.contents.every(isResourceContents))
+function validateResourceReadResult(result, serverName, modern) {
+  if (!isRecord(result) || !Array.isArray(result.contents) || !result.contents.every((content) => isResourceContents(content, modern)))
     throw mcpError(`MCP server '${serverName}' returned invalid resource contents`, 'MCP_INVALID_RESPONSE');
 }
 
-function validatePromptResult(result, serverName) {
+function validatePromptResult(result, serverName, modern) {
   if (
     !isRecord(result) ||
     !isOptionalString(result.description) ||
     !Array.isArray(result.messages) ||
     !result.messages.every(
-      (message) => isRecord(message) && ['user', 'assistant'].includes(message.role) && isContentBlock(message.content),
+      (message) => isRecord(message) && ['user', 'assistant'].includes(message.role) && isContentBlock(message.content, modern),
     )
   )
     throw mcpError(`MCP server '${serverName}' returned invalid prompt messages`, 'MCP_INVALID_RESPONSE');
 }
 
-function isContentBlock(value) {
-  if (!isRecord(value) || !isOptionalMeta(value._meta)) return false;
+function isContentBlock(value, modern) {
+  if (!isRecord(value) || !isOptionalMeta(value._meta, modern)) return false;
   if (value.type === 'text') return typeof value.text === 'string' && isOptionalAnnotations(value.annotations);
   if (value.type === 'image' || value.type === 'audio')
     return isBase64String(value.data) && typeof value.mimeType === 'string' && isOptionalAnnotations(value.annotations);
-  if (value.type === 'resource_link') return isResourceLink(value);
-  if (value.type === 'resource') return isResourceContents(value.resource) && isOptionalAnnotations(value.annotations);
+  if (value.type === 'resource_link') return isResourceLink(value, modern);
+  if (value.type === 'resource') return isResourceContents(value.resource, modern) && isOptionalAnnotations(value.annotations);
   return false;
 }
 
-function isResourceContents(value) {
+function isResourceContents(value, modern) {
   if (
     !isRecord(value) ||
-    !isOptionalMeta(value._meta) ||
+    !isOptionalMeta(value._meta, modern) ||
     !isUri(value.uri) ||
     (value.mimeType !== undefined && typeof value.mimeType !== 'string')
   )
@@ -178,10 +181,10 @@ function isBase64String(value) {
   return Buffer.from(value, 'base64').toString('base64') === value;
 }
 
-function isToolDefinition(value) {
+function isToolDefinition(value, modern) {
   return (
     isRecord(value) &&
-    isOptionalMeta(value._meta) &&
+    isOptionalMeta(value._meta, modern) &&
     typeof value.name === 'string' &&
     isInputSchema(value.inputSchema) &&
     (value.outputSchema === undefined || isOutputSchema(value.outputSchema)) &&
@@ -217,10 +220,10 @@ function isServerCapabilities(value) {
   return true;
 }
 
-function isResourceDefinition(value) {
+function isResourceDefinition(value, modern) {
   return (
     isRecord(value) &&
-    isOptionalMeta(value._meta) &&
+    isOptionalMeta(value._meta, modern) &&
     typeof value.name === 'string' &&
     isUri(value.uri) &&
     isOptionalString(value.title) &&
@@ -232,10 +235,10 @@ function isResourceDefinition(value) {
   );
 }
 
-function isResourceTemplate(value) {
+function isResourceTemplate(value, modern) {
   return (
     isRecord(value) &&
-    isOptionalMeta(value._meta) &&
+    isOptionalMeta(value._meta, modern) &&
     typeof value.name === 'string' &&
     typeof value.uriTemplate === 'string' &&
     isOptionalString(value.title) &&
@@ -246,10 +249,10 @@ function isResourceTemplate(value) {
   );
 }
 
-function isPromptDefinition(value) {
+function isPromptDefinition(value, modern) {
   return (
     isRecord(value) &&
-    isOptionalMeta(value._meta) &&
+    isOptionalMeta(value._meta, modern) &&
     typeof value.name === 'string' &&
     isOptionalString(value.title) &&
     isOptionalString(value.description) &&
@@ -267,9 +270,9 @@ function isPromptDefinition(value) {
   );
 }
 
-function isResourceLink(value) {
+function isResourceLink(value, modern) {
   return (
-    isOptionalMeta(value._meta) &&
+    isOptionalMeta(value._meta, modern) &&
     isUri(value.uri) &&
     typeof value.name === 'string' &&
     isOptionalString(value.title) &&
@@ -285,14 +288,27 @@ function isOptionalString(value) {
   return value === undefined || typeof value === 'string';
 }
 
-function isOptionalMeta(value) {
-  return value === undefined || isRecord(value);
+function isOptionalMeta(value, modern = false) {
+  return value === undefined || (isRecord(value) && (!modern || Object.keys(value).every(isValidMetaKey)));
+}
+
+function isValidMetaKey(key) {
+  const slash = key.indexOf('/');
+  if (slash === -1) return isValidMetaName(key);
+  if (slash !== key.lastIndexOf('/')) return false;
+  const prefix = key.slice(0, slash);
+  const name = key.slice(slash + 1);
+  return prefix.split('.').every((label) => /^[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)) && isValidMetaName(name);
+}
+
+function isValidMetaName(name) {
+  return name === '' || /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(name);
 }
 
 function isOptionalResultMeta(value) {
   return (
     value === undefined ||
-    (isRecord(value) &&
+    (isOptionalMeta(value, true) &&
       (value['io.modelcontextprotocol/serverInfo'] === undefined || isImplementation(value['io.modelcontextprotocol/serverInfo'])))
   );
 }
