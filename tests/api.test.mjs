@@ -2407,7 +2407,7 @@ test('local API stays available and reports an MCP startup failure in the catalo
       transport: 'stdio',
       package_id: null,
       connection_state: 'error',
-      error_code: 'MCP_SERVER_UNAVAILABLE',
+      error_code: 'MCP_SPAWN_FAILED',
       protocol_version: null,
       server_info: null,
       capabilities: [],
@@ -2436,7 +2436,7 @@ test('MCP server enable, disable, and removal persist for future runs without ac
   let servers = await fetch(`${url}/v1/mcp/servers`, { headers }).then((response) => response.json());
   assert.equal(servers.servers[0].enabled, true);
   assert.equal(servers.servers[0].connection_state, 'error');
-  assert.equal(servers.servers[0].error_code, 'MCP_SERVER_UNAVAILABLE');
+  assert.equal(servers.servers[0].error_code, 'MCP_SPAWN_FAILED');
 
   assert.equal(
     (await fetch(`${url}/v1/mcp/servers/docs`, { method: 'PUT', headers, body: JSON.stringify({ enabled: false }) })).status,

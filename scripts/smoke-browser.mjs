@@ -902,7 +902,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       protocol,
       `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Enable')).click()`,
     );
-    const enabledMcp = await waitForMcpState(protocol, 'Error · MCP_SERVER_UNAVAILABLE');
+    const enabledMcp = await waitForMcpState(protocol, 'Error · MCP_SPAWN_FAILED');
     assert.match(enabledMcp.text, /Disable/);
     await evaluate(
       protocol,
@@ -914,7 +914,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       protocol,
       `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Test connection')).click()`,
     );
-    const testedMcp = await waitForMcpState(protocol, 'Connection failed · MCP_SERVER_UNAVAILABLE');
+    const testedMcp = await waitForMcpState(protocol, 'Connection failed · MCP_SPAWN_FAILED');
     assert.match(testedMcp.text, /Edit settings/);
     await evaluate(
       protocol,
@@ -949,7 +949,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       })()`,
     );
     const addedMcp = await waitForMcpState(protocol, 'smoke-added');
-    assert.match(addedMcp.text, /Error · MCP_SERVER_UNAVAILABLE/);
+    assert.match(addedMcp.text, /Error · MCP_SPAWN_FAILED/);
     await evaluate(
       protocol,
       `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Audit history')).click()`,
@@ -2589,13 +2589,13 @@ async function waitForAppReady(protocol, pageErrors, failedResponses) {
         unavailable: document.querySelector('#connection-indicator')?.getAttribute('aria-label') === 'Runtime unavailable',
       })`,
     );
-    if (state.ready === 'complete' && state.welcome && state.controls && state.connected) return;
+    if (state.ready === 'complete' && state.controls && state.connected) return;
     if (state.unavailable) break;
     await delay(100);
   }
   const state = await evaluate(
     protocol,
-    `({ url: location.href, ready: document.readyState, connection: document.querySelector('#connection-indicator')?.getAttribute('aria-label') || '', status: document.querySelector('#workspace-status')?.textContent || '', banner: document.querySelector('#status-banner')?.textContent || '', tokenLength: document.querySelector('meta[name="xyst-token"]')?.content?.length || 0, tokenShapeValid: /^[A-Za-z0-9_-]{32,}$/.test(document.querySelector('meta[name="xyst-token"]')?.content || '') })`,
+    `({ url: location.href, ready: document.readyState, title: document.title, welcome: !!document.querySelector('#welcome h1'), controls: !!document.querySelector('#prompt-input'), connection: document.querySelector('#connection-indicator')?.getAttribute('aria-label') || '', status: document.querySelector('#workspace-status')?.textContent || '', banner: document.querySelector('#status-banner')?.textContent || '', tokenLength: document.querySelector('meta[name="xyst-token"]')?.content?.length || 0, tokenShapeValid: /^[A-Za-z0-9_-]{32,}$/.test(document.querySelector('meta[name="xyst-token"]')?.content || '') })`,
   );
   const resources = await evaluate(
     protocol,

@@ -43,8 +43,8 @@ test('tool schemas reject unknown fields and malformed values', () => {
   assert.throws(() => resolveToolTimeoutMs(TOOL_DEFINITIONS.web_search, { web_search: { timeout_ms: 100_000 } }), /between 1000 and 60000/);
   assert.equal(resolveToolTimeoutMs(TOOL_DEFINITIONS.semantic_search, { retrieval: { semantic: { timeout_ms: 45_000 } } }), 45_000);
   assert.deepEqual(validateArguments(TOOL_DEFINITIONS.read_file.parameters, '{"path":"a.txt"}'), { path: 'a.txt' });
-  assert.equal(validateArguments({ type: 'string', maxLength: 1 }, '😀'), '😀');
-  assert.throws(() => validateArguments({ type: 'string', maxLength: 1 }, 'ab'), /between 0 and 1 characters/);
+  assert.equal(validateArguments({ type: 'string', maxLength: 1 }, JSON.stringify('😀')), '😀');
+  assert.throws(() => validateArguments({ type: 'string', maxLength: 1 }, JSON.stringify('ab')), /between 0 and 1 characters/);
   assert.deepEqual(
     validateArguments(TOOL_DEFINITIONS.retry_subagent_task.parameters, { task_id: '00000000-0000-4000-8000-000000000001' }),
     {

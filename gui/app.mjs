@@ -4782,7 +4782,7 @@ function renderMcpServerEditor({ name, config }) {
   };
   const named = field('Server name', name, { className: 'mcp-name-field' });
   named.control.required = true;
-  named.control.pattern = '[a-z][a-z0-9_-]{0,31}';
+  named.control.pattern = '[a-z][a-z0-9_\\-]{0,31}';
   named.control.maxLength = 32;
   named.control.disabled = Boolean(name);
   const enabled = field('Enabled', '', { type: 'checkbox' });
