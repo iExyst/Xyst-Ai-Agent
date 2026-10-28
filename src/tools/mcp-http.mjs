@@ -1247,6 +1247,9 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
     'title',
     'description',
     'format',
+    'contentEncoding',
+    'contentMediaType',
+    'contentSchema',
     'default',
     'examples',
     'deprecated',
@@ -1319,11 +1322,13 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }, rootSch
   )
     throw mcpError('MCP schema uses unsupported type', 'MCP_INVALID_SCHEMA');
   const out = hasType ? { type } : {};
-  for (const k of ['$schema', '$comment', 'format'])
+  for (const k of ['$schema', '$comment', 'format', 'contentEncoding', 'contentMediaType'])
     if (schema[k] !== undefined) {
       if (typeof schema[k] !== 'string') throw mcpError(`MCP schema ${k} invalid`, 'MCP_INVALID_SCHEMA');
       out[k] = schema[k];
     }
+  if (schema.contentSchema !== undefined)
+    out.contentSchema = normalizeSchema(schema.contentSchema, depth + 1, budget, rootSchema, refStack);
   if (schema.examples !== undefined && !Array.isArray(schema.examples)) throw mcpError('MCP examples invalid', 'MCP_INVALID_SCHEMA');
   for (const k of ['deprecated', 'readOnly', 'writeOnly'])
     if (schema[k] !== undefined) {

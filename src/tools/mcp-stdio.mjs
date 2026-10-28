@@ -1005,6 +1005,9 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     'title',
     'description',
     'format',
+    'contentEncoding',
+    'contentMediaType',
+    'contentSchema',
     'default',
     'examples',
     'deprecated',
@@ -1076,11 +1079,13 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   )
     throw mcpError('MCP tool input schema uses an unsupported type', 'MCP_INVALID_SCHEMA');
   const result = hasType ? { type } : {};
-  for (const key of ['$schema', '$comment', 'format'])
+  for (const key of ['$schema', '$comment', 'format', 'contentEncoding', 'contentMediaType'])
     if (schema[key] !== undefined) {
       if (typeof schema[key] !== 'string') throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
+  if (schema.contentSchema !== undefined)
+    result.contentSchema = normalizeSchema(schema.contentSchema, depth + 1, budget, rootSchema, refStack);
   if (schema.examples !== undefined && !Array.isArray(schema.examples))
     throw mcpError('MCP tool input schema has invalid examples', 'MCP_INVALID_SCHEMA');
   for (const key of ['deprecated', 'readOnly', 'writeOnly'])
