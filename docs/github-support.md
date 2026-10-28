@@ -2,6 +2,8 @@
 
 Xyst uses GitHub's REST API with version header `2026-03-10`. The provider reads the fine-grained token's actual permissions from the API behavior and includes `X-Accepted-GitHub-Permissions` details when GitHub rejects an operation. It does not claim scopes that the token does not have.
 
+Cancelled API requests preserve the original abort error across single requests, pagination, App authentication, workflow-log reads, and downloads. Xyst does not retry a cancelled operation or reclassify it as a network outage; the shared agent loop can therefore persist the run as cancelled. Other connection failures are wrapped with GitHub-specific context. GitHub's primary rate-limit response is identified in the error message; Xyst does not sleep through rate limits or automatically replay writes.
+
 GitHub Enterprise Server is supported by setting `integrations.github.apiBaseUrl` to its HTTPS REST API base (commonly `https://HOST/api/v3`). Set it with `xyst config set integrations.github.apiBaseUrl '"https://github.example.com/api/v3"' global`, or use Settings → GitHub Server in the desktop. Xyst sends GitHub credentials only to the selected API host; HTTPS Git clone/fetch/push credentials are scoped to that same host. Leave the setting unset to use GitHub.com. Enterprise instances should be checked against their own GitHub API version and permissions policy before production use.
 
 ## Authentication
