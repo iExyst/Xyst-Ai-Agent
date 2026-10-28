@@ -395,6 +395,26 @@ export class AgentRunner {
         const capabilityFailures: string[] = [];
         for (const candidateRecommendation of allowedRecommendations.slice(0, 3)) {
           try {
+            if (externalApprovalRequired) {
+              if (!options.approveExternalAction) {
+                throw new ExternalActionApprovalError("EXTERNAL_ACTION_APPROVAL_REQUIRED", "Approval is required before model_acquire, but this run has no interactive approval channel");
+              }
+              const argumentsJson = this.deps.provider.redact(JSON.stringify({
+                repository: candidateRecommendation.repository,
+                artifact: candidateRecommendation.artifact,
+                quantization: candidateRecommendation.quantization,
+                sizeBytes: candidateRecommendation.sizeBytes,
+                sha256: candidateRecommendation.sha256,
+                license: candidateRecommendation.license
+              })).slice(0, 3000);
+              let approved = false;
+              try {
+                approved = await options.approveExternalAction({ sessionId, toolName: "model_acquire", argumentsJson, ...(options.missionId ? { missionId: options.missionId } : {}) });
+              } catch (error) {
+                throw new ExternalActionApprovalError("EXTERNAL_ACTION_APPROVAL_REQUIRED", error instanceof Error ? error.message : "The approval prompt failed");
+              }
+              if (!approved) throw new ExternalActionApprovalError("EXTERNAL_ACTION_DENIED", "The user denied model_acquire");
+            }
             const acquired = await acquisition.acquireRecommended(candidateRecommendation, options.signal, scopes);
             const verified = await acquisition.verify(acquired.id, options.signal, { visionRequired, toolCallingRequired: true }) as { capabilityCheck?: { status?: string; toolCalling?: { status?: string } } };
             if (verified.capabilityCheck?.status !== "passed") throw new Error(`Downloaded model ${acquired.modelKey} did not pass the LM Studio load and inference check`);
@@ -407,6 +427,7 @@ export class AgentRunner {
             break;
           } catch (error) {
             if (options.signal?.aborted) throw error;
+            if (error instanceof ExternalActionApprovalError) throw error;
             const message = error instanceof Error ? error.message : String(error);
             if (!/did not pass the LM Studio (?:load and inference|tool-calling) check|Model was discovered, but its capability check failed/i.test(message)) throw error;
             capabilityFailures.push(`${String(candidateRecommendation.repository)}: ${message}`);

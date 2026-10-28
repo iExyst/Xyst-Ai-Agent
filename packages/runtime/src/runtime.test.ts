@@ -4381,8 +4381,22 @@ test("agent model acquisition follows discovery and download controls without se
     await assert.rejects(() => agent.run("PRIVATE objective: use local repository details"), /none matches the saved license preference/);
     assert.equal(acquired, 0);
     config.set("global", "models.allowedLicenses", ["mit"]);
-    const result = await agent.run("PRIVATE objective: use local repository details");
+    config.set("global", "autonomy.externalActionApproval", true);
+    await assert.rejects(() => agent.run("PRIVATE objective: use local repository details"), /EXTERNAL_ACTION_APPROVAL_REQUIRED/);
+    assert.equal(acquired, 0, "automatic acquisition must not start without an interactive approval channel");
+    let approvalPrompts = 0;
+    await assert.rejects(() => agent.run("PRIVATE objective: use local repository details", { missionId: "download-approval-mission", approveExternalAction: async (request) => {
+      approvalPrompts++;
+      assert.equal(request.toolName, "model_acquire"); assert.equal(request.missionId, "download-approval-mission");
+      const args = JSON.parse(request.argumentsJson) as Record<string, unknown>;
+      assert.equal(args.repository, "owner/model"); assert.equal(args.artifact, "model-Q4_K_M.gguf"); assert.equal(args.license, "mit"); assert.equal(args.sizeBytes, 1024);
+      assert.equal(acquired, 0, "approval is requested before the acquisition provider is reached");
+      return false;
+    } }), /EXTERNAL_ACTION_DENIED/);
+    assert.equal(approvalPrompts, 1); assert.equal(acquired, 0);
+    const result = await agent.run("PRIVATE objective: use local repository details", { approveExternalAction: async (request) => { assert.equal(request.toolName, "model_acquire"); return true; } });
     assert.equal(result.model, "owner/model"); assert.equal(generatedModel, "owner/model"); assert.match(result.selectionReason, /integrity checked, and capability verified/); assert.equal(acquired, 1);
+    config.set("global", "autonomy.externalActionApproval", false);
     assert.equal(JSON.stringify(discoveryQueries).includes("PRIVATE objective"), false);
     models.length = 0;
     const visionResult = await agent.run("PRIVATE image objective", { initialMessage: { role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,cGl4ZWw=" } }] } });
