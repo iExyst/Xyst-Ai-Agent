@@ -37,6 +37,7 @@ const asArray = (value: unknown): any[] => Array.isArray(value) ? value : [];
 const externalToolNames = new Set(["file_create", "file_patch", "file_delete", "file_move", "office_create", "office_edit", "office_preview", "run_process", "git_clone", "git_create_branch", "git_stage", "git_commit", "git_fetch", "git_push", "github_issue_comment", "github_create_pull_request", "github_create_review_comment", "github_workflow_dispatch", "github_merge_pull_request", "browser_click", "browser_fill", "browser_select", "browser_press", "browser_download", "browser_upload", "desktop_action"]);
 const isExternalAction = (name: string) => externalToolNames.has(name) || (name.startsWith("mcp_") && !/_((resources)|(read_resource)|(prompts)|(get_prompt))$/.test(name));
 const parallelReadToolNames = new Set(["file_read", "file_list", "file_search", "git_status", "git_diff", "git_log", "git_branches"]);
+const workspaceMutationNames = new Set(["file_create", "file_patch", "file_delete", "file_move", "office_create", "office_edit", "office_preview", "browser_download", "git_clone", "git_create_branch", "git_fetch", "git_stage", "git_commit"]);
 export interface ExternalActionApprovalRequest { sessionId: string; toolName: string; argumentsJson: string; missionId?: string }
 export interface RemoteFallbackApprovalRequest { sessionId: string; model: string; endpoint: string; reason: string }
 export class ExternalActionApprovalError extends Error {
@@ -977,14 +978,15 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
             if (repeats >= 4) throw new Error("Repeated tool-call loop detected; revise the approach instead of repeating the same action");
             const effect = isExternalAction(name) ? "external" : "read";
             const requestHash = effect === "external" ? createHash("sha256").update(`${name}:${stableJson(args)}`).digest("hex") : undefined;
-            const workspaceRevision = name === "run_process"
-              ? (this.deps.store.db.prepare("SELECT COALESCE(MAX(rowid),0) AS revision FROM tool_calls WHERE execution_scope=? AND status IN ('completed','reconciled') AND name IN ('file_create','file_patch','file_delete','file_move','office_create','office_edit')").get(executionScope) as { revision: number }).revision
+            const tracksWorkspaceRevision = name === "run_process" || workspaceMutationNames.has(name);
+            const workspaceRevision = tracksWorkspaceRevision
+              ? (this.deps.store.db.prepare("SELECT COALESCE(MAX(rowid),0) AS revision FROM tool_calls WHERE execution_scope=? AND status IN ('completed','reconciled') AND name IN ('file_create','file_patch','file_delete','file_move','office_create','office_edit','office_preview','browser_download','git_clone','git_create_branch','git_fetch','git_stage','git_commit') AND name<>?").get(executionScope, name) as { revision: number }).revision
               : undefined;
             const idempotencyHash = requestHash && workspaceRevision !== undefined
               ? createHash("sha256").update(requestHash + ":workspace-revision:" + workspaceRevision).digest("hex")
               : requestHash;
             let existing = effect === "external" ? this.deps.store.db.prepare("SELECT id,status,output_json FROM tool_calls WHERE execution_scope=? AND request_hash=? AND effect='external'").get(executionScope, idempotencyHash) as { id: string; status: string; output_json: string | null } | undefined : undefined;
-            if (!existing && name === "run_process" && requestHash && workspaceRevision !== undefined) {
+            if (!existing && tracksWorkspaceRevision && requestHash && workspaceRevision !== undefined) {
               const legacy = this.deps.store.db.prepare("SELECT id,status,output_json,rowid FROM tool_calls WHERE execution_scope=? AND request_hash=? AND effect='external'").get(executionScope, requestHash) as { id: string; status: string; output_json: string | null; rowid: number } | undefined;
               if (legacy && workspaceRevision <= legacy.rowid) existing = legacy;
             }

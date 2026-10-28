@@ -2640,6 +2640,37 @@ test("run_process reruns after Xyst workspace edits and replays the unchanged re
   } finally { store.close(); }
 }));
 
+test("a workspace mutation retry runs after a different mutation and then replays unchanged", async () => withTemp(async (root) => {
+  const workspace = join(root, "workspace"); await mkdir(workspace);
+  const target = join(workspace, "recreate.txt"); await writeFile(target, "old contents");
+  const store = new XystStore(join(root, "workspace-mutation-retry.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  config.set("global", "model.default", "workspace-mutation-retry-model");
+  let turn = 0;
+  const provider = {
+    redact: (value: string) => value,
+    models: async () => [{ type: "llm", key: "workspace-mutation-retry-model", max_context_length: 8192, loaded_instances: [{ id: "loaded", config: { context_length: 8192 } }] }],
+    isLocalServer: () => true,
+    supportsLocalCliModelLifecycle: () => false,
+    streamChatWithTools: async () => {
+      turn++;
+      const call = (id: string, name: string, args: unknown) => ({ choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }] });
+      const createArgs = { path: "recreate.txt", content: "new contents" };
+      if (turn === 1 || turn === 3 || turn === 4) return call(`create-${turn}`, "file_create", createArgs);
+      if (turn === 2) return call("delete-blocker", "file_delete", { path: "recreate.txt" });
+      return { choices: [{ message: { role: "assistant", content: "The file was recreated." } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  try {
+    await agent.run("Replace the existing file, then repeat the create to confirm replay.", { workspace, executionScope: "workspace-mutation-retry" });
+    assert.equal(await readFileAsync(target, "utf8"), "new contents");
+    const calls = store.db.prepare("SELECT status,request_hash FROM tool_calls WHERE name='file_create' AND execution_scope=? ORDER BY rowid").all("workspace-mutation-retry") as Array<{ status: string; request_hash: string }>;
+    assert.deepEqual(calls.map(({ status }) => status), ["failed", "completed"]);
+    assert.notEqual(calls[0]!.request_hash, calls[1]!.request_hash, "a later workspace mutation should permit a fresh create attempt");
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM tool_calls WHERE name='file_delete' AND execution_scope=? AND status='completed'").get("workspace-mutation-retry") as { count: number }).count, 1);
+  } finally { store.close(); }
+}));
+
 test("a restarted mission resumes after a completed GitHub action without posting it twice", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-resume-action.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model"); config.set("global", "integrations.github.enabled", true); config.set("global", "integrations.github.writeEnabled", true);
