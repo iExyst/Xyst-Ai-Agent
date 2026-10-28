@@ -40,3 +40,7 @@ This audit maps the detailed Xyst specification (456 lines; SHA-256 `F5A6E185B2E
 ## Completion decision
 
 The full two-brief objective is **not complete**. Partial and open areas above are not waived by passing CI or package workflows. Completion still requires stronger model-backed coding reliability plus the stated platform, integration, accessibility, release and sustained-operation gates, or exact documentation of any genuinely external blocker after all independent work is finished.
+
+### C4 mission input payloads
+
+Mission definitions now accept a bounded JSON `inputs` object. Deterministic coverage verifies size rejection, persistence/export, and delivery to task prompts with an explicit untrusted-data boundary. The inputs feature is local and does not replace attached-file support or broader mission acceptance.

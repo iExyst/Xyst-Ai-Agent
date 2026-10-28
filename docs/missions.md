@@ -7,6 +7,7 @@ Missions are persisted in the runtime SQLite database and can be run from the CL
   "id": "weekly-check",
   "name": "Weekly repository check",
   "objective": "Review this repository for actionable maintenance work.",
+  "inputs": { "ticket": { "number": 17, "title": "Fix the parser" } },
   "workspace": "C:/work/project",
   "maxRetries": 1,
   "maxConcurrency": 2,
@@ -25,6 +26,8 @@ Missions are persisted in the runtime SQLite database and can be run from the CL
 ```
 
 Create and inspect missions with `mission create <file>`, `mission list`, and `mission show <id>`. Use `mission plan <objective> [--name NAME] [--workspace PATH] [--model KEY] [--max-concurrency 1-8]` to ask the configured local LM Studio model for a bounded task graph. Planning checks installed model choices, task dependencies, cycles, and an approximate memory-based concurrency limit. It prints a draft and does not save or run it; review or edit the JSON, then pass it to `mission create`. The desktop mission editor has the same draft planning action. Use `mission run <id>` for a manual run. `mission daemon` maintains schedules and processes queued GitHub webhooks. `mission pause`, `cancel`, `resume`, and `archive` update durable mission state. SIGINT or SIGTERM stops new scheduling and drains active mission work and queued webhook processing before the daemon exits. The installed systemd unit allows the drain to finish without a fixed stop timeout. Task Scheduler may terminate the process when a task is explicitly stopped or the user session ends, so durable runner recovery remains the fallback for interrupted work.
+
+The optional mission-level `inputs` field accepts a JSON object with at most 100 keys and 30,000 UTF-8 bytes total. The runner persists it with the mission definition, includes it in every task assignment, and retains it through export and fork. Inputs are passed to the agent as untrusted data; embedded instructions do not change the mission objective or access policy. Do not put credentials or secrets in mission inputs.
 
 Cron schedules use the supplied, validated IANA timezone. For a nonexistent spring-forward wall time, Croner fires at the equivalent time after the clock jump (02:30 becomes 03:30 local that date); a repeated fall-back wall time runs once, at its first occurrence. On scheduler startup, `missedRun: "skip"` emits a missed event for the last persisted due time; `"run_once"` attempts one catch-up run for that time, even if several intervals elapsed. A firing that overlaps an active mission is rejected by its durable runner lease and reported as a schedule failure; it is not queued for later execution. These rules prevent duplicate concurrent runs and bound catch-up work.
 
