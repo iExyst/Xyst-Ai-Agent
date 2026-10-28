@@ -1,0 +1,56 @@
+{
+  "verifiedAtUtc": "2026-10-28T02:14:29Z",
+  "followUpObservedAtUtc": "2026-10-28T02:16:04Z",
+  "baseCommit": "5b905edff6c762173fc04a4ffd391e5c7ade3fb7",
+  "verification": "independent separate-process Streamable HTTP MCP sampling round trips through Xyst and LM Studio",
+  "serverTransport": "Streamable HTTP",
+  "serverHost": "127.0.0.1",
+  "modelWasLoadedBeforeAndAfter": true,
+  "modelLoadOrUnloadPerformed": false,
+  "externalNetworkUsed": false,
+  "models": [
+    {
+      "model": "qwen/qwen3.5-9b",
+      "contextLength": 16384,
+      "samplingToolsCapabilityAdvertised": true,
+      "serverToolName": "wiki.lookup",
+      "serverToolInput": { "query": "React migration key" },
+      "serverExecutedTool": true,
+      "serverToolResult": "Migration key: XYST-RIVER-27",
+      "modelFinalAnswer": "Migration key: XYST-RIVER-27"
+    },
+    {
+      "model": "qwen/qwen3-vl-4b",
+      "contextLength": 16384,
+      "samplingToolsCapabilityAdvertised": true,
+      "serverToolName": "wiki.lookup",
+      "serverToolInput": { "query": "React migration key" },
+      "serverExecutedTool": true,
+      "serverToolResult": "Migration key: XYST-RIVER-27",
+      "modelFinalAnswer": "The React migration key is: XYST-RIVER-27."
+    }
+  ],
+  "postCheckInventory": ["qwen/qwen3-vl-4b", "qwen/qwen3.5-9b"],
+  "followUpAttempts": [
+    {
+      "model": "qwen/qwen3.5-9b",
+      "outcome": "failed",
+      "failure": "LM Studio did not return a tool call required by the MCP sampling request",
+      "serverToolExecuted": false,
+      "countedAsAcceptancePass": false
+    },
+    {
+      "model": "qwen/qwen3-vl-4b",
+      "outcome": "passed",
+      "serverToolName": "wiki.lookup",
+      "serverToolInput": { "query": "React migration key" },
+      "serverToolResult": "Migration key: XYST-RIVER-27",
+      "modelFinalAnswer": "The React migration key is: XYST-RIVER-27."
+    }
+  ],
+  "limitations": [
+    "The MCP server used a local loopback HTTP endpoint, not an externally hosted server.",
+    "The MCP lookup result was a deterministic server fixture, not a live external data lookup.",
+    "This bounded test does not establish hosted OAuth, SSE, broad model reliability, or multi-step task quality."
+  ]
+}
