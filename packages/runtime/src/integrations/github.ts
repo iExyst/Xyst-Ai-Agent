@@ -55,12 +55,25 @@ export class GitHubProvider {
     ]);
     if (!appId || !installationId || !privateKey) return undefined;
     if (this.appAccess && this.appAccess.expiresAt > Date.now() + 60_000) return this.appAccess.token;
-    const jwt = signAppJwt(appId, privateKey);
-    const response = await fetch(`${this.apiBase}/app/installations/${encodeURIComponent(installationId)}/access_tokens`, { method: "POST", headers: this.headers(jwt), body: "{}", ...(signal ? { signal } : {}) });
+    let jwt: string;
+    try { jwt = signAppJwt(appId, privateKey); }
+    catch { throw new GitHubError("GitHub App private key is invalid"); }
+    let response: Response;
+    try { response = await fetch(`${this.apiBase}/app/installations/${encodeURIComponent(installationId)}/access_tokens`, { method: "POST", headers: this.headers(jwt), body: "{}", ...(signal ? { signal } : {}) }); }
+    catch (error) { if (signal?.aborted) throw error; throw new GitHubError(`GitHub connection failed while requesting an App installation token: ${error instanceof Error ? error.message : String(error)}`); }
     if (!response.ok) throw await this.error(response);
-    const data = await response.json() as { token: string; expires_at: string };
-    this.appAccess = { token: data.token, expiresAt: Date.parse(data.expires_at) };
-    return data.token;
+    let data: unknown;
+    try { data = await response.json(); }
+    catch { throw new GitHubError("GitHub App installation-token response was invalid"); }
+    if (!data || typeof data !== "object") {
+      throw new GitHubError("GitHub App installation-token response was invalid");
+    }
+    const token = (data as { token?: unknown }).token;
+    if (typeof token !== "string" || !token.trim()) throw new GitHubError("GitHub App installation-token response was invalid");
+    const expiresAt = Date.parse(String((data as { expires_at?: unknown }).expires_at ?? ""));
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new GitHubError("GitHub App installation-token response had an invalid expiry");
+    this.appAccess = { token, expiresAt };
+    return token;
   }
 
   private headers(token?: string): Headers {

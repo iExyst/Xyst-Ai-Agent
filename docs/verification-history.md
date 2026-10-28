@@ -1,5 +1,10 @@
 # Xyst verification history
 
+## GitHub App installation authentication hardening · 2026-10-28
+
+- Expanded the current-source acceptance test to cryptographically verify the RS256 JWT signature and claims, check installation-token exchange and authorization on a repository request, and confirm the in-memory token is reused while valid. Added rejection coverage for malformed token expiry and normalization of token-exchange network failures to `GitHubError`.
+- The two GitHub App focused tests passed; the full runtime suite passed 169 tests with 2 host-specific skips and no failures; runtime typecheck passed. This is deterministic fixture evidence only. No live GitHub App credentials are available, so a real installation remains unverified.
+
 ## Fresh Xyst live-data sources · 2026-10-27
 
 - The active Xyst full profile (`network.enabled=true`) used local LM Studio `qwen/qwen3.5-9b` to fetch the GitHub repository REST API: HTTP 200, untruncated, retrieved at `2026-10-27T19:46:43.140Z`; Xyst persisted `task_complete verified=true`. The tool journal reports `default_branch=main` and `pushed_at=2026-10-27T19:39:51Z`. Proof.

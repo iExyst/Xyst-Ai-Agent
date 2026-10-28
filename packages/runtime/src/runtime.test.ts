@@ -15,8 +15,8 @@ import { credentialStoreError, redactSecrets } from "./credentials.js";
 import { chooseAgentModel, chooseEmbeddingModel, estimateRequiredContextTokens, MODEL_CONTEXT_HEADROOM_TOKENS, modelLoadContextLength } from "./model-selection.js";
 import { readModelPerformance } from "./model-performance.js";
 import { classifyModelTaskObjective } from "./model-task-type.js";
-import { createHash, createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
-import { createGitHubWebhookHandler, GitHubProvider, recordWebhookDelivery, verifyGitHubWebhook } from "./integrations/github.js";
+import { createHash, createHmac, generateKeyPairSync, randomUUID, verify as verifySignature } from "node:crypto";
+import { createGitHubWebhookHandler, GitHubError, GitHubProvider, recordWebhookDelivery, verifyGitHubWebhook } from "./integrations/github.js";
 import { createGitHubTools } from "./tools/github.js";
 import { PersistentMissionRunner, MissionRepository } from "./orchestration/missions.js";
 import { MissionPlanner } from "./orchestration/planner.js";
@@ -2081,20 +2081,50 @@ test("GitHub webhook handler marks Xyst-authored events processed without re-enq
 }));
 
 test("GitHub App authentication resolves its webhook actor from the app slug", async () => {
-  const originalFetch = globalThis.fetch; const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const privateKey = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(); const requests: string[] = [];
+  const originalFetch = globalThis.fetch; const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const privateKey = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(); const requests: string[] = []; let installationTokenRequests = 0;
   const credentials = { get: async (service: string, key: string) => service === "github-app" ? ({ "app-id": "123", "installation-id": "456", "private-key": privateKey } as Record<string, string>)[key] : undefined };
   globalThis.fetch = async (input, init) => {
     const url = String(input); requests.push(url);
-    assert.match(new Headers(init?.headers).get("authorization") ?? "", /^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
-    if (url.endsWith("/app/installations/456/access_tokens")) return Response.json({ token: "installation-token", expires_at: new Date(Date.now() + 60 * 60_000).toISOString() });
+    const authorization = new Headers(init?.headers).get("authorization") ?? "";
+    if (url.endsWith("/app/installations/456/access_tokens")) {
+      installationTokenRequests++;
+      assert.match(authorization, /^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+      const jwt = authorization.slice("Bearer ".length); const [header, payload, signature] = jwt.split(".");
+      assert.deepEqual(JSON.parse(Buffer.from(header!, "base64url").toString("utf8")), { alg: "RS256", typ: "JWT" });
+      const claims = JSON.parse(Buffer.from(payload!, "base64url").toString("utf8")) as { iss: string; iat: number; exp: number };
+      assert.equal(claims.iss, "123"); assert.ok(claims.exp > claims.iat); assert.ok(claims.exp - claims.iat <= 10 * 60);
+      assert.equal(verifySignature("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.publicKey, Buffer.from(signature!, "base64url")), true);
+      return Response.json({ token: "installation-token", expires_at: new Date(Date.now() + 60 * 60_000).toISOString() });
+    }
     if (url.endsWith("/app")) return Response.json({ slug: "xyst-agent", html_url: "https://github.com/apps/xyst-agent" });
+    if (url.endsWith("/repos/owner/repo")) {
+      assert.equal(authorization, "Bearer installation-token");
+      return Response.json({ full_name: "owner/repo", html_url: "https://github.com/owner/repo", default_branch: "main", private: true, description: null });
+    }
     throw new Error(`Unexpected GitHub URL ${url}`);
   };
   try {
     const provider = new GitHubProvider(credentials as never, { apiBase: "https://api.github.test" });
     assert.deepEqual(await provider.authenticate(), { authenticated: true, login: "xyst-agent[bot]", url: "https://github.com/apps/xyst-agent", identityType: "App" });
     assert.deepEqual(await provider.authenticate(), { authenticated: true, login: "xyst-agent[bot]", url: "https://github.com/apps/xyst-agent", identityType: "App" });
-    assert.deepEqual(requests, ["https://api.github.test/app/installations/456/access_tokens", "https://api.github.test/app"]);
+    assert.equal((await provider.repository("owner", "repo")).full_name, "owner/repo");
+    assert.equal(await provider.gitToken(), "installation-token");
+    assert.equal(installationTokenRequests, 1, "valid installation token should be reused while it is fresh");
+    assert.deepEqual(requests, ["https://api.github.test/app/installations/456/access_tokens", "https://api.github.test/app", "https://api.github.test/repos/owner/repo"]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub App token exchange rejects malformed responses and wraps network errors", async () => {
+  const originalFetch = globalThis.fetch; const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const privateKey = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const credentials = { get: async (service: string, key: string) => service === "github-app" ? ({ "app-id": "123", "installation-id": "456", "private-key": privateKey } as Record<string, string>)[key] : undefined };
+  try {
+    globalThis.fetch = async () => Response.json({ token: "installation-token", expires_at: "not-a-date" });
+    await assert.rejects(new GitHubProvider(credentials as never, { apiBase: "https://api.github.test" }).gitToken(), (error: unknown) => error instanceof GitHubError && /invalid expiry/.test(error.message));
+    globalThis.fetch = async () => { throw new TypeError("socket unavailable"); };
+    await assert.rejects(new GitHubProvider(credentials as never, { apiBase: "https://api.github.test" }).gitToken(), (error: unknown) => error instanceof GitHubError && /GitHub connection failed while requesting an App installation token: socket unavailable/.test(error.message));
+    const controller = new AbortController(); controller.abort();
+    globalThis.fetch = async () => { throw new DOMException("The operation was aborted", "AbortError"); };
+    await assert.rejects(new GitHubProvider(credentials as never, { apiBase: "https://api.github.test" }).gitToken(controller.signal), (error: unknown) => error instanceof DOMException && error.name === "AbortError");
   } finally { globalThis.fetch = originalFetch; }
 });
 
