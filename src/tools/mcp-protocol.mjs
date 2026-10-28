@@ -20,7 +20,6 @@ const RESULT_TYPE_METHODS = new Set([
   'prompts/get',
 ]);
 const MAX_SUPPORTED_PROTOCOL_VERSIONS = 32;
-const PROTOCOL_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Reject modern MCP control-flow results that Xyst does not yet implement. */
 export function validateMcpResultType(result, { protocolVersion, serverName, method }) {
@@ -51,7 +50,7 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
     method === 'server/discover' &&
     (!Array.isArray(result.supportedVersions) ||
       result.supportedVersions.length > MAX_SUPPORTED_PROTOCOL_VERSIONS ||
-      !result.supportedVersions.every((version) => typeof version === 'string' && PROTOCOL_VERSION_PATTERN.test(version)) ||
+      !result.supportedVersions.every(isProtocolVersion) ||
       !isServerCapabilities(result.capabilities) ||
       !isOptionalString(result.instructions))
   )
@@ -210,6 +209,19 @@ function isBase64String(value) {
   )
     return false;
   return Buffer.from(value, 'base64').toString('base64') === value;
+}
+
+function isProtocolVersion(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= daysInMonth[month - 1];
 }
 
 function isToolDefinition(value, modern) {

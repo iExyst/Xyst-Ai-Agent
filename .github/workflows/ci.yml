@@ -121,6 +121,13 @@ jobs:
       - name: Build release source archive
         if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
         run: node scripts/build-release.mjs
+      - name: Upload release source archive
+        if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' && runner.os == 'Linux' && matrix.node-version == 22 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyst-source-archive
+          path: dist/release/*.tar.gz
+          if-no-files-found: error
 
   desktop:
     strategy:

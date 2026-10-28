@@ -184,6 +184,8 @@ test('MCP discovery validates advertised capabilities and instructions', () => {
   assert.equal(validateMcpResultType(valid, options), valid);
   for (const result of [
     { ...valid, supportedVersions: ['not-a-version'] },
+    { ...valid, supportedVersions: ['2026-02-30'] },
+    { ...valid, supportedVersions: ['2026-13-01'] },
     { ...valid, supportedVersions: Array(33).fill('2026-07-28') },
     { ...valid, capabilities: { tools: { listChanged: 'yes' } } },
     { ...valid, capabilities: { extensions: { 'io.example/cap': true } } },
