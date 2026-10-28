@@ -177,7 +177,15 @@ Start the model server, load a model, and use its reported model ID. If discover
 
 ### A required sandbox action fails
 
-Check **Runtime settings → Sandbox** and the reported backend availability. Linux requires a trusted Bubblewrap installation and compatible user namespaces. Windows uses the packaged AppContainer helper. Workspace modes refuse process actions if the backend is unavailable; choose another policy only if it matches your intended trust boundary.
+Check **Runtime settings → Sandbox** and the reported backend availability. Linux requires a trusted Bubblewrap installation and compatible user namespaces. On Ubuntu 24.04 systems that restrict unprivileged user namespaces with AppArmor, the system administrator may need to install and load Ubuntu's `bwrap-userns-restrict` profile:
+
+```sh
+sudo apt install apparmor-profiles apparmor-utils
+sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+```
+
+Keep the host restriction enabled; Xyst fails closed if Bubblewrap cannot create the required namespaces. Windows uses the packaged AppContainer helper. Workspace modes refuse process actions if the backend is unavailable; choose another policy only if it matches your intended trust boundary.
 
 ### An update is not offered
 

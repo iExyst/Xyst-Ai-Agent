@@ -87,7 +87,9 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap python3 imagemagick dbus-x11 gnome-keyring libsecret-tools libglib2.0-bin
+          sudo apt-get install -y apparmor-profiles apparmor-utils bubblewrap python3 imagemagick dbus-x11 gnome-keyring libsecret-tools libglib2.0-bin
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
       - name: Run Linux checks with required OS integration tests
         if: runner.os == 'Linux'
         run: pnpm check:linux
