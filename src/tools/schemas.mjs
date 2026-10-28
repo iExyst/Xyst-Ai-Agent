@@ -404,11 +404,11 @@ export function validateArguments(schema, input) {
   } catch {
     throw new Error('Tool arguments are not valid JSON');
   }
-  validateValue(schema, value, '$');
+  validateValue(schema, value, '$', { patternChecksRemaining: 256 });
   return value;
 }
 
-function validateValue(schema, value, location) {
+function validateValue(schema, value, location, state) {
   if (schema === true) return;
   if (schema === false) throw new Error(`${location} is not allowed`);
   if (Object.hasOwn(schema, 'const') && !isDeepStrictEqual(schema.const, value)) throw new Error(`${location} must match its fixed value`);
@@ -418,7 +418,7 @@ function validateValue(schema, value, location) {
     let lastError;
     for (const type of matches) {
       try {
-        validateValue({ ...schema, type }, value, location);
+        validateValue({ ...schema, type }, value, location, state);
         return;
       } catch (error) {
         lastError = error;
@@ -428,13 +428,13 @@ function validateValue(schema, value, location) {
   }
   if (schema.enum && !schema.enum.some((candidate) => isDeepStrictEqual(candidate, value)))
     throw new Error(`${location} must match one of the allowed values`);
-  if (typeof value === 'string' && schema.pattern !== undefined && !matchesPattern(schema.pattern, value, location))
+  if (typeof value === 'string' && schema.pattern !== undefined && !matchesPattern(schema.pattern, value, location, state))
     throw new Error(`${location} must match the required pattern`);
-  for (const branch of schema.allOf || []) validateValue(branch, value, location);
+  for (const branch of schema.allOf || []) validateValue(branch, value, location, state);
   if (schema.anyOf) {
     let matched = false;
     for (const branch of schema.anyOf)
-      if (schemaMatches(branch, value, location)) {
+      if (schemaMatches(branch, value, location, state)) {
         matched = true;
         break;
       }
@@ -442,17 +442,27 @@ function validateValue(schema, value, location) {
   }
   if (schema.oneOf) {
     let matchingBranches = 0;
-    for (const branch of schema.oneOf) if (schemaMatches(branch, value, location)) matchingBranches += 1;
+    for (const branch of schema.oneOf) if (schemaMatches(branch, value, location, state)) matchingBranches += 1;
     if (matchingBranches !== 1) throw new Error(`${location} must match exactly one schema`);
   }
-  if (schema.not && schemaMatches(schema.not, value, location)) throw new Error(`${location} must not match the excluded schema`);
+  if (schema.not && schemaMatches(schema.not, value, location, state)) throw new Error(`${location} must not match the excluded schema`);
   if (schema.if) {
-    const branch = schemaMatches(schema.if, value, location) ? schema.then : schema.else;
-    if (branch !== undefined) validateValue(branch, value, location);
+    const branch = schemaMatches(schema.if, value, location, state) ? schema.then : schema.else;
+    if (branch !== undefined) validateValue(branch, value, location, state);
   }
-  if (schema.type === undefined) return;
-  if (schema.type === 'object') {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${location} must be an object`);
+  if (schema.type !== undefined && !matchesSchemaType(schema.type, value)) {
+    const typeErrors = {
+      array: 'must be an array',
+      boolean: 'must be a boolean',
+      integer: 'must be a valid integer',
+      null: 'must be null',
+      number: 'must be a valid number',
+      object: 'must be an object',
+      string: 'must be a string',
+    };
+    throw new Error(`${location} ${typeErrors[schema.type] || 'has an unsupported schema type'}`);
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
     const propertyCount = Object.keys(value).length;
     if (
       (schema.minProperties !== undefined && propertyCount < schema.minProperties) ||
@@ -462,12 +472,24 @@ function validateValue(schema, value, location) {
         `${location} must contain between ${schema.minProperties || 0} and ${schema.maxProperties ?? 'unlimited'} properties`,
       );
     for (const key of schema.required || []) if (!Object.hasOwn(value, key)) throw new Error(`${location}.${key} is required`);
-    for (const [key, child] of Object.entries(value))
-      if (Object.hasOwn(schema.properties || {}, key)) validateValue(schema.properties[key], child, `${location}.${key}`);
-      else if (schema.additionalProperties === false) throw new Error(`${location}.${key} is not allowed`);
-      else if (schema.additionalProperties !== undefined) validateValue(schema.additionalProperties, child, `${location}.${key}`);
-  } else if (schema.type === 'string') {
-    if (typeof value !== 'string') throw new Error(`${location} must be a string`);
+    const patternEntries = Object.entries(schema.patternProperties || {});
+    if (propertyCount > 128 && (patternEntries.length || schema.propertyNames !== undefined))
+      throw new Error(`${location} has too many properties for pattern validation`);
+    for (const [key, child] of Object.entries(value)) {
+      if (schema.propertyNames !== undefined) validateValue(schema.propertyNames, key, `${location} property name`, state);
+      let patternMatched = false;
+      for (const [pattern, propertySchema] of patternEntries)
+        if (matchesPattern(pattern, key, `${location} property name`, state)) {
+          patternMatched = true;
+          validateValue(propertySchema, child, `${location}.${key}`, state);
+        }
+      const explicitlyDeclared = Object.hasOwn(schema.properties || {}, key);
+      if (explicitlyDeclared) validateValue(schema.properties[key], child, `${location}.${key}`, state);
+      else if (!patternMatched && schema.additionalProperties === false) throw new Error(`${location}.${key} is not allowed`);
+      else if (!patternMatched && schema.additionalProperties !== undefined)
+        validateValue(schema.additionalProperties, child, `${location}.${key}`, state);
+    }
+  } else if (typeof value === 'string') {
     const length = countCodePoints(value);
     if ((schema.minLength !== undefined && length < schema.minLength) || (schema.maxLength !== undefined && length > schema.maxLength))
       throw new Error(`${location} must be between ${schema.minLength || 0} and ${schema.maxLength ?? 'unlimited'} characters`);
@@ -484,7 +506,7 @@ function validateValue(schema, value, location) {
       (schema.multipleOf !== undefined && !isMultipleOf(value, schema.multipleOf))
     )
       throw new Error(`${location} must be a valid integer`);
-  } else if (schema.type === 'number') {
+  } else if (typeof value === 'number') {
     if (
       typeof value !== 'number' ||
       !Number.isFinite(value) ||
@@ -495,12 +517,7 @@ function validateValue(schema, value, location) {
       (schema.multipleOf !== undefined && !isMultipleOf(value, schema.multipleOf))
     )
       throw new Error(`${location} must be a valid number`);
-  } else if (schema.type === 'boolean') {
-    if (typeof value !== 'boolean') throw new Error(`${location} must be a boolean`);
-  } else if (schema.type === 'null') {
-    if (value !== null) throw new Error(`${location} must be null`);
-  } else if (schema.type === 'array') {
-    if (!Array.isArray(value)) throw new Error(`${location} must be an array`);
+  } else if (Array.isArray(value)) {
     if (
       (schema.minItems !== undefined && value.length < schema.minItems) ||
       (schema.maxItems !== undefined && value.length > schema.maxItems)
@@ -514,11 +531,13 @@ function validateValue(schema, value, location) {
         items.add(serialized);
       }
     }
-    for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`);
-  } else throw new Error(`Unsupported tool schema type '${schema.type}'`);
+    if (schema.items !== undefined)
+      for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`, state);
+  }
 }
 
-function matchesPattern(pattern, value, location) {
+function matchesPattern(pattern, value, location, state) {
+  if (state.patternChecksRemaining-- <= 0) throw new Error(`${location} exceeded the pattern validation budget`);
   try {
     return vm.runInNewContext('new RegExp(pattern).test(value)', { pattern, value }, { timeout: 10 });
   } catch (error) {
@@ -527,9 +546,9 @@ function matchesPattern(pattern, value, location) {
   }
 }
 
-function schemaMatches(schema, value, location) {
+function schemaMatches(schema, value, location, state) {
   try {
-    validateValue(schema, value, location);
+    validateValue(schema, value, location, state);
     return true;
   } catch {
     return false;

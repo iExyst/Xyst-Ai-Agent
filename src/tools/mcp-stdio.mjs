@@ -842,6 +842,8 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     'readOnly',
     'writeOnly',
     'properties',
+    'patternProperties',
+    'propertyNames',
     'required',
     'additionalProperties',
     'items',
@@ -921,12 +923,11 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
   for (const key of ['if', 'then', 'else']) if (schema[key] !== undefined) result[key] = normalizeSchema(schema[key], depth + 1, budget);
   for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'])
     if (schema[key] !== undefined) {
-      if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[key]))
-        throw mcpError('MCP tool input schema has invalid numeric bounds', 'MCP_INVALID_SCHEMA');
+      if (!Number.isFinite(schema[key])) throw mcpError('MCP tool input schema has invalid numeric bounds', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
   if (schema.multipleOf !== undefined) {
-    if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema.multipleOf) || schema.multipleOf <= 0)
+    if (!Number.isFinite(schema.multipleOf) || schema.multipleOf <= 0)
       throw mcpError('MCP tool input schema has invalid multipleOf', 'MCP_INVALID_SCHEMA');
     result.multipleOf = schema.multipleOf;
   }
@@ -934,12 +935,6 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     if (schema[key] !== undefined) {
       if (!Number.isInteger(schema[key]) || schema[key] < 0 || schema[key] > 1_000_000)
         throw mcpError('MCP tool input schema has invalid size bounds', 'MCP_INVALID_SCHEMA');
-      if (
-        (key.endsWith('Length') && !types.includes('string')) ||
-        (key.endsWith('Items') && !types.includes('array')) ||
-        (key.endsWith('Properties') && !types.includes('object'))
-      )
-        throw mcpError('MCP tool input schema has bounds for the wrong type', 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
   if (schema.pattern !== undefined) {
@@ -960,10 +955,10 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     throw mcpError('MCP tool input schema has inconsistent array bounds', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
     throw mcpError('MCP tool input schema has invalid uniqueItems', 'MCP_INVALID_SCHEMA');
-  if (schema.uniqueItems !== undefined && !types.includes('array'))
-    throw mcpError('MCP tool input schema has uniqueItems for a non-array type', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined) result.uniqueItems = schema.uniqueItems;
-  if (types.includes('object')) {
+  const objectKeywords = ['properties', 'required', 'additionalProperties', 'patternProperties', 'propertyNames'];
+  const hasObjectKeywords = objectKeywords.some((key) => schema[key] !== undefined);
+  if (types.includes('object') || hasObjectKeywords) {
     if (
       schema.properties !== undefined &&
       (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties))
@@ -979,10 +974,30 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     );
     if (
       schema.required !== undefined &&
-      (!Array.isArray(schema.required) || schema.required.some((key) => typeof key !== 'string' || !Object.hasOwn(result.properties, key)))
+      (!Array.isArray(schema.required) ||
+        new Set(schema.required).size !== schema.required.length ||
+        schema.required.some((key) => typeof key !== 'string'))
     )
       throw mcpError('MCP tool input schema has invalid required properties', 'MCP_INVALID_SCHEMA');
     if (schema.required) result.required = [...new Set(schema.required)];
+    if (schema.patternProperties !== undefined) {
+      if (!schema.patternProperties || typeof schema.patternProperties !== 'object' || Array.isArray(schema.patternProperties))
+        throw mcpError('MCP object schema has invalid patternProperties', 'MCP_INVALID_SCHEMA');
+      const entries = Object.entries(schema.patternProperties);
+      if (entries.length > 16) throw mcpError('MCP object schema exceeds the patternProperties limit', 'MCP_INVALID_SCHEMA');
+      result.patternProperties = Object.fromEntries(
+        entries.map(([pattern, child]) => {
+          if (pattern.length > 256) throw mcpError('MCP patternProperties key is too long', 'MCP_INVALID_SCHEMA');
+          try {
+            new RegExp(pattern);
+          } catch {
+            throw mcpError('MCP patternProperties key is invalid', 'MCP_INVALID_SCHEMA');
+          }
+          return [pattern, normalizeSchema(child, depth + 1, budget)];
+        }),
+      );
+    }
+    if (schema.propertyNames !== undefined) result.propertyNames = normalizeSchema(schema.propertyNames, depth + 1, budget);
     if (schema.additionalProperties !== undefined) {
       if (
         typeof schema.additionalProperties !== 'boolean' &&
@@ -991,13 +1006,14 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
         throw mcpError('MCP object schema has invalid additionalProperties', 'MCP_INVALID_SCHEMA');
       result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1, budget);
     }
-  } else if (['properties', 'required', 'additionalProperties'].some((key) => schema[key] !== undefined)) {
-    throw mcpError('MCP scalar schema contains object keywords', 'MCP_INVALID_SCHEMA');
   }
-  if (types.includes('array')) {
-    if (schema.items === undefined) throw mcpError('MCP array schema requires an items schema', 'MCP_INVALID_SCHEMA');
-    result.items = normalizeSchema(schema.items, depth + 1, budget);
-  } else if (schema.items !== undefined) throw mcpError('MCP scalar schema contains an items keyword', 'MCP_INVALID_SCHEMA');
+  if (
+    types.includes('array') ||
+    schema.items !== undefined ||
+    (!hasType && ['minItems', 'maxItems', 'uniqueItems'].some((key) => schema[key] !== undefined))
+  ) {
+    if (schema.items !== undefined) result.items = normalizeSchema(schema.items, depth + 1, budget);
+  }
   return result;
 }
 
