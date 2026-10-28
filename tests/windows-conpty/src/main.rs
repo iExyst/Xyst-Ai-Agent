@@ -1,7 +1,7 @@
 #![cfg(windows)]
 
 use std::ffi::OsStr;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::{null, null_mut};
 use std::sync::mpsc;
@@ -10,14 +10,15 @@ use std::time::Duration;
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::Console::{
-    COORD, ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole,
+    COORD, ClosePseudoConsole, CreatePseudoConsole, GetStdHandle, ResizePseudoConsole,
+    STD_INPUT_HANDLE,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTUPINFOEXW, TerminateProcess,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 const WAIT_OBJECT_0: u32 = 0;
@@ -169,6 +170,10 @@ fn run() -> io::Result<u32> {
 
         let mut startup = STARTUPINFOEXW::default();
         startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+        startup.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+        startup.StartupInfo.hStdInput = null_mut();
+        startup.StartupInfo.hStdOutput = null_mut();
+        startup.StartupInfo.hStdError = null_mut();
         startup.lpAttributeList = attribute_list;
         if UpdateProcThreadAttribute(
             attribute_list,
@@ -187,28 +192,9 @@ fn run() -> io::Result<u32> {
             return fail("Could not attach the pseudo console");
         }
 
-        let mut process = PROCESS_INFORMATION::default();
-        let created = CreateProcessW(
-            null(),
-            command_wide.as_mut_ptr(),
-            null(),
-            null(),
-            0,
-            EXTENDED_STARTUPINFO_PRESENT,
-            null(),
-            null(),
-            &startup.StartupInfo,
-            &mut process,
-        );
-        DeleteProcThreadAttributeList(attribute_list);
-        if created == 0 {
-            ClosePseudoConsole(pseudoconsole);
-            CloseHandle(input_write);
-            CloseHandle(output_read);
-            return fail("CreateProcessW failed");
-        }
-        debug("child process created");
-
+        // Start draining ConPTY output before the child initializes its console.
+        // Console startup can block while output is pending, so the reader must
+        // already be active when CreateProcessW attaches the pseudoconsole.
         let output_handle = output_read as usize;
         let output_thread = thread::spawn(move || -> io::Result<()> {
             let output_read = output_handle as HANDLE;
@@ -235,11 +221,63 @@ fn run() -> io::Result<u32> {
             Ok(())
         });
 
+        let mut process = PROCESS_INFORMATION::default();
+        let created = CreateProcessW(
+            null(),
+            command_wide.as_mut_ptr(),
+            null(),
+            null(),
+            0,
+            EXTENDED_STARTUPINFO_PRESENT,
+            null(),
+            null(),
+            &startup.StartupInfo,
+            &mut process,
+        );
+        DeleteProcThreadAttributeList(attribute_list);
+        if created == 0 {
+            ClosePseudoConsole(pseudoconsole);
+            CloseHandle(input_write);
+            output_thread
+                .join()
+                .map_err(|_| io::Error::other("ConPTY output reader panicked"))??;
+            return fail("CreateProcessW failed");
+        }
+        debug("child process created");
+
         let (control_tx, control_rx) = mpsc::channel();
+        let control_input = GetStdHandle(STD_INPUT_HANDLE) as usize;
         thread::spawn(move || {
-            for line in io::stdin().lock().lines() {
-                if control_tx.send(line).is_err() {
+            let mut buffer = [0u8; 4096];
+            let mut pending = Vec::new();
+            loop {
+                let mut read = 0;
+                if ReadFile(
+                    control_input as HANDLE,
+                    buffer.as_mut_ptr(),
+                    buffer.len() as u32,
+                    &mut read,
+                    null_mut(),
+                ) == 0
+                    || read == 0
+                {
                     break;
+                }
+                pending.extend_from_slice(&buffer[..read as usize]);
+                if pending.len() > 131_075 {
+                    let _ = control_tx.send(Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "control line exceeded 64 KiB",
+                    )));
+                    break;
+                }
+                while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                    let line: Vec<_> = pending.drain(..=end).collect();
+                    let line = String::from_utf8(line)
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error));
+                    if control_tx.send(line).is_err() {
+                        break;
+                    }
                 }
             }
         });

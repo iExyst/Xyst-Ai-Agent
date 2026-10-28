@@ -468,10 +468,13 @@ test('Windows ConPTY reports live terminal resizes to the Ink prompt', {
     child.once('error', reject);
     child.once('exit', (code, signal) => resolve({ code, signal }));
   });
-  const sendInput = (value) => child.stdin.write(`I ${Buffer.from(value).toString('hex')}\n`);
-  const waitForOutput = async (expected) => {
+  const sendInput = (value) =>
+    new Promise((resolve, reject) => {
+      child.stdin.write(`I ${Buffer.from(value).toString('hex')}\n`, (error) => (error ? reject(error) : resolve()));
+    });
+  const waitForOutput = async (expected, after = 0) => {
     const deadline = Date.now() + 10_000;
-    while (!output.includes(expected)) {
+    while (!output.slice(after).includes(expected)) {
       if (child.exitCode !== null) throw new Error(`ConPTY TUI exited before ${JSON.stringify(expected)}: ${output}`);
       if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${JSON.stringify(expected)}: ${output}`);
       await pause(20);
@@ -479,7 +482,7 @@ test('Windows ConPTY reports live terminal resizes to the Ink prompt', {
   };
   t.after(async () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
-    child.stdin.write('Q\n');
+    if (!child.stdin.writableEnded) child.stdin.end('Q\n');
     await Promise.race([exitPromise, pause(1_000)]);
     if (child.exitCode === null && child.signalCode === null) child.kill();
   });
@@ -494,10 +497,19 @@ test('Windows ConPTY reports live terminal resizes to the Ink prompt', {
     throw error;
   }
   await waitForOutput('100×30');
+  let outputOffset = output.length;
   child.stdin.write('R 60 20\n');
-  await waitForOutput('60×20');
+  await waitForOutput('60×20', outputOffset);
+  outputOffset = output.length;
   child.stdin.write('R 100 30\n');
-  await waitForOutput('100×30');
-  sendInput('/exit\r');
-  assert.deepEqual(await withTimeout(exitPromise, 5_000, `ConPTY TUI did not exit: ${output}`), { code: 0, signal: null });
+  await waitForOutput('100×30', outputOffset);
+  outputOffset = output.length;
+  await sendInput('/exit');
+  await waitForOutput('/exit', outputOffset);
+  await sendInput('\r');
+  assert.deepEqual(
+    await withTimeout(exitPromise, 5_000, `ConPTY TUI did not exit: ${output}`),
+    { code: 0, signal: null },
+    `ConPTY TUI exited unexpectedly: ${output}`,
+  );
 });
