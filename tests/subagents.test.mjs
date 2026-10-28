@@ -62,6 +62,43 @@ test('subagent task store persists bounded task records and enforces cross-proce
   );
 });
 
+test('subagent slot acquisition failure preserves a replacement lock file', async (t) => {
+  const root = await createTempDirectory('xyst-subagent-slot-replacement-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SubagentTaskStore(root, { maxConcurrent: 1 });
+  const task = await store.create({ parentSessionId: randomUUID(), task: 'Acquire a slot safely' });
+  const lockPath = path.join(store.directory, 'slot-0.lock');
+  const backupPath = path.join(store.directory, 'failed-slot.backup');
+  const originalOpen = fs.open;
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] !== lockPath || args[1] !== 'wx') return handle;
+    let swapped = false;
+    return {
+      writeFile: (...writeArgs) => handle.writeFile(...writeArgs),
+      sync: async () => {
+        await handle.sync();
+        throw Object.assign(new Error('injected sync failure'), { code: 'EIO' });
+      },
+      stat: () => handle.stat(),
+      close: async () => {
+        await handle.close();
+        if (!swapped) {
+          swapped = true;
+          await fs.rename(lockPath, backupPath);
+          await fs.writeFile(lockPath, JSON.stringify({ lock_token: 'replacement-slot' }));
+        }
+      },
+    };
+  };
+  try {
+    await assert.rejects(store.acquireSlot(task.id), { code: 'EIO' });
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.equal(JSON.parse(await fs.readFile(lockPath, 'utf8')).lock_token, 'replacement-slot');
+});
+
 test('subagent task history restores one validated replacement backup instead of reporting an empty history', async (t) => {
   const root = await createTempDirectory('xyst-subagent-backup-recovery-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
