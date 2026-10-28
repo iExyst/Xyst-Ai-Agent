@@ -2668,4 +2668,4 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Modern stdio and Streamable HTTP sessions subscribe only to advertised tools/resources/prompts list-change capabilities. Subscription acknowledgements and IDs are checked, and notifications trigger a reload of the server's definitions. Legacy SSE list-change messages are accepted only for capabilities the server advertised.
 - Rapid notifications during a definition reload are coalesced into another reload so the final advertised state is not lost. Built-in MCP tool discovery reads live definitions after refresh.
-- Focused stdio, Streamable HTTP, scalar output-schema, and schema-validation regressions pass (4/4); changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+- Focused stdio, Streamable HTTP, legacy SSE, scalar output-schema, and schema-validation regressions pass (5/5); changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.

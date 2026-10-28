@@ -1500,6 +1500,10 @@ test('MCP legacy HTTP+SSE negotiates, routes features, parses fragmented UTF-8, 
   const posts = [];
   let streamController;
   let streamCancelled = false;
+  let resolveListChange;
+  const listChange = new Promise((resolve) => {
+    resolveListChange = resolve;
+  });
   const encoder = new TextEncoder();
   const fetchImpl = async (url, options) => {
     if (options.method === 'GET') {
@@ -1533,7 +1537,7 @@ test('MCP legacy HTTP+SSE negotiates, routes features, parses fragmented UTF-8, 
       request.method === 'initialize'
         ? {
             protocolVersion: '2024-11-05',
-            capabilities: { tools: {}, resources: {}, prompts: {} },
+            capabilities: { tools: { listChanged: true }, resources: {}, prompts: {} },
             serverInfo: { name: 'fixture', version: '1' },
           }
         : request.method === 'tools/list'
@@ -1568,11 +1572,16 @@ test('MCP legacy HTTP+SSE negotiates, routes features, parses fragmented UTF-8, 
     headers: { Authorization: 'Bearer fixture-token' },
     timeoutMs: 1_000,
     fetchImpl,
+    onNotification: (method) => resolveListChange(method),
   });
   t.after(() => session.close());
   await session.negotiate();
   assert.equal(session.version, '2024-11-05');
   assert.equal(session.serverInfo.name, 'fixture');
+  streamController.enqueue(
+    encoder.encode(`event: message\r\ndata: ${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })}\r\n\r\n`),
+  );
+  assert.equal(await listChange, 'notifications/tools/list_changed');
   assert.deepEqual(
     (await session.listTools()).map(({ name }) => name),
     ['mcp__remote__echo'],
