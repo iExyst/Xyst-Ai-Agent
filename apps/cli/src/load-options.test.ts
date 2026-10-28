@@ -88,7 +88,7 @@ test("mission templates provide valid task graphs and execute through the normal
   }
   assert.equal((getMissionTemplate("issue-to-pr") as any).github.writeEnabled, false);
   assert.equal((getMissionTemplate("pr-review") as any).github.writeEnabled, false);
-  const documentTasks = (getMissionTemplate("document-spreadsheet") as { tasks: Array<{ id: string; objective: string; expectedOutputs: string[] }> }).tasks;
+  const documentTasks = (getMissionTemplate("document-spreadsheet") as { tasks: Array<{ id: string; objective: string; expectedOutputs: string[]; allowedTools?: string[] }> }).tasks;
   const documentPlanTask = documentTasks.find((task) => task.id === "plan-artifact");
   const documentCreateObjective = documentTasks.find((task) => task.id === "create-artifact")?.objective ?? "";
   const documentVerifyObjective = documentTasks.find((task) => task.id === "verify-artifact")?.objective ?? "";
@@ -96,9 +96,12 @@ test("mission templates provide valid task graphs and execute through the normal
   assert.match(documentPlanTask?.objective ?? "", /reopen that exact file with file_read/);
   assert.match(documentCreateObjective, /do not repeat that heading in the body/);
   assert.match(documentVerifyObjective, /inspect the returned image pixels/);
+  assert.match(documentVerifyObjective, /read-only verification task/);
+  assert.match(documentVerifyObjective, /report it instead of changing the file/);
   assert.match(documentVerifyObjective, /PNG path alone is not visual evidence/);
   assert.match(documentVerifyObjective, /any repeated or missing content/);
   assert.match(documentVerifyObjective, /do not claim visual verification/);
+  assert.deepEqual(documentTasks.find((task) => task.id === "verify-artifact")?.allowedTools, ["office_read", "office_preview"]);
   assert.throws(() => getMissionTemplate("unknown-template"), /Unknown mission template/);
 
   const runCalls: Array<{ objective: string; options: Record<string, unknown> }> = [];
@@ -119,7 +122,7 @@ test("mission templates provide valid task graphs and execute through the normal
   for (const template of MISSION_TEMPLATES) {
     const startCall = runCalls.length;
     const startSession = sessionNumber;
-    const definition = getMissionTemplate(template.id) as { name: string; objective: string; workspace?: string; tasks: Array<{ id: string; dependsOn: string[] }> };
+    const definition = getMissionTemplate(template.id) as { name: string; objective: string; workspace?: string; tasks: Array<{ id: string; dependsOn: string[]; allowedTools?: string[] }> };
     definition.objective = `Execute the ${template.id} template through the standard mission runner.`;
     definition.workspace = repositoryPath;
     const executableMission = runner.repository.create(definition);
@@ -127,6 +130,10 @@ test("mission templates provide valid task graphs and execute through the normal
     assert.equal(run.status, "completed", `${template.id} should complete through PersistentMissionRunner`);
     assert.equal(runCalls.length - startCall, definition.tasks.length, `${template.id} should execute each task once`);
     assert.match(runCalls[startCall]!.objective, new RegExp(`Execute the ${template.id} template`));
+    for (const task of definition.tasks.filter((item) => item.allowedTools)) {
+      const taskCall = runCalls.slice(startCall, startCall + definition.tasks.length).find((call) => call.options.agentId === task.id);
+      assert.deepEqual(taskCall?.options.allowedTools, task.allowedTools, `${template.id}/${task.id} should pass its tool allowlist to AgentRunner`);
+    }
     for (let index = 1; index < definition.tasks.length; index++) assert.match(runCalls[startCall + index]!.objective, new RegExp(`verified-step-${startSession + index}`), `${template.id} should pass the preceding task result to its dependent`);
     const runTasks = runtime.store.db.prepare("SELECT task_key,state,attempts FROM mission_tasks WHERE run_id=? ORDER BY task_key").all(run.runId) as Array<{ task_key: string; state: string; attempts: number }>;
     assert.deepEqual(runTasks, definition.tasks.map((task) => ({ task_key: task.id, state: "completed", attempts: 1 })).sort((left, right) => left.task_key.localeCompare(right.task_key)), `${template.id} persisted task states`);

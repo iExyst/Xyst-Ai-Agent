@@ -915,9 +915,11 @@ test("office preview result sends the rendered PNG pixels to the next model requ
   let round = 0;
   const provider = {
     redact: (value: string) => value,
-    streamChatWithTools: async (request: { messages: Array<{ role: string; content?: unknown }> }) => {
+    streamChatWithTools: async (request: { messages: Array<{ role: string; content?: unknown }>; tools: Array<Record<string, unknown>> }) => {
       round++;
       if (round === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-page", type: "function", function: { name: "office_preview", arguments: JSON.stringify({ path: "vision.pdf", page: 1, output_path: "vision.png" }) } }] } }] };
+      const offeredTools = request.tools.map((tool) => String((tool.function as Record<string, unknown>)?.name));
+      assert.deepEqual(offeredTools, ["office_read", "office_preview", "task_complete"]);
       const previewResult = request.messages.find((message) => message.role === "tool" && Array.isArray(message.content) && message.content.some((part) => Boolean(part && typeof part === "object" && (part as Record<string, unknown>).type === "image_url")));
       assert.ok(previewResult, "office_preview's next-turn tool message should include multimodal image content");
       const parts = previewResult!.content as Array<Record<string, any>>;
@@ -925,13 +927,15 @@ test("office preview result sends the rendered PNG pixels to the next model requ
       const previewBytes = await readFileAsync(join(root, "vision.png"));
       assert.equal(imageUrl, `data:image/png;base64,${previewBytes.toString("base64")}`);
       assert.match(String(parts.find((part) => part.type === "text")?.text), /vision\.png/);
+      if (round === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "forbidden-delete", type: "function", function: { name: "file_delete", arguments: JSON.stringify({ path: "vision.pdf" }) } }] } }] };
+      assert.match(String(request.messages.at(-1)?.content), /not allowed for this task/);
       return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
     }
   };
   try {
     const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
-      .run("Inspect the rendered preview", { workspace: root, model: "test-model", maxTurns: 3, completionCriteria: ["Inspect the rendered preview"], requiredToolEvidence: [{ tool: "office_preview" }] });
-    assert.equal(result.status, "completed"); assert.equal(round, 2);
+      .run("Inspect the rendered preview", { workspace: root, model: "test-model", maxTurns: 4, allowedTools: ["office_read", "office_preview"], completionCriteria: ["Inspect the rendered preview"], requiredToolEvidence: [{ tool: "office_preview" }] });
+    assert.equal(result.status, "completed"); assert.equal(round, 3);
   } finally { store.close(); }
 }));
 
@@ -4611,6 +4615,22 @@ test("office tools create valid DOCX, XLSX, CSV, PDF, and PPTX files without ove
   await assert.rejects(() => office.office_edit!.execute({ format: "pptx", path: "slides.pptx", expected_sha256: deckRead.sha256, find_text: "Updated body", replace_text: "Stale" }), /changed since it was read/);
   await assert.rejects(() => call({ format: "csv", path: "report.docx", title: "Mismatch", rows: [["x"]] }), /must end in/);
   await assert.rejects(() => call({ format: "csv", path: "data.csv", title: "Overwrite", rows: [["x"]] }));
+}));
+
+test("office DOCX and PDF creation removes a matching leading title by default and can preserve an explicit repeat", async () => withTemp(async (root) => {
+  const office = createOfficeTools(new AccessController(), root);
+  for (const format of ["docx", "pdf"] as const) {
+    const path = `brief.${format}`;
+    await office.office_create!.execute({ format, path, title: "Workshop Brief", content: "\nWorkshop Brief\n\nDate: October 28, 2026\nChecklist" });
+    const normal = await office.office_read!.execute({ format, path }) as { text: string };
+    assert.equal(normal.text.split("Workshop Brief").length - 1, 1, `${format} should render the title once`);
+    assert.match(normal.text, /Date: October 28, 2026/);
+
+    const repeatPath = `repeat.${format}`;
+    await office.office_create!.execute({ format, path: repeatPath, title: "Workshop Brief", repeat_title: true, content: "Workshop Brief\n\nDate: October 28, 2026" });
+    const repeated = await office.office_read!.execute({ format, path: repeatPath }) as { text: string };
+    assert.equal(repeated.text.split("Workshop Brief").length - 1, 2, `${format} should keep an explicitly requested repeated title`);
+  }
 }));
 
 test("office preview renders DOCX, XLSX, and PPTX through installed LibreOffice", async (context) => {

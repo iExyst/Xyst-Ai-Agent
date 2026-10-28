@@ -137,6 +137,8 @@ export interface AgentOptions {
   expectedOutputPaths?: string[];
   /** Successful tool results that must satisfy machine-checkable mission assertions. */
   requiredToolEvidence?: RequiredToolEvidence[];
+  /** Restrict a mission task to these tools; task_complete remains available. */
+  allowedTools?: string[];
   model?: string;
   /** Marks a scheduler-selected model eligible for one automatic local fallback. */
   automaticModelAssignment?: boolean;
@@ -791,7 +793,8 @@ export class AgentRunner {
         return { verified: true, checks: checked };
       }
     };
-    const definitions = Object.values(tools).map((tool) => tool.definition);
+    const allowedToolNames = options.allowedTools ? new Set([...options.allowedTools, "task_complete"]) : undefined;
+    const definitions = Object.entries(tools).filter(([name]) => !allowedToolNames || allowedToolNames.has(name)).map(([, tool]) => tool.definition);
     const seenCalls = new Map<string, number>();
     let completionNudges = 0;
     let narratedToolCallNudges = 0;
@@ -967,6 +970,7 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
           completionVerified = false;
           const tool = tools[name];
           try {
+            if (allowedToolNames && !allowedToolNames.has(name)) throw new Error(`Tool ${name} is not allowed for this task`);
             if (name === "task_complete" && callIndex !== toolCalls.length - 1) throw new Error("task_complete must be the final tool call in a response; verify only after all requested actions");
             if (!tool) throw new Error(`Unknown tool: ${name}`);
             const args = JSON.parse(rawArgs) as unknown;

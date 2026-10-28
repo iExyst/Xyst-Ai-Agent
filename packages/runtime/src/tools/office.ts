@@ -34,11 +34,21 @@ const pdfReadSchema = z.object({ format: z.literal("pdf"), path: z.string().min(
 const officeReadSchema = z.discriminatedUnion("format", [docxReadSchema, xlsxReadSchema, csvReadSchema, pptxReadSchema, pdfReadSchema]);
 const schema = z.object({
   format: z.enum(["docx", "xlsx", "csv", "pdf", "pptx"]), path: z.string().min(1), title: z.string().min(1).max(200),
-  content: z.string().max(contentLimit).optional(), rows: z.array(z.array(spreadsheetCellSchema).min(1).max(100)).max(rowLimit).optional(),
+  content: z.string().max(contentLimit).optional(), repeat_title: z.boolean().optional(), rows: z.array(z.array(spreadsheetCellSchema).min(1).max(100)).max(rowLimit).optional(),
   slides: z.array(z.object({ title: z.string().min(1).max(200), body: z.string().max(20_000) }).strict()).max(60).optional()
 }).strict();
 
 const xml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&apos;");
+function removeLeadingDuplicateTitle(title: string, content: string, repeatTitle = false): string {
+  if (repeatTitle) return content;
+  const lines = content.split(/\r?\n/);
+  let firstContentLine = 0;
+  while (firstContentLine < lines.length && !lines[firstContentLine]!.trim()) firstContentLine++;
+  if (lines[firstContentLine]?.trim() !== title.trim()) return content;
+  const body = lines.slice(firstContentLine + 1);
+  while (body.length && !body[0]!.trim()) body.shift();
+  return body.join("\n");
+}
 function columnName(value: number): string { let name = ""; for (let n = value; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + (n - 1) % 26) + name; return name; }
 function spreadsheetCellXml(value: SpreadsheetCell, address: string, header: boolean): string {
   const style = header ? ' s="1"' : "";
@@ -792,7 +802,7 @@ export function createOfficeTools(access: AccessController, workspace = process.
       return { ...saved, sha256: createHash("sha256").update(rendered.png).digest("hex"), source_path: sourcePath, source_sha256: hash, source_format: sourceFormat.slice(1), ...(sourceFormat === ".pdf" ? {} : { renderer: officeRendererExecutable }), page: args.page, page_count: rendered.pageCount, width: rendered.width, height: rendered.height, mime_type: "image/png" };
     }
   }, office_create: {
-    definition: { type: "function", function: { name: "office_create", description: "Create a new DOCX, XLSX, CSV, PDF, or PPTX artifact in the workspace. Provide content for DOCX/PDF, typed rows (including a header row) for XLSX/CSV, or titled slides for PPTX. XLSX strings beginning with = are formulas and are recalculated; use numbers and booleans for typed spreadsheet values. Formula compatibility follows Formualizer's documented subset, and unsupported formulas are reported. Existing files are never overwritten; inspect generated layout-sensitive documents using an available viewer before reporting them as visually verified.", parameters: { type: "object", properties: { format: { type: "string", enum: ["docx", "xlsx", "csv", "pdf", "pptx"] }, path: { type: "string" }, title: { type: "string", maxLength: 200 }, content: { type: "string", maxLength: contentLimit }, rows: { type: "array", maxItems: 1000, items: { type: "array", minItems: 1, maxItems: 100, items: { anyOf: [{ type: "string", maxLength: 20000 }, { type: "number" }, { type: "boolean" }, { type: "null" }] } } }, slides: { type: "array", maxItems: 60, items: { type: "object", properties: { title: { type: "string", maxLength: 200 }, body: { type: "string", maxLength: 20000 } }, required: ["title", "body"], additionalProperties: false } } }, required: ["format", "path", "title"], additionalProperties: false } } },
+    definition: { type: "function", function: { name: "office_create", description: "Create a new DOCX, XLSX, CSV, PDF, or PPTX artifact in the workspace. For DOCX/PDF, title is rendered as the document heading. If content starts with that same heading, it is removed once by default; set repeat_title=true only when an intentional repeated heading is required. Provide content for DOCX/PDF, typed rows (including a header row) for XLSX/CSV, or titled slides for PPTX. XLSX strings beginning with = are formulas and are recalculated; use numbers and booleans for typed spreadsheet values. Formula compatibility follows Formualizer's documented subset, and unsupported formulas are reported. Existing files are never overwritten; inspect generated layout-sensitive documents using an available viewer before reporting them as visually verified.", parameters: { type: "object", properties: { format: { type: "string", enum: ["docx", "xlsx", "csv", "pptx", "pdf"] }, path: { type: "string" }, title: { type: "string", maxLength: 200 }, content: { type: "string", maxLength: contentLimit }, repeat_title: { type: "boolean" }, rows: { type: "array", maxItems: 1000, items: { type: "array", minItems: 1, maxItems: 100, items: { anyOf: [{ type: "string", maxLength: 20000 }, { type: "number" }, { type: "boolean" }, { type: "null" }] } } }, slides: { type: "array", maxItems: 60, items: { type: "object", properties: { title: { type: "string", maxLength: 200 }, body: { type: "string", maxLength: 20000 } }, required: ["title", "body"], additionalProperties: false } } }, required: ["format", "path", "title"], additionalProperties: false } } },
     execute: async (input) => {
       const args = schema.parse(input); let path = resolve(workspace, args.path);
       const totalRowsChars = args.rows?.reduce<number>((sum, row) => sum + row.reduce<number>((inner, value) => inner + String(value ?? "").length, 0), 0) ?? 0;
@@ -801,11 +811,12 @@ export function createOfficeTools(access: AccessController, workspace = process.
       const expectedExtension = `.${args.format}`;
       if (extname(path).toLowerCase() !== expectedExtension) throw new Error(`Output path must end in ${expectedExtension}`);
       path = await access.assertPath(path, "write");
+      const content = args.content === undefined ? undefined : removeLeadingDuplicateTitle(args.title, args.content, args.repeat_title);
       let bytes: Uint8Array; let recalculation: FormulaRecalculation | undefined;
       if (args.format === "docx") {
-        if (args.content === undefined) throw new Error("DOCX creation requires content");
+        if (content === undefined) throw new Error("DOCX creation requires content");
         const { Document, HeadingLevel, Packer, Paragraph } = await import("docx");
-        const body = args.content.split(/\r?\n/).map((text) => new Paragraph({ text: text || " " }));
+        const body = content.split(/\r?\n/).map((text) => new Paragraph({ text: text || " " }));
         bytes = await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph({ text: args.title, heading: HeadingLevel.HEADING_1 }), ...body] }] }));
       } else if (args.format === "xlsx") {
         if (!args.rows?.length) throw new Error("XLSX creation requires rows including a header row");
@@ -817,9 +828,9 @@ export function createOfficeTools(access: AccessController, workspace = process.
         if (!args.rows?.length) throw new Error("CSV creation requires rows including a header row");
         bytes = new TextEncoder().encode(csvText(args.rows));
       } else if (args.format === "pdf") {
-        if (args.content === undefined) throw new Error("PDF creation requires content");
+        if (content === undefined) throw new Error("PDF creation requires content");
         const { PDFDocument, StandardFonts } = await import("pdf-lib"); const pdf = await PDFDocument.create(); const font = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-        for (const [pageIndex, lines] of makePdfText(args.title, args.content).entries()) {
+        for (const [pageIndex, lines] of makePdfText(args.title, content).entries()) {
           const page = pdf.addPage([612, 792]); let y = 744;
           for (const [lineIndex, line] of lines.entries()) { page.drawText(line, { x: 50, y, size: pageIndex === 0 && lineIndex === 0 ? 18 : 11, font: pageIndex === 0 && lineIndex === 0 ? bold : font, maxWidth: 512 }); y -= pageIndex === 0 && lineIndex === 0 ? 28 : 14; }
         }
