@@ -3,7 +3,7 @@
 ## MCP metadata and URI validation — 2026-10-28
 
 - Modern MCP results now validate the result-specific `serverInfo` metadata shape; tool input/output schema `$schema` fields must be strings when present; resource, embedded-resource, resource-link, icon, and implementation website URI fields must be absolute, whitespace-free URIs. Legacy result metadata remains compatible.
-- The focused MCP protocol suite passes 8/8; changed-file Biome and whitespace checks pass. Exact-source hosted confirmation is pending. Full MCP schema conformance remains open.
+- The focused MCP protocol suite passes 8/8; changed-file Biome and whitespace checks pass. Exact-source run [40640078030](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40640078030) passed security and both desktop platform build/lifecycle/native jobs with this change. The full Node matrices still fail only on the known host capability limits. Full MCP schema conformance remains open.
 
 ## Bounded runtime settings reads — 2026-10-28
 
