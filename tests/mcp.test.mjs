@@ -1224,6 +1224,7 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
 
 test('modern Streamable HTTP subscriptions forward acknowledged list changes', async (t) => {
   let streamController;
+  let subscriptionCount = 0;
   const notifications = [];
   const fetchImpl = async (_url, options) => {
     const request = JSON.parse(options.body);
@@ -1243,6 +1244,7 @@ test('modern Streamable HTTP subscriptions forward acknowledged list changes', a
     assert.equal(options.headers.get('Mcp-Method'), 'subscriptions/listen');
     assert.equal(options.headers.get('MCP-Protocol-Version'), '2026-07-28');
     assert.deepEqual(request.params.notifications, { toolsListChanged: true, resourcesListChanged: false, promptsListChanged: false });
+    subscriptionCount += 1;
     const ack = {
       jsonrpc: '2.0',
       method: 'notifications/subscriptions/acknowledged',
@@ -1269,6 +1271,7 @@ test('modern Streamable HTTP subscriptions forward acknowledged list changes', a
   t.after(() => session.close());
   await session.negotiate();
   assert.equal(await session.listenForChanges(), true);
+  session.subscriptionRetryDelayMs = 2;
   const changed = {
     jsonrpc: '2.0',
     method: 'notifications/tools/list_changed',
@@ -1277,6 +1280,9 @@ test('modern Streamable HTTP subscriptions forward acknowledged list changes', a
   streamController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(changed)}\n\n`));
   for (let attempt = 0; attempt < 10 && notifications.length === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(notifications, ['notifications/tools/list_changed']);
+  streamController.close();
+  for (let attempt = 0; attempt < 50 && subscriptionCount < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 1));
+  assert.equal(subscriptionCount, 2);
 });
 
 test('MCP HTTP rejects malformed UTF-8 JSON as an invalid response', async () => {

@@ -31,6 +31,8 @@ export class StreamableHttpMcpSession {
     this.closed = false;
     this.subscriptionController = null;
     this.subscriptionPromise = null;
+    this.subscriptionRetryTimer = null;
+    this.subscriptionRetryDelayMs = 1_000;
   }
 
   static async start({ name, settings, config, secretStore, fetchImpl = fetch, onNotification }) {
@@ -344,6 +346,8 @@ export class StreamableHttpMcpSession {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    clearTimeout(this.subscriptionRetryTimer);
+    this.subscriptionRetryTimer = null;
     this.subscriptionController?.abort();
     const sessionId = this.sessionId;
     this.sessionId = null;
@@ -366,7 +370,7 @@ export class StreamableHttpMcpSession {
   }
 
   async listenForChanges() {
-    if (this.version !== VERSION || this.subscriptionController) return false;
+    if (this.closed || this.version !== VERSION || this.subscriptionController) return false;
     const notifications = {
       toolsListChanged: this.capabilities.tools?.listChanged === true,
       resourcesListChanged: this.capabilities.resources?.listChanged === true,
@@ -385,8 +389,26 @@ export class StreamableHttpMcpSession {
       controller.abort();
       if (this.subscriptionPromise === task) this.subscriptionPromise = null;
       if (this.subscriptionController === controller) this.subscriptionController = null;
+      this.#scheduleSubscriptionRetry();
       throw error;
     }
+  }
+
+  #scheduleSubscriptionRetry() {
+    if (this.closed || this.version !== VERSION || this.subscriptionRetryTimer) return;
+    const delay = this.subscriptionRetryDelayMs;
+    this.subscriptionRetryDelayMs = Math.min(this.subscriptionRetryDelayMs * 2, 30_000);
+    this.subscriptionRetryTimer = setTimeout(() => {
+      this.subscriptionRetryTimer = null;
+      void this.listenForChanges().catch(() => {});
+    }, delay);
+  }
+
+  subscriptionEnded(controller) {
+    if (this.subscriptionController !== controller) return;
+    this.subscriptionController = null;
+    this.subscriptionPromise = null;
+    if (!this.closed) this.#scheduleSubscriptionRetry();
   }
 
   async #recoverLegacySession(signal) {
@@ -446,6 +468,7 @@ async function pumpHttpSubscription(session, { id, notifications, controller }) 
             throw mcpError('MCP subscription acknowledgment accepted an invalid notification filter', 'MCP_INVALID_RESPONSE');
         acknowledged = true;
         acceptedFilters = accepted;
+        session.subscriptionRetryDelayMs = 1_000;
         clearTimeout(timeout);
         resolveAck(true);
         return;
@@ -460,17 +483,11 @@ async function pumpHttpSubscription(session, { id, notifications, controller }) 
     })
       .then(() => {
         if (!acknowledged) rejectAck(mcpError('MCP subscription ended before acknowledgment', 'MCP_INVALID_RESPONSE'));
-        if (session.subscriptionController === controller) {
-          session.subscriptionController = null;
-          session.subscriptionPromise = null;
-        }
+        session.subscriptionEnded(controller);
       })
       .catch((error) => {
         if (!acknowledged) rejectAck(error);
-        if (session.subscriptionController === controller) {
-          session.subscriptionController = null;
-          session.subscriptionPromise = null;
-        }
+        session.subscriptionEnded(controller);
       });
     return await ack;
   } catch (error) {
