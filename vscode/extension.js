@@ -21,6 +21,14 @@ function activate(context, injectedVscode, dependencies = {}) {
   let activeRunId = null;
   let activeSessionId = null;
   let activeWorkspaceRoot = null;
+  const workspaceState = context.workspaceState;
+  const savedWorkspaceRoot = workspaceState?.get('xyst.activeWorkspaceRoot');
+  const matchingWorkspace = (vscode.workspace.workspaceFolders || []).find(
+    (folder) => typeof savedWorkspaceRoot === 'string' && sameWorkspacePath(folder.uri.fsPath, savedWorkspaceRoot),
+  );
+  if (matchingWorkspace) activeWorkspaceRoot = matchingWorkspace.uri.fsPath;
+  const savedSessionId = workspaceState?.get('xyst.activeSessionId');
+  if (isUuid(savedSessionId)) activeSessionId = savedSessionId;
   let runController = null;
   let serviceStart = null;
   let reconnectTimer = null;
@@ -102,6 +110,7 @@ function activate(context, injectedVscode, dependencies = {}) {
       await stopService();
       activeWorkspaceRoot = selected.workspaceRoot;
       activeSessionId = null;
+      persistSelection();
       postToPanel({ type: 'session', session: null });
       try {
         await ensureService();
@@ -110,6 +119,7 @@ function activate(context, injectedVscode, dependencies = {}) {
       } catch (error) {
         await stopService();
         activeWorkspaceRoot = previousRoot;
+        persistSelection();
         try {
           await ensureService();
           await initializeWorkspacePanel();
@@ -189,6 +199,7 @@ function activate(context, injectedVscode, dependencies = {}) {
     void stopService();
     activeWorkspaceRoot = null;
     activeSessionId = null;
+    persistSelection();
     activeSessionWorktreeId = null;
     activeSessionWorktreeUnavailable = false;
     availableWorktrees = [];
@@ -271,7 +282,6 @@ function activate(context, injectedVscode, dependencies = {}) {
       if (!['running', 'paused'].includes(activeRunState.status)) activeRunState = null;
     }
     if (!activeRunState) {
-      activeSessionId = null;
       activeSessionWorktreeId = null;
       activeSessionWorktreeUnavailable = false;
       selectedWorktreeId = null;
@@ -312,7 +322,21 @@ function activate(context, injectedVscode, dependencies = {}) {
         enabled: activeRunState.budget_adjustments_enabled,
       });
       for (const approval of activeRunState.approval_requests || []) postToPanel({ type: 'approval', approval });
+    } else if (activeSessionId) {
+      try {
+        await loadSession(activeSessionId);
+      } catch {
+        activeSessionId = null;
+        persistSelection();
+        postToPanel({ type: 'session', session: null });
+      }
     }
+  }
+
+  function persistSelection() {
+    if (typeof workspaceState?.update !== 'function') return;
+    void workspaceState.update('xyst.activeWorkspaceRoot', activeWorkspaceRoot).catch(() => {});
+    void workspaceState.update('xyst.activeSessionId', activeSessionId).catch(() => {});
   }
 
   async function ensureService({ reconnect = false } = {}) {
@@ -323,6 +347,7 @@ function activate(context, injectedVscode, dependencies = {}) {
     if (vscode.workspace.isTrusted === false) throw new Error('Trust this VS Code workspace before starting the Xyst AI Assistant agent.');
     const workspaceRoot = activeWorkspaceRoot || folders[0].uri.fsPath;
     activeWorkspaceRoot = workspaceRoot;
+    persistSelection();
     const cliPath = getXystSetting(vscode, 'cliPath', '').trim();
     const nodePath = getXystSetting(vscode, 'nodePath', 'node').trim() || 'node';
     if (!cliPath || !path.isAbsolute(cliPath))
@@ -433,23 +458,11 @@ function activate(context, injectedVscode, dependencies = {}) {
   }
 
   async function reconnectWorkspace() {
-    const previousSessionId = activeSessionId;
     const previousWorkspaceRoot = activeWorkspaceRoot;
     try {
       await ensureService({ reconnect: true });
       if (!sameWorkspacePath(activeWorkspaceRoot, previousWorkspaceRoot)) return;
       await initializeWorkspacePanel();
-      if (previousSessionId) {
-        try {
-          await loadSession(previousSessionId);
-        } catch {
-          activeSessionId = null;
-          activeSessionWorktreeId = null;
-          activeSessionWorktreeUnavailable = false;
-          postToPanel({ type: 'session', session: null });
-          postWorktreeState();
-        }
-      }
       reconnectAttempt = 0;
       postToPanel({ type: 'connection', connected: true, message: 'Xyst AI Assistant reconnected to the active workspace.' });
     } catch {
@@ -764,6 +777,7 @@ function activate(context, injectedVscode, dependencies = {}) {
           if (deleting) await client.deleteSession(sessionId);
           else await client.archiveSession(sessionId);
           activeSessionId = null;
+          persistSelection();
           activeSessionWorktreeId = null;
           activeSessionWorktreeUnavailable = false;
           postToPanel({ type: 'session', session: null });
@@ -791,6 +805,7 @@ function activate(context, injectedVscode, dependencies = {}) {
       if (message.type === 'newSession') {
         if (activeRunId) throw new Error('Wait for the active run to finish before starting a new session.');
         activeSessionId = null;
+        persistSelection();
         activeSessionWorktreeId = null;
         activeSessionWorktreeUnavailable = false;
         postToPanel({ type: 'session', session: null });
@@ -831,6 +846,7 @@ function activate(context, injectedVscode, dependencies = {}) {
   async function loadSession(sessionId) {
     const session = await client.getSession(sessionId);
     activeSessionId = session.id;
+    persistSelection();
     const boundPath = typeof session.worktree_path === 'string' ? session.worktree_path : null;
     const boundWorktree = boundPath ? availableWorktrees.find((worktree) => sameWorkspacePath(worktree.path, boundPath)) : null;
     activeSessionWorktreeId = boundWorktree?.id || null;
@@ -934,6 +950,7 @@ function activate(context, injectedVscode, dependencies = {}) {
         const data = event.data;
         if (data.session_id) {
           activeSessionId = data.session_id;
+          persistSelection();
           postWorktreeState();
         }
         if (event.type === 'assistant_delta') postToPanel({ type: 'assistantDelta', text: data.text });
@@ -998,6 +1015,7 @@ function activate(context, injectedVscode, dependencies = {}) {
         if (event.type === 'api_run_finished') {
           pendingFileChanges.clear();
           activeSessionId = data.session_id || activeSessionId;
+          persistSelection();
           updateStatus('ready');
           postToPanel({ type: 'runFinished', status: data.status, sessionId: activeSessionId });
         }

@@ -24,4 +24,6 @@ The extension requires a configured model in the Xyst AI Assistant project or us
 
 `xyst.nodePath` selects the Node executable (default `node`). `xyst.maxAttachedSelectionCharacters` bounds editor selections and full-file attachments. Neither the bearer token nor chat contents are written to extension settings or global state.
 
-This is an early functional VS Code client, not a signed Marketplace release. Approval cards can open proposed text changes in VS Code's side-by-side diff editor, including newly created files; selected hunks are applied through the shared API and checked against the reviewed file snapshot before replacement. Offline pairing, multiple workspace folders, extension-host reconnect recovery, and Windows/Linux GUI accessibility testing remain open.
+If the VS Code extension host restarts, the selected workspace and conversation are restored from VS Code workspace state. A run interrupted because its local service process stopped is not restarted automatically; reopen the restored conversation to continue it.
+
+This is an early functional VS Code client, not a signed Marketplace release. Approval cards can open proposed text changes in VS Code's side-by-side diff editor, including newly created files; selected hunks are applied through the shared API and checked against the reviewed file snapshot before replacement. Offline pairing and Windows/Linux GUI accessibility testing remain open.

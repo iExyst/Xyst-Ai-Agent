@@ -938,6 +938,14 @@ test('VS Code workspace switching reconnects the shared service to the selected 
   const secondSession = secondStore.create({ title: 'Second workspace only' });
   await secondStore.save(secondSession);
   const commands = new Map();
+  const savedWorkspaceState = new Map();
+  const workspaceState = {
+    get: (key) => savedWorkspaceState.get(key),
+    update: async (key, value) => {
+      if (value === undefined) savedWorkspaceState.delete(key);
+      else savedWorkspaceState.set(key, value);
+    },
+  };
   const spawnedRoots = [];
   const spawnedChildren = [];
   const posted = [];
@@ -993,7 +1001,7 @@ test('VS Code workspace switching reconnects the shared service to the selected 
       setStatusBarMessage() {},
     },
   };
-  const extension = activate({ subscriptions: [], extensionUri: 'extension://xyst' }, vscode, {
+  const extension = activate({ subscriptions: [], extensionUri: 'extension://xyst', workspaceState }, vscode, {
     spawn: (_node, args) => {
       const root = args[args.indexOf('--workspace') + 1];
       spawnedRoots.push(root);
@@ -1063,6 +1071,56 @@ test('VS Code workspace switching reconnects the shared service to the selected 
   await waitUntil(() => posted.some((message) => message.type === 'session' && message.session?.id === firstSession.id));
   assert.equal(deferredHealthCalls, 0, 'a stale reconnect must not publish its client after a workspace switch');
   assert.deepEqual(spawnedRoots, [firstWorkspace, secondWorkspace, secondWorkspace, secondWorkspace, firstWorkspace]);
+
+  selectedWorkspaceIndex = 1;
+  await commands.get('xyst.selectWorkspace')();
+  await waitUntil(() => posted.filter((message) => message.type === 'initialize').length === 5);
+  await waitUntil(() =>
+    posted.some((message) => message.type === 'sessions' && message.sessions.some((session) => session.id === secondSession.id)),
+  );
+  const sessionMessageCountBeforeReloadSelection = posted.filter((message) => message.type === 'session').length;
+  receiveMessage({ type: 'loadSession', sessionId: secondSession.id });
+  await waitUntil(
+    () =>
+      posted.filter((message) => message.type === 'session').length > sessionMessageCountBeforeReloadSelection &&
+      posted.filter((message) => message.type === 'session').at(-1)?.session?.id === secondSession.id,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(savedWorkspaceState.get('xyst.activeWorkspaceRoot'), secondWorkspace);
+  assert.equal(savedWorkspaceState.get('xyst.activeSessionId'), secondSession.id);
+
+  await extension.dispose();
+  commands.clear();
+  const previousInitializeCount = posted.filter((message) => message.type === 'initialize').length;
+  const restartedExtension = activate({ subscriptions: [], extensionUri: 'extension://xyst', workspaceState }, vscode, {
+    spawn: (_node, args) => {
+      const root = args[args.indexOf('--workspace') + 1];
+      spawnedRoots.push(root);
+      const child = fakeServiceChild();
+      spawnedChildren.push(child);
+      const connection = root === firstWorkspace ? firstConnection : secondConnection;
+      queueMicrotask(() => child.stdout.emit('data', Buffer.from(`${JSON.stringify(connection)}\n`)));
+      return child;
+    },
+    clientFactory: ({ url, token }) => new ControlApiClient({ url, token }),
+  });
+  t.after(() => restartedExtension.dispose());
+  const sessionMessageCountBeforeRestart = posted.filter((message) => message.type === 'session').length;
+  await commands.get('xyst.startChat')();
+  receiveMessage({ type: 'webviewReady' });
+  await waitUntil(() => posted.filter((message) => message.type === 'initialize').length > previousInitializeCount);
+  await waitUntil(
+    () =>
+      posted.filter((message) => message.type === 'session').length > sessionMessageCountBeforeRestart &&
+      posted.filter((message) => message.type === 'session').at(-1)?.session?.id === secondSession.id,
+  );
+  assert.equal(spawnedRoots.at(-1), secondWorkspace, 'extension-host activation should restore the selected workspace');
+
+  selectedWorkspaceIndex = 0;
+  const initializeCountBeforeSwitchBack = posted.filter((message) => message.type === 'initialize').length;
+  await commands.get('xyst.selectWorkspace')();
+  await waitUntil(() => posted.filter((message) => message.type === 'initialize').length > initializeCountBeforeSwitchBack);
+  assert.equal(spawnedRoots.at(-1), firstWorkspace);
 
   vscode.workspace.workspaceFolders = [{ uri: { fsPath: secondWorkspace } }];
   foldersChanged();
