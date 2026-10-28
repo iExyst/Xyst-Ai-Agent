@@ -438,6 +438,36 @@ test("agent automatically selects an installed embedding model for semantic memo
   } finally { store.close(); }
 }));
 
+test("agent uses the configured embedding model for semantic memory", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "configured-embedding.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents(); const memories = new MemoryStore(store);
+  config.set("global", "memory.semantic.enabled", true);
+  config.set("global", "memory.embeddingModel", "manual-embedder");
+  const preference = memories.add("preference", "Keep answers concise", "user request");
+  memories.setEmbedding(preference.id, "manual-embedder", [1, 0], preference.content);
+  const embeddingModels: string[] = [];
+  let turns = 0;
+  const provider = {
+    redact: (value: string) => value,
+    models: async () => [
+      { type: "llm" as const, publisher: "test", key: "loaded-chat", display_name: "Chat", size_bytes: 20, loaded_instances: [{ id: "loaded-chat", config: { context_length: 8192 } }], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
+      { type: "embedding" as const, publisher: "test", key: "automatic-embedder", display_name: "Automatic", size_bytes: 10, loaded_instances: [{ id: "automatic-embedder", config: { context_length: 4096 } }], max_context_length: 8192 },
+      { type: "embedding" as const, publisher: "test", key: "manual-embedder", display_name: "Manual", size_bytes: 200, loaded_instances: [], max_context_length: 8192 }
+    ],
+    embeddings: async (model: string) => { embeddingModels.push(model); return { data: [{ index: 0, embedding: [1, 0] }] }; },
+    streamChatWithTools: async () => {
+      turns++;
+      if (turns === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "memory-search-pinned-embedding", type: "function", function: { name: "memory_search", arguments: JSON.stringify({ query: "answer style" }) } }] } }] };
+      return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "complete-pinned-embedding-search", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never, memories });
+  try {
+    const result = await agent.run("Use memory_search to retrieve my saved answer style preference.", { workspace: root, model: "loaded-chat", maxTurns: 3 });
+    assert.equal(result.status, "completed");
+    assert.deepEqual(embeddingModels, ["manual-embedder"]);
+  } finally { store.close(); }
+}));
+
 test("automatic selection deprioritizes a model with observed zero task completions when an eligible model is unmeasured", () => {
   const models = [
     { type: "llm" as const, publisher: "test", key: "observed-failures", display_name: "Observed Failures", size_bytes: 500_000_000, loaded_instances: [], max_context_length: 8192, capabilities: { trained_for_tool_use: true } },
