@@ -3995,6 +3995,30 @@ test("agent model acquisition follows discovery and download controls without se
   } finally { store.close(); }
 }));
 
+test("agent falls back to an advertised base model ID when a loaded instance ID is not callable", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "callable-model-id.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  let requestModel = "";
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    if (request.url === "/api/v1/models") response.end(JSON.stringify({ models: [{ type: "llm", publisher: "owner", key: "owner/model", display_name: "Model", size_bytes: 1024, loaded_instances: [{ id: "owner/model:2", config: { context_length: 8192 } }], max_context_length: 8192, capabilities: { trained_for_tool_use: true } }] }));
+    else if (request.url === "/v1/models") response.end(JSON.stringify({ data: [{ id: "owner/model" }] }));
+    else { response.writeHead(404); response.end("not found"); }
+  });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const lm = new LMStudioProvider({ baseUrl: `http://127.0.0.1:${address.port}` });
+    const provider = Object.assign(lm, { streamChatWithTools: async (request: { model: string }) => { requestModel = request.model; return { choices: [{ message: { role: "assistant", content: "done" } }] }; } });
+    const runner = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider, github: {} as never });
+    const result = await runner.run("Return a short response", { model: "owner/model", workspace: root });
+    assert.equal(result.model, "owner/model");
+    assert.equal(requestModel, "owner/model", "never submit the loaded-instance ID when only the base ID is callable");
+  } finally {
+    store.close();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}));
+
 test("automatic acquisition recommends and downloads only a model with declared adequate context", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "context-acquisition.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   const models: Array<Record<string, unknown>> = [{ type: "llm", publisher: "local", key: "short-model", display_name: "Short model", size_bytes: 1024, loaded_instances: [], max_context_length: 4096, capabilities: { trained_for_tool_use: true } }];
@@ -5026,6 +5050,25 @@ test("LM Studio REST loads request and return the applied model configuration", 
     assert.equal(requestBody?.echo_load_config, true);
     assert.equal(requestBody?.context_length, 8192);
     assert.deepEqual(result.load_config, { context_length: 8192, flash_attention: true });
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+});
+
+test("LM Studio inference resolves advertised instance IDs and rejects stale native-inventory IDs early", async () => {
+  const requestedPaths: string[] = [];
+  const server = createServer((request, response) => {
+    requestedPaths.push(request.url ?? "");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ data: [{ id: "owner/model" }, { id: "owner/model:3" }] }));
+  });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const provider = new LMStudioProvider({ baseUrl: `http://127.0.0.1:${address.port}` });
+    assert.equal(await provider.resolveInferenceModelId("owner/model:3", "owner/model"), "owner/model:3");
+    assert.equal(await provider.resolveInferenceModelId("owner/model:2", "owner/model", { allowBaseModelFallback: true }), "owner/model");
+    await assert.rejects(() => provider.resolveInferenceModelId("owner/model:2", "owner/model"), /not available from the OpenAI-compatible \/v1\/models endpoint/);
+    await assert.rejects(() => provider.resolveInferenceModelId("owner/removed", "owner/removed", { allowBaseModelFallback: true }), /base ID owner\/removed is unavailable too/);
+    assert.deepEqual(requestedPaths, ["/v1/models", "/v1/models", "/v1/models", "/v1/models"]);
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
 

@@ -168,6 +168,13 @@ export class LMStudioProvider {
     const response = await this.request<{ models: LMStudioModel[] }>("/api/v1/models", signal ? { signal } : {});
     return response.models;
   }
+  async resolveInferenceModelId(instanceId: string, modelKey: string, options: { allowBaseModelFallback?: boolean } = {}, signal?: AbortSignal): Promise<string> {
+    const response = await this.request<{ data?: Array<{ id?: unknown }> }>("/v1/models", signal ? { signal } : {});
+    const available = new Set((Array.isArray(response.data) ? response.data : []).flatMap((model) => typeof model.id === "string" && model.id ? [model.id] : []));
+    if (available.has(instanceId)) return instanceId;
+    if (options.allowBaseModelFallback && available.has(modelKey)) return modelKey;
+    throw new LMStudioError(`LM Studio reports ${modelKey} in its native inventory, but inference model ID ${instanceId} is not available from the OpenAI-compatible /v1/models endpoint${options.allowBaseModelFallback ? ` (base ID ${modelKey} is unavailable too)` : ""}. Refresh LM Studio's model list or choose a model visible to its inference API.`);
+  }
   async load(model: string, options: LMStudioLoadOptions = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const usesCliLoad = options.gpu_offload !== undefined || options.ttl_seconds !== undefined || options.speculative_draft_mtp !== undefined || options.draft_model !== undefined ||
       options.speculative_draft_max_tokens !== undefined || options.speculative_draft_min_tokens !== undefined || options.speculative_draft_min_continue_probability !== undefined;

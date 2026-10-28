@@ -6,6 +6,8 @@ A bounded live Xyst CLI native chat request to an already-loaded model returned 
 
 LM Studio recommends its native REST API v1 for new integrations; the docs identify it as released in 0.4.0. Xyst uses native v1 where it covers the feature and compatible endpoints where they provide custom tool calls or embeddings. Endpoint behavior is version-dependent; this matrix records what is implemented and what is still pending in Xyst.
 
+The native `GET /api/v1/models` inventory and OpenAI-compatible `GET /v1/models` inference list can expose different model identifiers. Before using a loaded instance ID for tool-enabled inference, Xyst now checks that exact ID against `/v1/models`. If the exact instance ID is absent, Xyst uses the base model key only when exactly one instance is loaded and that base key is listed; otherwise it returns an actionable error before sending the prompt. Explicitly selected instance IDs are never silently replaced.
+
 | Feature | LM Studio interface | Xyst status | Notes |
 | --- | --- | --- | --- |
 | Connect, diagnostics, optional bearer auth | REST v1 | Implemented | Base URL configurable by `LM_STUDIO_BASE_URL`; token resolved from `LM_API_TOKEN` when set, otherwise from the OS credential vault (`credential set lmstudio api-token`). This supports headless Linux sessions without a Secret Service when an explicit environment token is configured. |
