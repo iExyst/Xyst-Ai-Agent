@@ -2710,3 +2710,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - MCP arrays now support draft-07 tuple `items` and `additionalItems` on stdio and Streamable HTTP. Tuple length remains capped at 64; omitted `additionalItems` is normalized to an allowing schema, preserving legacy semantics alongside the unevaluated-item validator.
 - Focused transport checks pass 2/2 and changed-file Biome/whitespace checks pass. Exact-source Windows/Linux confirmation is pending.
+
+## CI runner throughput — 2026-10-28
+
+- CI runs are now grouped by ref and superseded runs are cancelled on the next push, preventing stale full matrices from occupying Windows/Linux runner slots. The latest revision still runs the complete required matrix and both desktop package lifecycle jobs.
