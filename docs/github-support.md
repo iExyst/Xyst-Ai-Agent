@@ -67,3 +67,5 @@ Webhook requests use HMAC-SHA256 signature verification, a 1 MiB body limit, the
 - [Release asset REST endpoints](https://docs.github.com/en/rest/releases/assets)
 - [GitHub App REST endpoints](https://docs.github.com/en/rest/apps/apps)
 - [REST API troubleshooting and accepted permissions](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)
+
+Pagination is bounded and validates server-provided next-page URLs against the configured API origin and base path before reusing credentials. Regression coverage verifies same-origin traversal and rejects external origins and paths outside a GitHub Enterprise `/api/v3` base. Live GHES pagination remains unverified.

@@ -40,3 +40,7 @@ This audit maps the detailed Xyst specification (456 lines; SHA-256 `F5A6E185B2E
 ## Completion decision
 
 The full two-brief objective is **not complete**. Partial and open areas above are not waived by passing CI or package workflows. Completion still requires stronger model-backed coding reliability plus the stated platform, integration, accessibility, release and sustained-operation gates, or exact documentation of any genuinely external blocker after all independent work is finished.
+
+### D2 GitHub pagination follow-up
+
+Deterministic coverage now follows same-origin pagination links and rejects links outside the configured API host/base path before forwarding credentials. Rate limits, revoked access, branch conflicts, live GHES pagination, and varied protection policies remain open.

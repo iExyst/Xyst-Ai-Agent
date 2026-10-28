@@ -2484,6 +2484,33 @@ test("GitHub API tools pass agent cancellation through to HTTP requests", async 
   finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
 });
 
+test("GitHub pagination keeps credentials on the configured API origin and path", async () => {
+  const originalFetch = globalThis.fetch; const requests: Array<{ url: string; authorization: string | null; redirect: RequestRedirect | undefined }> = [];
+  const credentials = { get: async () => "test-github-token" };
+  globalThis.fetch = async (input, init) => {
+    const url = String(input); requests.push({ url, authorization: new Headers(init?.headers).get("authorization"), redirect: init?.redirect });
+    if (url.endsWith("?page=1")) return Response.json([{ id: 1 }], { headers: { link: '<https://api.github.test/repos/owner/repo/items?page=2>; rel="next"; title="next page", <https://api.github.test/repos/owner/repo/items?page=9>; rel="last"' } });
+    if (url.endsWith("?page=2")) return Response.json([{ id: 2 }]);
+    if (url.endsWith("?page=external")) return Response.json([{ id: 1 }], { headers: { link: '<https://attacker.example/collect>; rel="next"' } });
+    if (url.endsWith("/api/v3/repos/owner/repo/items?page=1")) return Response.json([{ id: 1 }], { headers: { link: '<https://github.example.test/steal?page=2>; rel="next"' } });
+    throw new Error(`Unexpected GitHub URL ${url}`);
+  };
+  try {
+    const provider = new GitHubProvider(credentials as never, { apiBase: "https://api.github.test" });
+    assert.deepEqual(await provider.paginate<{ id: number }>("/repos/owner/repo/items?page=1"), [{ id: 1 }, { id: 2 }]);
+    assert.deepEqual(requests.slice(0, 2).map((request) => request.url), [
+      "https://api.github.test/repos/owner/repo/items?page=1", "https://api.github.test/repos/owner/repo/items?page=2"
+    ]);
+    assert.ok(requests.slice(0, 2).every((request) => request.authorization === "Bearer test-github-token"));
+    assert.ok(requests.every((request) => request.redirect === "error"), "API pagination must not follow credentialed redirects");
+    const enterprise = new GitHubProvider(credentials as never, { apiBase: "https://github.example.test/api/v3" });
+    await assert.rejects(enterprise.paginate("/repos/owner/repo/items?page=1"), /configured API host and path/);
+    await assert.rejects(provider.paginate("/repos/owner/repo/items?page=external"), /configured API host and path/);
+    assert.equal(requests.length, 4, "unsafe next-page URLs must be rejected before a credentialed request is made");
+    assert.ok(requests.every((request) => new URL(request.url).origin !== "https://attacker.example" && !request.url.includes("github.example.test/steal")));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("GitHub pull request review comments use guarded tools and current diff coordinates", async () => {
   const originalFetch = globalThis.fetch; const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
   globalThis.fetch = async (input, init) => {
