@@ -2699,3 +2699,6 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Both MCP transports now accept the draft-07 `definitions` container and resolve bounded local JSON Pointer references into it, while preserving fail-closed behavior for recursive and external references. Anchor lookup traverses the container too.
 - Focused stdio and Streamable HTTP schema tests pass 2/2, including valid and invalid references. Changed-file Biome and whitespace checks pass; exact-source hosted CI is pending.
+
+- Draft-07 `dependencies` is now accepted on both MCP transports. Property dependency arrays map to required-property checks; schema dependencies map to dependent schemas, preserving conjunctions when old and new forms overlap. Entries, names, and depth remain bounded, and generated maps safely preserve special property names.
+- Focused stdio and Streamable HTTP validation checks pass 2/2. Changed-file Biome and whitespace checks pass; exact-source hosted confirmation is pending.

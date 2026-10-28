@@ -995,7 +995,7 @@ function resolveLocalSchemaReference(rootSchema, reference) {
         target = schema;
       }
       const pushSchema = (value) => pending.push({ schema: value, depth: depth + 1 });
-      for (const keyword of ['$defs', 'definitions', 'properties', 'patternProperties', 'dependentSchemas'])
+      for (const keyword of ['$defs', 'definitions', 'properties', 'patternProperties', 'dependentSchemas', 'dependencies'])
         if (schema[keyword] && typeof schema[keyword] === 'object' && !Array.isArray(schema[keyword]))
           for (const child of Object.values(schema[keyword])) pushSchema(child);
       for (const keyword of [
@@ -1065,6 +1065,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     'required',
     'dependentRequired',
     'dependentSchemas',
+    'dependencies',
     'additionalProperties',
     'unevaluatedProperties',
     'items',
@@ -1228,6 +1229,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     'required',
     'dependentRequired',
     'dependentSchemas',
+    'dependencies',
     'additionalProperties',
     'patternProperties',
     'propertyNames',
@@ -1286,6 +1288,41 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
           return [key, normalizeSchema(child, depth + 1, budget, rootSchema, refStack)];
         }),
       );
+    }
+    if (schema.dependencies !== undefined) {
+      if (!schema.dependencies || typeof schema.dependencies !== 'object' || Array.isArray(schema.dependencies))
+        throw mcpError('MCP object schema has invalid dependencies', 'MCP_INVALID_SCHEMA');
+      const dependencies = Object.entries(schema.dependencies);
+      if (dependencies.length > 64) throw mcpError('MCP dependencies exceeds its entry limit', 'MCP_INVALID_SCHEMA');
+      for (const [key, dependency] of dependencies) {
+        if (key.length > 128) throw mcpError('MCP dependency key is too long', 'MCP_INVALID_SCHEMA');
+        if (Array.isArray(dependency)) {
+          if (
+            dependency.length > 64 ||
+            new Set(dependency).size !== dependency.length ||
+            dependency.some((name) => typeof name !== 'string' || name.length > 128)
+          )
+            throw mcpError('MCP property dependency is invalid', 'MCP_INVALID_SCHEMA');
+          result.dependentRequired ||= Object.create(null);
+          const existing = Object.hasOwn(result.dependentRequired, key) ? result.dependentRequired[key] : [];
+          Object.defineProperty(result.dependentRequired, key, {
+            value: [...new Set([...existing, ...dependency])],
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          });
+        } else {
+          const normalized = normalizeSchema(dependency, depth + 1, budget, rootSchema, refStack);
+          result.dependentSchemas ||= Object.create(null);
+          const existing = Object.hasOwn(result.dependentSchemas, key) ? result.dependentSchemas[key] : null;
+          Object.defineProperty(result.dependentSchemas, key, {
+            value: existing ? { allOf: [existing, normalized] } : normalized,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          });
+        }
+      }
     }
     if (schema.patternProperties !== undefined) {
       if (!schema.patternProperties || typeof schema.patternProperties !== 'object' || Array.isArray(schema.patternProperties))

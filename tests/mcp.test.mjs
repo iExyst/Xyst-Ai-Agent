@@ -78,6 +78,10 @@ const sendMethodResult = (request, result) => {
     result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
     result.tools[0].inputSchema.properties.ref_anchor = { $ref: '#ShortTextAnchor' };
     result.tools[0].inputSchema.properties.legacy_ref_text = { $ref: '#/definitions/LegacyShortText' };
+    result.tools[0].inputSchema.properties.legacy_dependencies = {
+      type: 'object',
+      dependencies: { card: ['billing'], member: { required: ['id'] } },
+    };
   }
   if (${legacy ? 'false' : 'true'}) {
     result.resultType ||= 'complete';
@@ -344,6 +348,13 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_tight: 'longer' }), /characters/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'ok' }).ref_anchor, 'ok');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'x' }), /characters/);
+  assert.deepEqual(
+    validateArguments(definition.parameters, { text: 'hello', legacy_dependencies: { card: 1, billing: 2, member: 1, id: 'x' } })
+      .legacy_dependencies,
+    { card: 1, billing: 2, member: 1, id: 'x' },
+  );
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', legacy_dependencies: { card: 1 } }), /billing is required/);
+  assert.throws(() => validateArguments(definition.parameters, { text: 'hello', legacy_dependencies: { member: 1 } }), /id is required/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', legacy_ref_text: 'ok' }).legacy_ref_text, 'ok');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', legacy_ref_text: 'x' }), /characters/);
   assert.deepEqual(
@@ -1093,6 +1104,10 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
       result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
       result.tools[0].inputSchema.properties.ref_anchor = { $ref: '#ShortTextAnchor' };
       result.tools[0].inputSchema.properties.legacy_ref_text = { $ref: '#/definitions/LegacyShortText' };
+      result.tools[0].inputSchema.properties.legacy_dependencies = {
+        type: 'object',
+        dependencies: { card: ['billing'], member: { required: ['id'] } },
+      };
     }
     if (
       ['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(
@@ -1270,6 +1285,22 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   assert.throws(
     () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', legacy_ref_text: 'x' }),
     /characters/,
+  );
+  assert.deepEqual(
+    validateArguments(definitions[0].parameters, {
+      text: 'hello',
+      region: 'Québec',
+      legacy_dependencies: { card: 1, billing: 2, member: 1, id: 'x' },
+    }).legacy_dependencies,
+    { card: 1, billing: 2, member: 1, id: 'x' },
+  );
+  assert.throws(
+    () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', legacy_dependencies: { card: 1 } }),
+    /billing is required/,
+  );
+  assert.throws(
+    () => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', legacy_dependencies: { member: 1 } }),
+    /id is required/,
   );
   assert.deepEqual(
     validateArguments(definitions[0].parameters, {
