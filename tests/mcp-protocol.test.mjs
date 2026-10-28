@@ -33,17 +33,55 @@ test('MCP tool-call results validate content blocks and standard flags', () => {
     { resultType: 'complete', content: [{ type: 'image', data: 'abc' }] },
     { resultType: 'complete', content: [{ type: 'resource', resource: { uri: 'file:///workspace/a.txt', blob: 42 } }] },
     { resultType: 'complete', content: [], isError: 'false' },
-    { resultType: 'complete', content: [], structuredContent: [] },
-    { resultType: 'complete', content: [], structuredContent: null },
   ]) {
     assert.throws(() => validateMcpResultType(invalid, { protocolVersion: '2026-07-28', serverName: 'fixture', method: 'tools/call' }), {
       code: 'MCP_INVALID_RESPONSE',
     });
   }
+  for (const structuredContent of [null, [], 'answer', 42, true])
+    assert.equal(
+      validateMcpResultType(
+        { resultType: 'complete', content: [], structuredContent },
+        { protocolVersion: '2026-07-28', serverName: 'fixture', method: 'tools/call' },
+      ).structuredContent,
+      structuredContent,
+    );
   assert.throws(
     () => validateMcpResultType({ resultType: 'complete' }, { protocolVersion: '2025-11-25', serverName: 'fixture', method: 'tools/call' }),
     { code: 'MCP_INVALID_RESPONSE' },
   );
+});
+
+test('MCP list results validate tool, resource, template, and prompt definitions', () => {
+  const options = { protocolVersion: '2026-07-28', serverName: 'fixture' };
+  const cache = { resultType: 'complete', cacheScope: 'private', ttlMs: 10 };
+  const validCases = [
+    [
+      'tools/list',
+      { ...cache, tools: [{ name: 'search', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } }] },
+    ],
+    [
+      'resources/list',
+      { ...cache, resources: [{ name: 'report', uri: 'file:///report.txt', size: 10, annotations: { audience: ['user'] } }] },
+    ],
+    [
+      'resources/templates/list',
+      {
+        ...cache,
+        resourceTemplates: [{ name: 'report', uriTemplate: 'file:///reports/{id}', icons: [{ src: 'https://example.test/icon.png' }] }],
+      },
+    ],
+    ['prompts/list', { ...cache, prompts: [{ name: 'summarize', arguments: [{ name: 'text', required: true }] }] }],
+  ];
+  for (const [method, result] of validCases) assert.equal(validateMcpResultType(result, { ...options, method }), result);
+
+  for (const [method, result] of [
+    ['tools/list', { ...cache, tools: [{ name: 'bad', inputSchema: { type: 'array' } }] }],
+    ['resources/list', { ...cache, resources: [{ name: 'missing uri' }] }],
+    ['resources/templates/list', { ...cache, resourceTemplates: [{ name: 'missing template' }] }],
+    ['prompts/list', { ...cache, prompts: [{ name: 'bad', arguments: [{ name: 'x', required: 'yes' }] }] }],
+  ])
+    assert.throws(() => validateMcpResultType(result, { ...options, method }), { code: 'MCP_INVALID_RESPONSE' });
 });
 
 test('MCP modern resource and prompt results require result types while legacy results remain compatible', () => {
@@ -62,7 +100,11 @@ test('MCP modern resource and prompt results require result types while legacy r
     const result = {
       ...(method === 'server/discover' ? { supportedVersions: ['2026-07-28'], capabilities: {} } : {}),
       ...(method === 'tools/call' ? { content: [] } : {}),
+      ...(method === 'tools/list' ? { tools: [] } : {}),
+      ...(method === 'resources/list' ? { resources: [] } : {}),
+      ...(method === 'resources/templates/list' ? { resourceTemplates: [] } : {}),
       ...(method === 'resources/read' ? { contents: [] } : {}),
+      ...(method === 'prompts/list' ? { prompts: [] } : {}),
       ...(method === 'prompts/get' ? { messages: [] } : {}),
       resultType: 'complete',
       ...(['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(method)
