@@ -214,11 +214,16 @@ function isServerCapabilities(value) {
     )
       return false;
   }
-  for (const name of ['experimental', 'extensions']) {
-    const capabilities = value[name];
-    if (capabilities !== undefined && (!isRecord(capabilities) || Object.values(capabilities).some((settings) => !isRecord(settings))))
-      return false;
-  }
+  const experimental = value.experimental;
+  if (experimental !== undefined && (!isRecord(experimental) || Object.values(experimental).some((settings) => !isRecord(settings))))
+    return false;
+  const extensions = value.extensions;
+  if (
+    extensions !== undefined &&
+    (!isRecord(extensions) ||
+      Object.entries(extensions).some(([key, settings]) => !key.includes('/') || !isValidMetaKey(key) || !isRecord(settings)))
+  )
+    return false;
   return true;
 }
 

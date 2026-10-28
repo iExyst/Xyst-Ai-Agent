@@ -10,6 +10,10 @@
 - MCP template-list results now reject unmatched RFC 6570 braces as `MCP_INVALID_RESPONSE` before tool registration. Runtime expansion continues to use the vendored RFC 6570 implementation. The focused protocol suite passes 8/8 and template integration regressions pass 2/2. Exact-source hosted confirmation is pending, and full schema parity remains open.
 - RFC 6570 variable-name parsing now accepts legal hyphen and tilde characters. The integration test expands a hyphenated query variable successfully.
 
+## MCP discovery extension-key validation — 2026-10-28
+
+- Discovery responses now reject extension capability keys without a valid namespaced prefix, as required by the pinned schema. The focused protocol suite passes 8/8; exact-source hosted confirmation is pending.
+
 ## MCP binary payload validation — 2026-10-28
 
 - MCP image/audio data and blob resource contents enforce canonical base64 byte strings from the pinned `2026-07-28` schema. Malformed characters, padding, and pad bits are rejected before the result is passed to tool or resource handling. Exact-source run [40657161271](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40657161271) passed these protocol regressions on Windows and Ubuntu under Node 22/24.

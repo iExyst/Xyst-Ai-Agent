@@ -147,6 +147,8 @@ test('MCP discovery validates advertised capabilities and instructions', () => {
   for (const result of [
     { ...valid, capabilities: { tools: { listChanged: 'yes' } } },
     { ...valid, capabilities: { extensions: { 'io.example/cap': true } } },
+    { ...valid, capabilities: { extensions: { unprefixed: { enabled: true } } } },
+    { ...valid, capabilities: { extensions: { '1io.example/cap': { enabled: true } } } },
     { ...valid, capabilities: { resources: { subscribe: 'yes' } } },
     { ...valid, instructions: 1 },
     { ...valid, _meta: [] },
