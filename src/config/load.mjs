@@ -100,8 +100,7 @@ function validateProjectCannotElevate(userConfig, projectConfig, runtimeOverride
     projectConfig.routing !== undefined;
   const controlsDiscovery = projectConfig.local_servers !== undefined || projectConfig.discovery !== undefined;
   const controlsSearchProvider = projectConfig.web_search !== undefined;
-  const controlsSemanticDisclosure =
-    projectConfig.retrieval?.semantic !== undefined || projectConfig.retrieval?.auto_context !== undefined;
+  const controlsSemanticDisclosure = projectConfig.retrieval?.semantic !== undefined || projectConfig.retrieval?.auto_context !== undefined;
   const sandboxTargets = [null, ...SANDBOX_PROCESS_TOOLS];
   const weakensSandbox = sandboxTargets.some((toolName) => {
     const userMode = resolveSandboxMode(effectiveUserConfig, toolName);

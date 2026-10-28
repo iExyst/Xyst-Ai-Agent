@@ -108,7 +108,7 @@ jobs:
         run: pnpm smoke:cli-shells
       - name: Validate the VS Code package
         if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' }}
-        run: node scripts/check-vscode-package.mjs
+        run: pnpm build:vscode && pnpm check:vscode
       - name: Run browser UI and accessibility smoke
         if: ${{ !cancelled() && steps.javascript-tools.outcome == 'success' && steps.chrome.outcome == 'success' }}
         run: pnpm smoke:browser
