@@ -1,5 +1,9 @@
 # Xyst development build status — 2026-10-28
 
+## Windows development installer rebuild — 2026-10-28
+
+- `pnpm build:desktop:windows-installer` completed from source commit `36a8b94`; the NSIS installer is 29,154,464 bytes with SHA-256 `b2c795d0e666c405025223232ddaf1959eb4f96437f5664a0be05394b5ffed31`. It is `NotSigned`. The build completed; no fresh install smoke was run. The development artifact and checksum are in local `dist/dev/`.
+
 ## MCP list-result schema conformance — 2026-10-28
 
 - MCP tool, resource, resource-template, and prompt list responses validate required arrays and definition fields, including JSON Schema object input schemas, optional prompt arguments, pagination cursors, annotations, icons, and metadata objects. Discovery validates known capability flags/maps and optional instructions; resource text/blob alternative fields are type-checked. `tools/call.structuredContent` accepts any JSON value (including arrays, scalars, and `null`) as the official schema specifies.
