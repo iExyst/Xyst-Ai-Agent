@@ -2554,6 +2554,44 @@ test("mission cron scheduling resolves daylight-saving gaps and repeated hours e
   }
 });
 
+test("independent mission runners sharing a profile cannot execute the same mission concurrently", async () => withTemp(async (root) => {
+  const databasePath = join(root, "shared-runner.sqlite");
+  const firstStore = new XystStore(databasePath); const secondStore = new XystStore(databasePath);
+  const firstConfig = new ConfigStore(firstStore); const secondConfig = new ConfigStore(secondStore);
+  const firstEvents = new RuntimeEvents(); const secondEvents = new RuntimeEvents();
+  const mission = new MissionRepository(firstStore).create({ name: "Shared runner lease", objective: "Run one task once", tasks: [{ id: "main", objective: "Complete", dependsOn: [] }] });
+  let calls = 0; let enteredResolve!: () => void; let releaseResolve!: () => void;
+  const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+  const holdRunner = new Promise<void>((resolve) => { releaseResolve = resolve; });
+  const agent = { run: async () => { calls++; enteredResolve(); await holdRunner; return { sessionId: randomUUID(), model: "fake", turns: 1, status: "completed" as const, response: "complete" }; } } as never;
+  const firstRunner = new PersistentMissionRunner({ store: firstStore, config: firstConfig, events: firstEvents, agent });
+  const secondRunner = new PersistentMissionRunner({ store: secondStore, config: secondConfig, events: secondEvents, agent });
+  let firstRun: ReturnType<typeof firstRunner.run> | undefined; let secondRun: ReturnType<typeof secondRunner.run> | undefined;
+  try {
+    firstRun = firstRunner.run(mission.id);
+    await entered;
+    secondRun = secondRunner.run(mission.id);
+    const secondOutcome = await Promise.race([
+      secondRun.then((value) => ({ value }), (error: unknown) => ({ error })),
+      new Promise<{ timeout: true }>((resolve) => setTimeout(() => resolve({ timeout: true }), 500))
+    ]);
+    releaseResolve();
+    const [firstOutcome, settledSecond] = await Promise.allSettled([firstRun, secondRun]);
+    assert.equal("timeout" in secondOutcome, false, "the competing runner should promptly observe the live lease");
+    assert.ok("error" in secondOutcome && secondOutcome.error instanceof Error && /live runner lease/.test(secondOutcome.error.message));
+    assert.equal(firstOutcome.status, "fulfilled");
+    assert.equal(settledSecond.status, "rejected");
+    assert.equal(calls, 1, "only the lease owner should call the agent");
+    assert.equal((firstStore.db.prepare("SELECT COUNT(*) AS count FROM mission_runs WHERE mission_id=?").get(mission.id) as { count: number }).count, 1);
+    assert.equal((firstStore.db.prepare("SELECT status FROM missions WHERE id=?").get(mission.id) as { status: string }).status, "completed");
+  } finally {
+    releaseResolve();
+    if (firstRun) await Promise.allSettled([firstRun]);
+    if (secondRun) await Promise.allSettled([secondRun]);
+    firstStore.close(); secondStore.close();
+  }
+}));
+
 test("disabled agent delegation permits one task and rejects delegated mission graphs", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-no-delegation.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   config.set("global", "orchestration.delegation.enabled", false);

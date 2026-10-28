@@ -1806,3 +1806,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added deterministic restart coverage for two due schedules: `run_once` executes the mission once with the exact persisted `next_run_at` timestamp, then advances the next run; `skip` emits no mission run for stale work.
 - The focused behavior passed as part of the complete Windows local runtime suite (186 passed, 2 host-specific skips), along with CLI 26/26, release verification 5/5, workspace `npm run typecheck`, and `git diff --check`. C4 remains partial; this does not establish long-running multi-runner or bare-metal service behavior.
+
+## Concurrent mission runner lease isolation · 2026-10-28
+
+- Added a regression with two independent `PersistentMissionRunner` instances and separate SQLite connections to one profile. While the first holds the mission lease inside its agent call, the second sees the live lease immediately, rejects without invoking the agent, and creates no second run; the lease owner then finishes successfully.
+- Focused test passed 1/1; full local verification passed (runtime 187 passed / 2 host-specific skips, CLI 26/26, release checks 5/5), workspace `npm run typecheck`, and `git diff --check`. This tests separate runtime/store instances in one process, not process-kill or long-duration multi-runner stress; C4 remains partial pending that broader coverage.
