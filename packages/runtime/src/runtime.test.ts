@@ -929,6 +929,56 @@ test("external action approval blocks side effects when denied and permits one a
   } finally { store.close(); }
 }));
 
+test("scoped GitHub grants cannot bypass global gates and scoped settings cannot disable global action approval", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "scoped-security-gates.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  const missionId = "mission-policy";
+  config.set("global", "model.default", "test-model");
+  config.set("global", "integrations.github.enabled", false); config.set("global", "integrations.github.writeEnabled", false); config.set("global", "integrations.github.mergeEnabled", false);
+  config.set("mission", "integrations.github.enabled", true, missionId); config.set("mission", "integrations.github.writeEnabled", true, missionId); config.set("mission", "integrations.github.mergeEnabled", true, missionId);
+  config.set("global", "autonomy.externalActionApproval", false); config.set("mission", "autonomy.externalActionApproval", false, missionId);
+  let requestedToolNames: string[] = []; let action: "none" | "comment" | "create" = "none"; let actionSent = false;
+  const provider = {
+    redact: (value: string) => value,
+    streamChatWithTools: async (request: { tools: Array<Record<string, unknown>> }) => {
+      requestedToolNames = request.tools.map((tool) => String((tool.function as Record<string, unknown>)?.name));
+      if (action !== "none" && !actionSent) {
+        actionSent = true;
+        const name = action === "comment" ? "github_issue_comment" : "file_create";
+        const args = action === "comment" ? { owner: "openai", repo: "xyst", number: 1, body: "not allowed" } : { path: "approval-gate.txt", content: "approval stayed required" };
+        return { choices: [{ message: { role: "assistant", tool_calls: [{ id: `action-${randomUUID()}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }] };
+      }
+      return { choices: [{ message: { role: "assistant", content: "Policy checked." } }] };
+    }
+  };
+  let commentCount = 0;
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: { commentIssue: async () => { commentCount++; return { id: 1 }; } } as never });
+  try {
+    await agent.run("Check GitHub policy", { missionId, workspace: root });
+    assert.ok(!requestedToolNames.some((name) => name.startsWith("github_")), "mission grants cannot enable GitHub when the global integration gate is off");
+
+    config.set("global", "integrations.github.enabled", true);
+    await agent.run("Check GitHub read-only policy", { missionId, workspace: root });
+    assert.ok(requestedToolNames.includes("github_repository"), "global GitHub access exposes read tools when the mission enables the integration");
+    assert.ok(requestedToolNames.includes("github_issue_comment"), "write tools remain guarded at execution time");
+    assert.ok(!requestedToolNames.includes("github_merge_pull_request"), "mission merge grant cannot bypass the global merge gate");
+
+    action = "comment"; actionSent = false;
+    const blockedWrite = await agent.run("Post a comment", { missionId, workspace: root });
+    assert.equal(commentCount, 0, "mission write grant cannot bypass the global write gate");
+    assert.equal((store.db.prepare("SELECT status FROM tool_calls WHERE session_id=? AND name='github_issue_comment'").get(blockedWrite.sessionId) as { status: string }).status, "failed");
+
+    config.set("global", "integrations.github.writeEnabled", true); config.set("global", "integrations.github.mergeEnabled", true);
+    action = "none"; actionSent = false;
+    await agent.run("Check authorized GitHub policy", { missionId, workspace: root });
+    assert.ok(requestedToolNames.includes("github_issue_comment")); assert.ok(requestedToolNames.includes("github_merge_pull_request"));
+
+    config.set("global", "autonomy.externalActionApproval", true); action = "create"; actionSent = false; let approvalPrompts = 0;
+    await assert.rejects(() => agent.run("Create a file", { missionId, workspace: root, approveExternalAction: async (approval) => { approvalPrompts++; assert.equal(approval.toolName, "file_create"); return false; } }), /EXTERNAL_ACTION_DENIED/);
+    assert.equal(approvalPrompts, 1, "a mission false override cannot turn off a globally required approval");
+    assert.equal(existsSync(join(root, "approval-gate.txt")), false);
+  } finally { store.close(); }
+}));
+
 test("agent completion requires successful persisted tool evidence", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "completion-evidence.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model");

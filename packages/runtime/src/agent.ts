@@ -247,7 +247,8 @@ export class AgentRunner {
     const stopSequences = this.deps.config.resolve<string | string[]>("inference.stopSequences", scopes)?.value;
     const reasoning = this.deps.config.resolve<"off" | "low" | "medium" | "high" | "on">("inference.reasoning", scopes)?.value;
     const reasoningEffort: "none" | "low" | "medium" | "high" | undefined = reasoning === "off" ? "none" : reasoning === "on" ? "medium" : reasoning;
-    const externalApprovalRequired = this.deps.config.resolve<boolean>("autonomy.externalActionApproval", scopes)?.value === true;
+    const externalApprovalRequired = this.deps.config.resolve<boolean>("autonomy.externalActionApproval")?.value === true
+      || this.deps.config.resolve<boolean>("autonomy.externalActionApproval", scopes)?.value === true;
     const inferenceOptions = {
       ...(temperature !== undefined ? { temperature } : {}), ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
       ...(topP !== undefined ? { top_p: topP } : {}), ...(topK !== undefined ? { top_k: topK } : {}), ...(repeatPenalty !== undefined ? { repeat_penalty: repeatPenalty } : {}), ...(presencePenalty !== undefined ? { presence_penalty: presencePenalty } : {}),
@@ -502,9 +503,13 @@ export class AgentRunner {
     this.deps.store.db.prepare("INSERT INTO model_decisions(id,session_id,objective,model,reason,considered_json,created_at) VALUES(?,?,?,?,?,?,?)")
       .run(decisionId, sessionId, safeObjective, selected, selectionReason, JSON.stringify({ source: options.automaticModelAssignment ? "automatic_resource_aware" : options.model ? "manual" : "automatic" }), new Date().toISOString());
     this.deps.events.emit("model.selected", { model: selected, modelInstanceId: inferenceModel, reason: selectionReason }, sessionId);
-    const githubEnabled = this.deps.config.resolve<boolean>("integrations.github.enabled", scopes)?.value === true;
-    const githubWritesEnabled = this.deps.config.resolve<boolean>("integrations.github.writeEnabled", scopes)?.value === true;
-    const mergeAuthorized = Boolean(options.missionId && this.deps.config.resolve<boolean>("integrations.github.mergeEnabled", scopes)?.value === true);
+    const githubEnabled = this.deps.config.resolve<boolean>("integrations.github.enabled")?.value === true
+      && this.deps.config.resolve<boolean>("integrations.github.enabled", scopes)?.value === true;
+    const githubWritesEnabled = this.deps.config.resolve<boolean>("integrations.github.writeEnabled")?.value === true
+      && this.deps.config.resolve<boolean>("integrations.github.writeEnabled", scopes)?.value === true;
+    const mergeAuthorized = Boolean(options.missionId
+      && this.deps.config.resolve<boolean>("integrations.github.mergeEnabled")?.value === true
+      && this.deps.config.resolve<boolean>("integrations.github.mergeEnabled", scopes)?.value === true);
     const workspace = options.workspace ?? process.cwd();
     const projectInstructions = await loadProjectInstructions(access, workspace);
     const mcpEnabled = this.deps.config.resolve<boolean>("integrations.mcp.enabled", scopes)?.value === true;
