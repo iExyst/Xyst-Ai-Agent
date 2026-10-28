@@ -26,7 +26,16 @@ function fixtureServerCode({
 const readline = require('node:readline');
 const lines = readline.createInterface({ input: process.stdin });
 const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
-const sendMethodResult = (request, result) => { if (${legacy ? 'false' : 'true'}) result.resultType ||= 'complete'; send(request.id, result); };
+const sendMethodResult = (request, result) => {
+  if (${legacy ? 'false' : 'true'}) {
+    result.resultType ||= 'complete';
+    if (['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(request.method)) {
+      result.cacheScope ||= 'private';
+      result.ttlMs ??= 0;
+    }
+  }
+  send(request.id, result);
+};
 const fail = (id, code, message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }) + '\\n');
 lines.on('line', (line) => {
   const request = JSON.parse(line);
@@ -168,10 +177,14 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.deepEqual(result.content, [{ type: 'text', text: 'echo:hello' }]);
   assert.deepEqual(await manager.call(resourceTool.name, {}), {
     resultType: 'complete',
+    cacheScope: 'private',
+    ttlMs: 0,
     contents: [{ uri: 'file:///docs/readme', mimeType: 'text/plain', text: 'Fixture resource contents' }],
   });
   assert.deepEqual(await manager.call(resourceTemplateTool.name, { name: 'my doc!.md' }), {
     resultType: 'complete',
+    cacheScope: 'private',
+    ttlMs: 0,
     contents: [{ uri: 'file:///docs/my%20doc%21.md', mimeType: 'text/plain', text: 'Fixture resource contents' }],
   });
   await assert.rejects(manager.call(resourceTemplateTool.name, { name: 'ok', extra: 'rejected' }), {
@@ -638,6 +651,14 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                         resultType: callResultType || 'complete',
                       };
     result.resultType ||= 'complete';
+    if (
+      ['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(
+        request.method,
+      )
+    ) {
+      result.cacheScope ||= 'private';
+      result.ttlMs ??= 0;
+    }
     const payload = JSON.stringify({ jsonrpc: '2.0', id: request.id, result });
     if (request.method !== 'tools/call')
       return Response.json(JSON.parse(payload), {
@@ -681,10 +702,14 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   callResultType = null;
   assert.deepEqual(await session.readResource('https://docs.example.test/readme'), {
     resultType: 'complete',
+    cacheScope: 'private',
+    ttlMs: 0,
     contents: [{ uri: 'https://docs.example.test/readme', text: 'remote resource' }],
   });
   assert.deepEqual(await session.readResource('https://docs.example.test/alpha'), {
     resultType: 'complete',
+    cacheScope: 'private',
+    ttlMs: 0,
     contents: [{ uri: 'https://docs.example.test/alpha', text: 'remote resource' }],
   });
   assert.deepEqual(await session.getPrompt('review', { topic: 'safety' }), {
@@ -861,7 +886,13 @@ test('MCP current protocol does not resume SSE responses', async (t) => {
         return Response.json({
           jsonrpc: '2.0',
           id: request.id,
-          result: { resultType: 'complete', supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+          result: {
+            resultType: 'complete',
+            cacheScope: 'private',
+            ttlMs: 0,
+            supportedVersions: ['2026-07-28'],
+            capabilities: { tools: {} },
+          },
         });
       return new Response('id: cursor-1\n\n', { headers: { 'content-type': 'text/event-stream' } });
     },

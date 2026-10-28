@@ -60,10 +60,14 @@ test('MCP modern resource and prompt results require result types while legacy r
       code: 'MCP_INVALID_RESPONSE',
     });
     const result = {
+      ...(method === 'server/discover' ? { supportedVersions: ['2026-07-28'], capabilities: {} } : {}),
       ...(method === 'tools/call' ? { content: [] } : {}),
       ...(method === 'resources/read' ? { contents: [] } : {}),
       ...(method === 'prompts/get' ? { messages: [] } : {}),
       resultType: 'complete',
+      ...(['server/discover', 'tools/list', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list'].includes(method)
+        ? { cacheScope: 'private', ttlMs: 0 }
+        : {}),
     };
     assert.equal(validateMcpResultType(result, { protocolVersion: '2026-07-28', method }), result);
     const { resultType: _resultType, ...legacy } = result;
@@ -75,7 +79,12 @@ test('MCP resource reads and prompt messages validate returned content shapes', 
   const options = { protocolVersion: '2026-07-28', serverName: 'fixture' };
   assert.equal(
     validateMcpResultType(
-      { resultType: 'complete', contents: [{ uri: 'file:///workspace/a.txt', text: 'contents' }] },
+      {
+        resultType: 'complete',
+        cacheScope: 'private',
+        ttlMs: 0,
+        contents: [{ uri: 'file:///workspace/a.txt', text: 'contents' }],
+      },
       { ...options, method: 'resources/read' },
     ).contents[0].text,
     'contents',
@@ -88,7 +97,10 @@ test('MCP resource reads and prompt messages validate returned content shapes', 
     'assistant',
   );
   for (const [method, result] of [
-    ['resources/read', { resultType: 'complete', contents: [{ uri: 'file:///workspace/a.txt', blob: 42 }] }],
+    [
+      'resources/read',
+      { resultType: 'complete', cacheScope: 'private', ttlMs: 0, contents: [{ uri: 'file:///workspace/a.txt', blob: 42 }] },
+    ],
     ['prompts/get', { resultType: 'complete', messages: [{ role: 'system', content: { type: 'text', text: 'ignored' } }] }],
     ['prompts/get', { resultType: 'complete', messages: [{ role: 'user', content: { type: 'text', text: 1 } }] }],
   ])

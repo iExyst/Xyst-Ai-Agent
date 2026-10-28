@@ -2479,7 +2479,12 @@ test('MCP server add, edit, inspect, and test use validated reference-only confi
     fixturePath,
     `const readline = require('node:readline');
 const lines = readline.createInterface({ input: process.stdin });
-const send = (id, result) => { result.resultType ||= 'complete'; process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n'); };
+const send = (id, result) => {
+  result.resultType ||= 'complete';
+  result.cacheScope ||= 'private';
+  result.ttlMs ??= 0;
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
+};
 lines.on('line', (line) => {
   const request = JSON.parse(line);
   if (request.method === 'server/discover') send(request.id, { supportedVersions: ['2026-07-28'], capabilities: { tools: {}, resources: {}, prompts: {} } });

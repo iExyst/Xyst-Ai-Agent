@@ -2,8 +2,8 @@
 
 ## MCP result-shape conformance — 2026-10-28
 
-- Modern discovery, tool, resource, and prompt method responses now require the schema's `resultType`; resource reads validate text/blob content records, and prompt results validate message roles and content blocks. Unsupported result control flow continues to fail closed, while legacy responses keep their omitted-resultType compatibility.
-- Focused protocol validation passes 5/5; focused stdio and Streamable HTTP integration regressions pass 4/4; focused API, signed-package, and current-protocol HTTP fixtures pass 4/4; changed-file Biome checks pass. Hosted run [40611216609](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40611216609) for `79c8892` confirms the preceding result-type change and fixtures on exact source; this field-shape follow-up is awaiting hosted CI. Full MCP field-level schema validation remains open. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
+- Modern discovery, tool, resource, and prompt method responses now require the schema's `resultType`; cacheable responses require valid cache scope and nonnegative integer TTL; discovery validates version and capability containers; resource reads validate text/blob records; prompt responses validate message roles and content blocks. Unsupported control flow remains fail closed; legacy responses keep omitted-field compatibility.
+- Focused protocol validation passes 5/5; stdio and Streamable HTTP integration regressions pass 2/2; focused API, signed-package, and MCP package API fixtures pass 3/3; changed-file Biome checks pass. Hosted run [40611216609](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40611216609) confirms the preceding result-type change and fixtures on exact source; cache/shape validation follow-up is awaiting hosted CI. Full MCP field-level schema validation remains open. Reference: [official MCP 2026-07-28 JSON schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.json).
 
 ## Windows atomic-replacement cleanup warning — 2026-10-28
 

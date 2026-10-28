@@ -1,4 +1,12 @@
 const MODERN_PROTOCOL_VERSION = '2026-07-28';
+const CACHEABLE_METHODS = new Set([
+  'server/discover',
+  'tools/list',
+  'resources/list',
+  'resources/templates/list',
+  'resources/read',
+  'prompts/list',
+]);
 const RESULT_TYPE_METHODS = new Set([
   'server/discover',
   'tools/list',
@@ -25,6 +33,20 @@ export function validateMcpResultType(result, { protocolVersion, serverName, met
     (!isRecord(result) || typeof result.resultType !== 'string')
   )
     throw mcpError(`MCP server '${serverName}' omitted the required result type during ${method}`, 'MCP_INVALID_RESPONSE');
+  if (
+    protocolVersion === MODERN_PROTOCOL_VERSION &&
+    CACHEABLE_METHODS.has(method) &&
+    (!isRecord(result) || !['private', 'public'].includes(result.cacheScope) || !Number.isInteger(result.ttlMs) || result.ttlMs < 0)
+  )
+    throw mcpError(`MCP server '${serverName}' returned invalid cache metadata during ${method}`, 'MCP_INVALID_RESPONSE');
+  if (
+    protocolVersion === MODERN_PROTOCOL_VERSION &&
+    method === 'server/discover' &&
+    (!Array.isArray(result.supportedVersions) ||
+      !result.supportedVersions.every((version) => typeof version === 'string') ||
+      !isRecord(result.capabilities))
+  )
+    throw mcpError(`MCP server '${serverName}' returned invalid discovery metadata`, 'MCP_INVALID_RESPONSE');
   if (method === 'tools/call') validateToolCallResult(result, { protocolVersion, serverName });
   if (method === 'resources/read') validateResourceReadResult(result, serverName);
   if (method === 'prompts/get') validatePromptResult(result, serverName);

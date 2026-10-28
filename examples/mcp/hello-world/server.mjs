@@ -43,6 +43,8 @@ input.on('line', (line) => {
     case 'server/discover':
       respond(request.id, {
         resultType: 'complete',
+        cacheScope: 'private',
+        ttlMs: 0,
         supportedVersions: [PROTOCOL_VERSION],
         capabilities: { tools: {} },
         _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'xyst-hello-world', version: SERVER_VERSION } },
@@ -51,6 +53,8 @@ input.on('line', (line) => {
     case 'tools/list':
       respond(request.id, {
         resultType: 'complete',
+        cacheScope: 'private',
+        ttlMs: 0,
         tools: [
           {
             name: 'echo',
