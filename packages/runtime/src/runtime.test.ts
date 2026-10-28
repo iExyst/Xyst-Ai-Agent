@@ -1393,7 +1393,13 @@ test("office preview result sends the rendered PNG pixels to the next model requ
     redact: (value: string) => value,
     streamChatWithTools: async (request: { messages: Array<{ role: string; content?: unknown }>; tools: Array<Record<string, unknown>> }) => {
       round++;
-      if (round === 1) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-page", type: "function", function: { name: "office_preview", arguments: JSON.stringify({ path: "vision.pdf", page: 1, output_path: "vision.png" }) } }] } }] };
+      if (round === 1) {
+        const previewTool = request.tools.find((tool) => (tool.function as Record<string, unknown>)?.name === "office_preview");
+        assert.ok(previewTool, "office_preview should be offered to the agent");
+        assert.match(JSON.stringify(previewTool), /inspect those pixels directly/);
+        assert.match(JSON.stringify(previewTool), /Do not infer colors or layout from filenames or text/);
+        return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-page", type: "function", function: { name: "office_preview", arguments: JSON.stringify({ path: "vision.pdf", page: 1, output_path: "vision.png" }) } }] } }] };
+      }
       const offeredTools = request.tools.map((tool) => String((tool.function as Record<string, unknown>)?.name));
       assert.deepEqual(offeredTools, ["office_read", "office_preview", "task_complete"]);
       const previewResult = request.messages.find((message) => message.role === "tool" && Array.isArray(message.content) && message.content.some((part) => Boolean(part && typeof part === "object" && (part as Record<string, unknown>).type === "image_url")));
