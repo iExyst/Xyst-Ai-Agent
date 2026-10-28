@@ -998,7 +998,18 @@ function resolveLocalSchemaReference(rootSchema, reference) {
       for (const keyword of ['$defs', 'properties', 'patternProperties', 'dependentSchemas'])
         if (schema[keyword] && typeof schema[keyword] === 'object' && !Array.isArray(schema[keyword]))
           for (const child of Object.values(schema[keyword])) pushSchema(child);
-      for (const keyword of ['additionalProperties', 'propertyNames', 'items', 'contains', 'not', 'if', 'then', 'else', 'contentSchema'])
+      for (const keyword of [
+        'additionalProperties',
+        'unevaluatedProperties',
+        'propertyNames',
+        'items',
+        'contains',
+        'not',
+        'if',
+        'then',
+        'else',
+        'contentSchema',
+      ])
         if (schema[keyword] !== undefined) pushSchema(schema[keyword]);
       for (const keyword of ['prefixItems', 'allOf', 'anyOf', 'oneOf'])
         if (Array.isArray(schema[keyword])) for (const child of schema[keyword]) pushSchema(child);
@@ -1053,6 +1064,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     'dependentRequired',
     'dependentSchemas',
     'additionalProperties',
+    'unevaluatedProperties',
     'items',
     'prefixItems',
     'contains',
@@ -1206,6 +1218,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
     'additionalProperties',
     'patternProperties',
     'propertyNames',
+    'unevaluatedProperties',
   ];
   const hasObjectKeywords = objectKeywords.some((key) => schema[key] !== undefined);
   if (types.includes('object') || hasObjectKeywords) {
@@ -1288,6 +1301,8 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
         throw mcpError('MCP object schema has invalid additionalProperties', 'MCP_INVALID_SCHEMA');
       result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1, budget, rootSchema, refStack);
     }
+    if (schema.unevaluatedProperties !== undefined)
+      result.unevaluatedProperties = normalizeSchema(schema.unevaluatedProperties, depth + 1, budget, rootSchema, refStack);
   }
   if (
     types.includes('array') ||

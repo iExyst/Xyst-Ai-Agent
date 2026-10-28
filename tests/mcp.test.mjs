@@ -44,6 +44,25 @@ const sendMethodResult = (request, result) => {
     if (${dynamicToolNotifications ? 'true' : 'false'} && dynamicToolChanged) result.tools[0].description = 'Updated fixture tool description.';
   }
   if (request.method === 'tools/list' && result.tools?.[0]?.inputSchema) {
+    result.tools[0].inputSchema.properties.unevaluated_object = {
+      allOf: [
+        { type: 'object', properties: { first: { type: 'string' } } },
+        { type: 'object', properties: { second: { type: 'integer' } } },
+        {
+          anyOf: [
+            { properties: { third: { type: 'boolean' } }, required: ['third'] },
+            { properties: { fourth: { type: 'boolean' } }, required: ['fourth'] },
+          ],
+        },
+        {
+          oneOf: [
+            { properties: { fifth: { type: 'boolean' } }, required: ['fifth'] },
+            { properties: { sixth: { type: 'boolean' } }, required: ['sixth'] },
+          ],
+        },
+      ],
+      unevaluatedProperties: false,
+    };
     result.tools[0].inputSchema.$defs = { ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 } };
     result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
     result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
@@ -314,6 +333,21 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_tight: 'longer' }), /characters/);
   assert.equal(validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'ok' }).ref_anchor, 'ok');
   assert.throws(() => validateArguments(definition.parameters, { text: 'hello', ref_anchor: 'x' }), /characters/);
+  assert.deepEqual(
+    validateArguments(definition.parameters, {
+      text: 'hello',
+      unevaluated_object: { first: 'ok', second: 2, third: true, fifth: false },
+    }).unevaluated_object,
+    { first: 'ok', second: 2, third: true, fifth: false },
+  );
+  assert.throws(
+    () =>
+      validateArguments(definition.parameters, {
+        text: 'hello',
+        unevaluated_object: { first: 'ok', second: 2, third: true, fifth: false, extra: true },
+      }),
+    /not allowed/,
+  );
   assert.deepEqual(validateArguments(definition.parameters, { text: 'hello', object_choice: { mode: 'fast' } }), {
     text: 'hello',
     object_choice: { mode: 'fast' },
@@ -1000,6 +1034,25 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                       };
     result.resultType ||= 'complete';
     if (request.method === 'tools/list') {
+      result.tools[0].inputSchema.properties.unevaluated_object = {
+        allOf: [
+          { type: 'object', properties: { first: { type: 'string' } } },
+          { type: 'object', properties: { second: { type: 'integer' } } },
+          {
+            anyOf: [
+              { properties: { third: { type: 'boolean' } }, required: ['third'] },
+              { properties: { fourth: { type: 'boolean' } }, required: ['fourth'] },
+            ],
+          },
+          {
+            oneOf: [
+              { properties: { fifth: { type: 'boolean' } }, required: ['fifth'] },
+              { properties: { sixth: { type: 'boolean' } }, required: ['sixth'] },
+            ],
+          },
+        ],
+        unevaluatedProperties: false,
+      };
       result.tools[0].inputSchema.$defs = {
         ShortText: { $anchor: 'ShortTextAnchor', type: 'string', minLength: 2 },
         Region: { type: 'string', 'x-mcp-header': 'Region' },
@@ -1169,6 +1222,23 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_tight: 'longer' }), /characters/);
   assert.equal(validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_anchor: 'ok' }).ref_anchor, 'ok');
   assert.throws(() => validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', ref_anchor: 'x' }), /characters/);
+  assert.deepEqual(
+    validateArguments(definitions[0].parameters, {
+      text: 'hello',
+      region: 'Québec',
+      unevaluated_object: { first: 'ok', second: 2, third: true, fifth: false },
+    }).unevaluated_object,
+    { first: 'ok', second: 2, third: true, fifth: false },
+  );
+  assert.throws(
+    () =>
+      validateArguments(definitions[0].parameters, {
+        text: 'hello',
+        region: 'Québec',
+        unevaluated_object: { first: 'ok', second: 2, third: true, fifth: false, extra: true },
+      }),
+    /not allowed/,
+  );
   assert.deepEqual(
     validateArguments(definitions[0].parameters, { text: 'hello', region: 'Québec', any_value: 42, extension_field: 'accepted' }),
     { text: 'hello', region: 'Québec', any_value: 42, extension_field: 'accepted' },

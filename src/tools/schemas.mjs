@@ -425,8 +425,9 @@ export function validateMcpToolOutput(schema, result) {
 }
 
 function validateValue(schema, value, location, state) {
-  if (schema === true) return;
+  if (schema === true) return new Set();
   if (schema === false) throw new Error(`${location} is not allowed`);
+  const evaluatedProperties = new Set();
   if (Object.hasOwn(schema, 'const') && !isDeepStrictEqual(schema.const, value)) throw new Error(`${location} must match its fixed value`);
   if (Array.isArray(schema.type)) {
     const matches = schema.type.filter((type) => matchesSchemaType(type, value));
@@ -434,8 +435,7 @@ function validateValue(schema, value, location, state) {
     let lastError;
     for (const type of matches) {
       try {
-        validateValue({ ...schema, type }, value, location, state);
-        return;
+        return validateValue({ ...schema, type }, value, location, state);
       } catch (error) {
         lastError = error;
       }
@@ -446,25 +446,33 @@ function validateValue(schema, value, location, state) {
     throw new Error(`${location} must match one of the allowed values`);
   if (typeof value === 'string' && schema.pattern !== undefined && !matchesPattern(schema.pattern, value, location, state))
     throw new Error(`${location} must match the required pattern`);
-  for (const branch of schema.allOf || []) validateValue(branch, value, location, state);
+  for (const branch of schema.allOf || []) mergeEvaluatedProperties(evaluatedProperties, validateValue(branch, value, location, state));
   if (schema.anyOf) {
     let matched = false;
-    for (const branch of schema.anyOf)
-      if (schemaMatches(branch, value, location, state)) {
+    for (const branch of schema.anyOf) {
+      const branchProperties = tryValidateValue(branch, value, location, state);
+      if (branchProperties) {
         matched = true;
-        break;
+        mergeEvaluatedProperties(evaluatedProperties, branchProperties);
       }
+    }
     if (!matched) throw new Error(`${location} must match at least one schema`);
   }
   if (schema.oneOf) {
-    let matchingBranches = 0;
-    for (const branch of schema.oneOf) if (schemaMatches(branch, value, location, state)) matchingBranches += 1;
-    if (matchingBranches !== 1) throw new Error(`${location} must match exactly one schema`);
+    let matchingProperties = null;
+    for (const branch of schema.oneOf) {
+      const branchProperties = tryValidateValue(branch, value, location, state);
+      if (!branchProperties) continue;
+      if (matchingProperties) throw new Error(`${location} must match exactly one schema`);
+      matchingProperties = branchProperties;
+    }
+    if (!matchingProperties) throw new Error(`${location} must match exactly one schema`);
+    mergeEvaluatedProperties(evaluatedProperties, matchingProperties);
   }
-  if (schema.not && schemaMatches(schema.not, value, location, state)) throw new Error(`${location} must not match the excluded schema`);
+  if (schema.not && tryValidateValue(schema.not, value, location, state)) throw new Error(`${location} must not match the excluded schema`);
   if (schema.if) {
-    const branch = schemaMatches(schema.if, value, location, state) ? schema.then : schema.else;
-    if (branch !== undefined) validateValue(branch, value, location, state);
+    const branch = tryValidateValue(schema.if, value, location, state) ? schema.then : schema.else;
+    if (branch !== undefined) mergeEvaluatedProperties(evaluatedProperties, validateValue(branch, value, location, state));
   }
   if (schema.type !== undefined && !matchesSchemaType(schema.type, value)) {
     const typeErrors = {
@@ -493,7 +501,7 @@ function validateValue(schema, value, location, state) {
         for (const dependentName of dependentNames)
           if (!Object.hasOwn(value, dependentName)) throw new Error(`${location}.${dependentName} is required when ${key} is present`);
     for (const [key, dependentSchema] of Object.entries(schema.dependentSchemas || {}))
-      if (Object.hasOwn(value, key)) validateValue(dependentSchema, value, location, state);
+      if (Object.hasOwn(value, key)) mergeEvaluatedProperties(evaluatedProperties, validateValue(dependentSchema, value, location, state));
     const patternEntries = Object.entries(schema.patternProperties || {});
     if (propertyCount > 128 && (patternEntries.length || schema.propertyNames !== undefined))
       throw new Error(`${location} has too many properties for pattern validation`);
@@ -506,10 +514,24 @@ function validateValue(schema, value, location, state) {
           validateValue(propertySchema, child, `${location}.${key}`, state);
         }
       const explicitlyDeclared = Object.hasOwn(schema.properties || {}, key);
-      if (explicitlyDeclared) validateValue(schema.properties[key], child, `${location}.${key}`, state);
-      else if (!patternMatched && schema.additionalProperties === false) throw new Error(`${location}.${key} is not allowed`);
-      else if (!patternMatched && schema.additionalProperties !== undefined)
+      if (explicitlyDeclared) {
+        validateValue(schema.properties[key], child, `${location}.${key}`, state);
+        evaluatedProperties.add(key);
+      }
+      if (patternMatched) evaluatedProperties.add(key);
+      if (!explicitlyDeclared && !patternMatched && schema.additionalProperties === false)
+        throw new Error(`${location}.${key} is not allowed`);
+      if (!explicitlyDeclared && !patternMatched && schema.additionalProperties !== undefined) {
         validateValue(schema.additionalProperties, child, `${location}.${key}`, state);
+        evaluatedProperties.add(key);
+      }
+    }
+    if (schema.unevaluatedProperties !== undefined) {
+      for (const [key, child] of Object.entries(value)) {
+        if (evaluatedProperties.has(key)) continue;
+        validateValue(schema.unevaluatedProperties, child, `${location}.${key}`, state);
+        evaluatedProperties.add(key);
+      }
     }
   } else if (typeof value === 'string') {
     const length = countCodePoints(value);
@@ -571,6 +593,19 @@ function validateValue(schema, value, location, state) {
       for (let index = prefixItems.length; index < value.length; index++)
         validateValue(schema.items, value[index], `${location}[${index}]`, state);
   }
+  return evaluatedProperties;
+}
+
+function tryValidateValue(schema, value, location, state) {
+  try {
+    return validateValue(schema, value, location, state);
+  } catch {
+    return null;
+  }
+}
+
+function mergeEvaluatedProperties(target, source) {
+  for (const property of source) target.add(property);
 }
 
 function matchesPattern(pattern, value, location, state) {
@@ -584,12 +619,7 @@ function matchesPattern(pattern, value, location, state) {
 }
 
 function schemaMatches(schema, value, location, state) {
-  try {
-    validateValue(schema, value, location, state);
-    return true;
-  } catch {
-    return false;
-  }
+  return tryValidateValue(schema, value, location, state) !== null;
 }
 
 function canonicalJson(value) {
