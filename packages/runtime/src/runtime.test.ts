@@ -1260,20 +1260,36 @@ test("all GitHub mutations require approval and durable external-action tracking
   } finally { store.close(); }
 }));
 
-test("closing a browser tab requires approval and durable external-action tracking", async () => withTemp(async (root) => {
+test("browser page mutations and transfers require approval and durable external-action tracking", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "browser-close-approval.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.default", "test-model"); config.set("global", "browser.automation.enabled", true); config.set("global", "autonomy.externalActionApproval", true);
-  let closes = 0;
-  const provider = { redact: (value: string) => value, streamChatWithTools: async () => ({ choices: [{ message: { role: "assistant", tool_calls: [{ id: "unapproved-close-tab", type: "function", function: { name: "browser_close_tab", arguments: JSON.stringify({ tab_id: "tab-1" }) } }] } }] }) };
+  const actions = [
+    { name: "browser_close_tab", args: { tab_id: "tab-1" } },
+    { name: "browser_click", args: { selector: "button[type=submit]" } },
+    { name: "browser_fill", args: { selector: "input[name=email]", value: "operator@example.invalid" } },
+    { name: "browser_select", args: { selector: "select[name=plan]", value: "pro" } },
+    { name: "browser_press", args: { key: "Enter" } },
+    { name: "browser_download", args: { selector: "a[download]", path: "download.bin" } },
+    { name: "browser_upload", args: { selector: "input[type=file]", path: "upload.bin" } }
+  ];
+  let requested = actions[0]!; const sideEffects: string[] = [];
+  const provider = { redact: (value: string) => value, streamChatWithTools: async () => ({ choices: [{ message: { role: "assistant", tool_calls: [{ id: `unapproved-${requested.name}`, type: "function", function: { name: requested.name, arguments: JSON.stringify(requested.args) } }] } }] }) };
+  const browserTools = Object.fromEntries(actions.map(({ name }) => [name, {
+    definition: { type: "function", function: { name, parameters: { type: "object", properties: {}, additionalProperties: false } } },
+    execute: async () => { sideEffects.push(name); return { ok: true }; }
+  }]));
   const agent = new AgentRunner({
     store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never, dataDir: root,
-    browserToolsFactory: () => ({ tools: { browser_close_tab: { definition: { type: "function", function: { name: "browser_close_tab", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } }, execute: async () => { closes++; return { closed: "tab-1" }; } } }, close: async () => undefined })
+    browserToolsFactory: () => ({ tools: browserTools, close: async () => undefined })
   });
   try {
-    await assert.rejects(() => agent.run("Read the page and summarize it. Do not change anything.", { workspace: root, maxTurns: 1 }), (error: unknown) => error instanceof ExternalActionApprovalError && error.code === "EXTERNAL_ACTION_APPROVAL_REQUIRED");
-    assert.equal(closes, 0, "the tab stays open until user approval");
-    const call = store.db.prepare("SELECT status,effect,execution_scope,request_hash FROM tool_calls WHERE name='browser_close_tab'").get() as { status: string; effect: string; execution_scope: string; request_hash: string };
-    assert.deepEqual([call.status, call.effect], ["failed", "external"]); assert.ok(call.execution_scope); assert.match(call.request_hash, /^[a-f0-9]{64}$/);
+    for (const action of actions) {
+      requested = action;
+      await assert.rejects(() => agent.run("Read the page and summarize it. Do not change anything.", { workspace: root, maxTurns: 1 }), (error: unknown) => error instanceof ExternalActionApprovalError && error.code === "EXTERNAL_ACTION_APPROVAL_REQUIRED");
+      const call = store.db.prepare("SELECT status,effect,execution_scope,request_hash FROM tool_calls WHERE name=? ORDER BY rowid DESC LIMIT 1").get(action.name) as { status: string; effect: string; execution_scope: string; request_hash: string };
+      assert.deepEqual([call.status, call.effect], ["failed", "external"]); assert.ok(call.execution_scope); assert.match(call.request_hash, /^[a-f0-9]{64}$/);
+    }
+    assert.deepEqual(sideEffects, [], "browser mutations, transfers, and closing tabs never execute without user approval");
   } finally { store.close(); }
 }));
 
