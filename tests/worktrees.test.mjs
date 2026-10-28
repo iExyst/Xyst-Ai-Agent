@@ -177,3 +177,40 @@ test('worktree lease release preserves a replacement lock file', async (t) => {
   await release();
   assert.equal(JSON.parse(await fs.readFile(lockPath, 'utf8')).lock_token, '00000000-0000-4000-8000-000000000126');
 });
+
+test('worktree lease acquisition failure preserves a replacement lock file', async (t) => {
+  const root = await createTempDirectory('xyst-worktree-lock-acquire-replacement-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const id = '00000000-0000-4000-8000-000000000127';
+  const lockDirectory = path.join(root, '.agent', 'worktree-locks');
+  const lockPath = path.join(lockDirectory, `${id}.lock`);
+  const backupPath = path.join(lockDirectory, 'failed-lock.backup');
+  const originalOpen = fs.open;
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] !== lockPath || args[1] !== 'wx') return handle;
+    let swapped = false;
+    return {
+      writeFile: (...writeArgs) => handle.writeFile(...writeArgs),
+      sync: async () => {
+        await handle.sync();
+        throw Object.assign(new Error('injected sync failure'), { code: 'EIO' });
+      },
+      stat: () => handle.stat(),
+      close: async () => {
+        await handle.close();
+        if (!swapped) {
+          swapped = true;
+          await fs.rename(lockPath, backupPath);
+          await fs.writeFile(lockPath, JSON.stringify({ lock_token: 'replacement-lock' }));
+        }
+      },
+    };
+  };
+  try {
+    await assert.rejects(acquireWorktreeLease(root, id), { code: 'EIO' });
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.equal(JSON.parse(await fs.readFile(lockPath, 'utf8')).lock_token, 'replacement-lock');
+});

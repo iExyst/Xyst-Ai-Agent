@@ -123,8 +123,19 @@ export async function acquireWorktreeLease(workspaceRoot, id) {
     );
     await handle.sync();
   } catch (error) {
+    const openedInfo = await handle.stat().catch(() => null);
     await handle.close().catch(() => {});
-    await fs.rm(lockPath, { force: true }).catch(() => {});
+    if (openedInfo) {
+      const currentInfo = await fs.lstat(lockPath).catch(() => null);
+      if (currentInfo?.isFile() && !currentInfo.isSymbolicLink() && sameFileIdentity(openedInfo, currentInfo)) {
+        try {
+          const currentRecord = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+          if (currentRecord.lock_token === lockToken) await fs.rm(lockPath).catch(() => {});
+        } catch {
+          // Keep the path when ownership cannot be confirmed.
+        }
+      }
+    }
     throw error;
   }
   let released = false;
