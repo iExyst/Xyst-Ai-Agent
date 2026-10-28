@@ -2682,3 +2682,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - The MCP server-name field now escapes its literal hyphen for Chromium's Unicode-set (`v`) regular-expression mode. Browser smoke readiness now accepts a connected active conversation without requiring the empty-state welcome heading.
 - Startup diagnostics retain the specific `MCP_SPAWN_FAILED` code for a missing configured executable; API and browser expectations now match that contract. The JSON-schema unit fixture now supplies serialized JSON for scalar-string validation.
 - Focused API/schema regressions pass 3/3, changed-file Biome and whitespace checks pass, and `pnpm smoke:browser` passes in Edge through MCP editing/audit, approvals, session goals, CLI resume, model switching, and active-run budgets. Hosted verification is pending.
+
+## MCP JSON Schema anchors — 2026-10-28
+
+- Stdio and Streamable HTTP tool schemas preserve and validate `$anchor`, then resolve bounded named local-fragment references through schema-bearing positions. Invalid, missing, or duplicate anchors fail closed.
+- Focused stdio discovery and HTTP negotiation/schema integration regressions pass (2/2). Exact-source hosted run [40700792449](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40700792449) passed JavaScript formatting, browser smoke, CLI workflow, VS Code package, and evaluation jobs on Ubuntu, but both Linux Node lanes failed the known hosted Bubblewrap loopback restriction and dependent signed-MCP isolation test. Windows and desktop lifecycle jobs were still running at last observation.

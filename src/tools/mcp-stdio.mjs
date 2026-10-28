@@ -973,7 +973,39 @@ function mcpTimeoutPolicy(serverName) {
 
 function resolveLocalSchemaReference(rootSchema, reference) {
   if (reference === '#') return rootSchema;
-  if (!reference.startsWith('#/')) throw mcpError('Only local JSON Schema references are supported', 'MCP_INVALID_SCHEMA');
+  if (!reference.startsWith('#/')) {
+    let anchor;
+    try {
+      anchor = decodeURIComponent(reference.slice(1));
+    } catch {
+      throw mcpError('MCP tool input schema has an invalid $ref anchor', 'MCP_INVALID_SCHEMA');
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(anchor)) throw mcpError('Only local JSON Schema references are supported', 'MCP_INVALID_SCHEMA');
+    const pending = [{ schema: rootSchema, depth: 0 }];
+    const visited = new WeakSet();
+    let target = null;
+    let count = 0;
+    while (pending.length) {
+      const { schema, depth } = pending.pop();
+      if (!schema || typeof schema !== 'object' || Array.isArray(schema) || visited.has(schema)) continue;
+      visited.add(schema);
+      if (++count > 512 || depth > 32) throw mcpError('MCP tool schema anchor search exceeds its limit', 'MCP_INVALID_SCHEMA');
+      if (schema.$anchor === anchor) {
+        if (target) throw mcpError('MCP tool input schema contains duplicate $anchor values', 'MCP_INVALID_SCHEMA');
+        target = schema;
+      }
+      const pushSchema = (value) => pending.push({ schema: value, depth: depth + 1 });
+      for (const keyword of ['$defs', 'properties', 'patternProperties', 'dependentSchemas'])
+        if (schema[keyword] && typeof schema[keyword] === 'object' && !Array.isArray(schema[keyword]))
+          for (const child of Object.values(schema[keyword])) pushSchema(child);
+      for (const keyword of ['additionalProperties', 'propertyNames', 'items', 'contains', 'not', 'if', 'then', 'else', 'contentSchema'])
+        if (schema[keyword] !== undefined) pushSchema(schema[keyword]);
+      for (const keyword of ['prefixItems', 'allOf', 'anyOf', 'oneOf'])
+        if (Array.isArray(schema[keyword])) for (const child of schema[keyword]) pushSchema(child);
+    }
+    if (!target) throw mcpError('MCP tool input schema $ref target was not found', 'MCP_INVALID_SCHEMA');
+    return target;
+  }
   let pointer;
   try {
     pointer = decodeURIComponent(reference.slice(1));
@@ -999,6 +1031,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   const allowed = new Set([
     '$schema',
     '$comment',
+    '$anchor',
     '$defs',
     '$ref',
     'type',
@@ -1079,11 +1112,13 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }, rootSchema 
   )
     throw mcpError('MCP tool input schema uses an unsupported type', 'MCP_INVALID_SCHEMA');
   const result = hasType ? { type } : {};
-  for (const key of ['$schema', '$comment', 'format', 'contentEncoding', 'contentMediaType'])
+  for (const key of ['$schema', '$comment', '$anchor', 'format', 'contentEncoding', 'contentMediaType'])
     if (schema[key] !== undefined) {
       if (typeof schema[key] !== 'string') throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
       result[key] = schema[key];
     }
+  if (schema.$anchor !== undefined && !/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(schema.$anchor))
+    throw mcpError('MCP tool input schema has an invalid $anchor', 'MCP_INVALID_SCHEMA');
   if (schema.contentSchema !== undefined)
     result.contentSchema = normalizeSchema(schema.contentSchema, depth + 1, budget, rootSchema, refStack);
   if (schema.examples !== undefined && !Array.isArray(schema.examples))
