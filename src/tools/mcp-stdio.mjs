@@ -14,7 +14,7 @@ import { buildBubblewrapArgs, bubblewrapLauncherEnvironment, findBubblewrap, val
 import { waitForBubblewrapStart } from '../platform/bubblewrap-status.mjs';
 import { redactSecrets } from '../platform/redaction.mjs';
 import { isReadOnlySandbox, requiresProcessIsolation, resolveSandboxMode } from '../platform/sandbox-modes.mjs';
-import { validateMcpInitializeResult, validateMcpResultType } from './mcp-protocol.mjs';
+import { validateMcpInitializeResult, validateMcpJsonRpcResponse, validateMcpResultType } from './mcp-protocol.mjs';
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -544,7 +544,7 @@ class McpStdioSession {
         this.pending.delete(id);
         reject(mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT'));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, method, protocolVersion });
+      this.pending.set(id, { id, resolve, reject, timer, method, protocolVersion });
       const message = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
       try {
         this.child.stdin.write(message, (error) => {
@@ -600,7 +600,13 @@ class McpStdioSession {
       if (!pending) continue;
       clearTimeout(pending.timer);
       this.pending.delete(message.id);
-      if (message.error && Number.isInteger(message.error.code))
+      try {
+        validateMcpJsonRpcResponse(message, pending.id);
+      } catch (error) {
+        pending.reject(error);
+        continue;
+      }
+      if (Object.hasOwn(message, 'error'))
         pending.reject(
           mcpError(
             `MCP server '${this.name}' returned JSON-RPC error ${message.error.code}`,

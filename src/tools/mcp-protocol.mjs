@@ -79,6 +79,18 @@ export function validateMcpInitializeResult(result, { serverName }) {
   return result;
 }
 
+/** Validate the JSON-RPC 2.0 response envelope before a transport handles its result or error. */
+export function validateMcpJsonRpcResponse(message, expectedId) {
+  if (!isRecord(message) || message.jsonrpc !== '2.0' || message.id !== expectedId)
+    throw mcpError('MCP server returned an invalid JSON-RPC response', 'MCP_INVALID_RESPONSE');
+  const hasResult = Object.hasOwn(message, 'result');
+  const hasError = Object.hasOwn(message, 'error');
+  if (hasResult === hasError) throw mcpError('MCP server response must contain exactly one result or error', 'MCP_INVALID_RESPONSE');
+  if (hasError && (!isRecord(message.error) || !Number.isInteger(message.error.code) || typeof message.error.message !== 'string'))
+    throw mcpError('MCP server returned an invalid JSON-RPC error object', 'MCP_INVALID_RESPONSE');
+  return message;
+}
+
 function rejectUnsupportedResultType(resultType, { serverName, method }) {
   if (resultType === 'input_required')
     throw mcpError(

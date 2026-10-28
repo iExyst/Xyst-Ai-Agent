@@ -23,6 +23,7 @@ function fixtureServerCode({
   malicious = false,
   toolResultType = null,
   invalidDiscovery = false,
+  invalidJsonRpcResponse = false,
 } = {}) {
   return `
 const readline = require('node:readline');
@@ -41,6 +42,10 @@ const sendMethodResult = (request, result) => {
 const fail = (id, code, message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }) + '\\n');
 lines.on('line', (line) => {
   const request = JSON.parse(line);
+  if (${invalidJsonRpcResponse ? 'true' : 'false'}) {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {}, error: { code: -32601 } }) + '\\n');
+    return;
+  }
   if (request.method === 'server/discover') {
     ${legacy ? "fail(request.id, -32601, 'method not found');" : invalidDiscovery ? "sendMethodResult(request, { supportedVersions: '2026-07-28', capabilities: {} });" : "sendMethodResult(request, { supportedVersions: ['2026-07-28'], capabilities: { tools: {}, resources: {}, prompts: {}, private: { token: 'metadata-secret-canary' } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'fixture', version: 'token=metadata-secret-canary' } } });"}
   } else if (request.method === 'initialize') {
@@ -77,6 +82,7 @@ function managerConfig({
   malicious = false,
   toolResultType = null,
   invalidDiscovery = false,
+  invalidJsonRpcResponse = false,
 } = {}) {
   return {
     tools: { shell_enabled: true },
@@ -98,6 +104,7 @@ function managerConfig({
               malicious,
               toolResultType,
               invalidDiscovery,
+              invalidJsonRpcResponse,
             }),
           ],
           timeout_ms: 3000,
@@ -234,6 +241,19 @@ test('MCP stdio manager falls back to the legacy initialize handshake', async (t
 test('MCP stdio does not downgrade a malformed discovery response to legacy', async (t) => {
   const root = await createTempDirectory('xyst-mcp-invalid-discovery-');
   const manager = new StdioMcpManager({ config: managerConfig({ invalidDiscovery: true }), workspaceRoot: root });
+  t.after(async () => {
+    await manager.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await manager.initialize();
+  assert.equal(manager.serverCatalog[0].connection_state, 'error');
+  assert.equal(manager.serverCatalog[0].error_code, 'MCP_INVALID_RESPONSE');
+  assert.deepEqual(manager.definitions, []);
+});
+
+test('MCP stdio rejects response envelopes that contain both result and error', async (t) => {
+  const root = await createTempDirectory('xyst-mcp-invalid-jsonrpc-');
+  const manager = new StdioMcpManager({ config: managerConfig({ invalidJsonRpcResponse: true }), workspaceRoot: root });
   t.after(async () => {
     await manager.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -802,6 +822,21 @@ test('MCP HTTP rejects malformed UTF-8 JSON as an invalid response', async () =>
     fetchImpl: async () => new Response(Uint8Array.of(0xff), { headers: { 'content-type': 'application/json' } }),
   });
   await assert.rejects(session.negotiate(), { code: 'MCP_INVALID_RESPONSE' });
+});
+
+test('MCP Streamable HTTP rejects non-exclusive and malformed JSON-RPC result envelopes', async () => {
+  for (const envelope of [{ result: {}, error: { code: -32601 } }, { result: {} }, { error: { code: -32601 } }]) {
+    const session = new StreamableHttpMcpSession({
+      name: 'invalid-jsonrpc',
+      settings: { url: 'https://mcp.example.test/mcp' },
+      headers: {},
+      timeoutMs: 1000,
+      fetchImpl: async (_url, options) => Response.json({ jsonrpc: '2.0', id: JSON.parse(options.body).id, ...envelope }),
+    });
+    await assert.rejects(session.request('tools/list', {}, { protocolVersion: '2026-07-28' }), {
+      code: 'MCP_INVALID_RESPONSE',
+    });
+  }
 });
 
 test('MCP HTTP rejects an oversized declared body and cancels it before reading', async () => {

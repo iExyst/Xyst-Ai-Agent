@@ -1,5 +1,5 @@
 import { resolveToolTimeoutMs, TOOL_SCHEMA_VERSION, deepFreeze } from './schemas.mjs';
-import { validateMcpInitializeResult, validateMcpResultType } from './mcp-protocol.mjs';
+import { validateMcpInitializeResult, validateMcpJsonRpcResponse, validateMcpResultType } from './mcp-protocol.mjs';
 
 const VERSION = '2026-07-28';
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -280,9 +280,8 @@ export class StreamableHttpMcpSession {
           message = await this.#resumeStream(id, protocolVersion, resumeSessionId, lastEventId, controller.signal);
         }
       }
-      if (message?.jsonrpc !== '2.0' || message.id !== id)
-        throw mcpError('MCP server returned an invalid JSON-RPC response', 'MCP_INVALID_RESPONSE');
-      if (message.error) {
+      validateMcpJsonRpcResponse(message, id);
+      if (Object.hasOwn(message, 'error')) {
         const err = mcpError(
           `MCP server '${this.name}' returned JSON-RPC error ${Number.isInteger(message.error.code) ? message.error.code : 'unknown'}`,
           allowError && message.error.code === -32601 ? 'MCP_REMOTE_METHOD_MISSING' : 'MCP_REMOTE_ERROR',
@@ -705,9 +704,8 @@ export class LegacySseMcpSession extends StreamableHttpMcpSession {
       void response.body?.cancel().catch(() => {});
       if (notification) return null;
       const message = await waitForAbort(messagePromise, controller.signal);
-      if (message.id !== id || message.jsonrpc !== '2.0')
-        throw mcpError('MCP server returned an invalid JSON-RPC response', 'MCP_INVALID_RESPONSE');
-      if (message.error) {
+      validateMcpJsonRpcResponse(message, id);
+      if (Object.hasOwn(message, 'error')) {
         throw mcpError(
           `MCP server '${this.name}' returned JSON-RPC error ${Number.isInteger(message.error.code) ? message.error.code : 'unknown'}`,
           allowError && message.error.code === -32601 ? 'MCP_REMOTE_METHOD_MISSING' : 'MCP_REMOTE_ERROR',
