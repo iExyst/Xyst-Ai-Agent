@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson, restoreAtomicWriteBackup } from '../platform/files.mjs';
+import { atomicWriteJson, readBoundedFileHandle, restoreAtomicWriteBackup } from '../platform/files.mjs';
 
 const VERSION = 1;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -195,10 +196,24 @@ export class UsageBudgetStore {
 
   async #read() {
     try {
-      const info = await fs.lstat(this.file);
-      if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_FILE_BYTES)
+      const info = await fs.lstat(this.file, { bigint: true });
+      if (!info.isFile() || info.isSymbolicLink() || info.nlink > 1n || info.size > BigInt(MAX_FILE_BYTES))
         throw new Error('Usage budget ledger is not a bounded regular file');
-      return decodeUsageState(await fs.readFile(this.file, 'utf8'));
+      const handle = await fs.open(this.file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+      try {
+        const opened = await handle.stat({ bigint: true });
+        if (!opened.isFile() || opened.nlink > 1n || opened.dev !== info.dev || opened.ino !== info.ino || opened.size !== info.size)
+          throw new Error('Usage budget ledger changed while it was being opened');
+        if (opened.size > BigInt(MAX_FILE_BYTES)) throw new Error('Usage budget ledger is not a bounded regular file');
+        const bytes = await readBoundedFileHandle(handle, MAX_FILE_BYTES);
+        if (bytes === null) throw new Error('Usage budget ledger is not a bounded regular file');
+        const [after, current] = await Promise.all([handle.stat({ bigint: true }), fs.lstat(this.file, { bigint: true })]);
+        if (!sameUsageFileVersion(opened, after) || !sameUsageFileVersion(opened, current))
+          throw new Error('Usage budget ledger changed while it was being read');
+        return decodeUsageState(bytes.toString('utf8'));
+      } finally {
+        await handle.close();
+      }
     } catch (error) {
       if (error.code === 'ENOENT') {
         const recovered = await restoreAtomicWriteBackup(this.file, { maxBytes: MAX_FILE_BYTES, decode: decodeUsageState });
@@ -253,6 +268,19 @@ export class UsageBudgetStore {
 
 function emptyLedger() {
   return { version: VERSION, days: {}, months: {}, reservations: {}, attribution: { version: 1, days: {}, months: {} } };
+}
+
+function sameUsageFileVersion(first, second) {
+  return (
+    second.isFile() &&
+    !second.isSymbolicLink() &&
+    second.nlink <= 1n &&
+    second.dev === first.dev &&
+    second.ino === first.ino &&
+    second.size === first.size &&
+    second.mtimeNs === first.mtimeNs &&
+    second.ctimeNs === first.ctimeNs
+  );
 }
 
 function decodeUsageState(serialized) {

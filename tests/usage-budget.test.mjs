@@ -55,6 +55,32 @@ test('usage ledger preserves ambiguous replacement backups and refuses an empty 
   await assert.rejects(fs.lstat(store.file), { code: 'ENOENT' });
 });
 
+test('usage ledger reads stop at the configured size limit plus one byte during concurrent growth', async (t) => {
+  const root = await createTempDirectory('xyst-usage-budget-bounded-read-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new UsageBudgetStore(root);
+  const now = Date.parse('2026-10-27T12:00:00.000Z');
+  await store.snapshot({ now });
+
+  const probe = await fs.open(store.file, 'r');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const read = fileHandlePrototype.read;
+  let bytesRead = 0;
+  fileHandlePrototype.read = async (buffer, offset, length) => {
+    buffer.fill(0, offset, offset + length);
+    bytesRead += length;
+    return { bytesRead: length, buffer };
+  };
+  try {
+    await assert.rejects(store.snapshot({ now }), /Usage budget ledger is not a bounded regular file/);
+    assert.equal(bytesRead, 4 * 1024 * 1024 + 1);
+  } finally {
+    fileHandlePrototype.read = read;
+  }
+  assert.ok((await fs.stat(store.file)).isFile());
+});
+
 test('usage budget waits for an existing lock file instead of failing on Windows sharing errors', async (t) => {
   const root = await createTempDirectory('xyst-usage-budget-existing-lock-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
