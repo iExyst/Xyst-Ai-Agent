@@ -130,13 +130,15 @@ export async function hasAtomicWriteBackup(destination) {
 }
 
 /** Restore the one validated Windows replacement backup after a crash between
- * moving the old destination aside and installing the new file. The caller
- * must hold the store's cross-process mutation lock and validate the decoded
- * record with its own schema rules.
+ * moving the old destination aside and installing the new file. Structured
+ * stores must hold their cross-process mutation lock and validate decoded
+ * records. Raw-file recovery uses the no-overwrite link and a target callback.
  */
-export async function restoreAtomicWriteBackup(destination, { maxBytes, decode }) {
+export async function restoreAtomicWriteBackup(destination, { maxBytes, decode, beforeRestore }) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || typeof decode !== 'function')
     throw new TypeError('Backup recovery requires a positive size limit and decoder');
+  if (beforeRestore !== undefined && typeof beforeRestore !== 'function')
+    throw new TypeError('Backup recovery path validation must be a function');
   const directory = path.dirname(destination);
   const directoryInfo = await fs.lstat(directory);
   if (directoryInfo.isSymbolicLink() || !directoryInfo.isDirectory())
@@ -203,6 +205,27 @@ export async function restoreAtomicWriteBackup(destination, { maxBytes, decode }
     await handle.close();
   }
 
+  await beforeRestore?.();
+  const directoryAfterValidation = await fs.lstat(directory);
+  if (
+    directoryAfterValidation.isSymbolicLink() ||
+    !directoryAfterValidation.isDirectory() ||
+    directoryAfterValidation.dev !== directoryInfo.dev ||
+    directoryAfterValidation.ino !== directoryInfo.ino
+  )
+    throw Object.assign(new Error('Atomic-write recovery directory changed during validation'), { code: 'ATOMIC_WRITE_RECOVERY_REQUIRED' });
+  const backupAfterValidation = await fs.lstat(backup).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (
+    !backupAfterValidation?.isFile() ||
+    backupAfterValidation.isSymbolicLink() ||
+    backupAfterValidation.dev !== before.dev ||
+    backupAfterValidation.ino !== before.ino ||
+    backupAfterValidation.nlink !== 1
+  )
+    throw Object.assign(new Error('Atomic-write recovery backup changed before restore'), { code: 'ATOMIC_WRITE_RECOVERY_REQUIRED' });
   try {
     await fs.link(backup, destination);
   } catch (cause) {
@@ -226,4 +249,18 @@ export async function restoreAtomicWriteBackup(destination, { maxBytes, decode }
     });
   await fs.rm(backup);
   return record;
+}
+
+/** Restore a bounded raw-file backup left by a Windows replacement interrupted
+ * after the old file moved aside. The caller must validate the target path
+ * immediately before the no-overwrite restore. Raw bytes are preserved; the
+ * returned decoded string is only for consistency with structured-store recovery.
+ */
+export async function restoreAtomicWriteFileBackup(destination, { maxBytes, beforeRestore }) {
+  if (typeof beforeRestore !== 'function') throw new TypeError('File backup recovery requires a path validation callback');
+  return restoreAtomicWriteBackup(destination, {
+    maxBytes,
+    decode: (content) => content,
+    beforeRestore,
+  });
 }

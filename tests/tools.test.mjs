@@ -288,6 +288,37 @@ test('workspace tools read, search, list, write atomically, and apply only uniqu
   assert.equal(createBuiltinTools({ workspaceRoot: root, config: { tools: { shell_enabled: true } } }).has('run_shell_script'), true);
 });
 
+test('file reads and edits recover one interrupted atomic-replacement backup without discarding ambiguous backups', async (t) => {
+  const root = await createTempDirectory('xyst-file-backup-recovery-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const tools = createBuiltinTools({ workspaceRoot: root, config: { tools: { autonomy: 'unrestricted' } } });
+  const recovered = path.join(root, 'recovered.txt');
+  await fs.writeFile(recovered, 'prior contents');
+  const backup = `${recovered}.00000000-0000-4000-8000-000000000001.bak`;
+  await fs.rename(recovered, backup);
+
+  assert.match(await tools.call('read_file', { path: 'recovered.txt' }), /prior contents/);
+  assert.equal(await fs.readFile(recovered, 'utf8'), 'prior contents');
+  await assert.rejects(fs.lstat(backup), { code: 'ENOENT' });
+
+  const edited = path.join(root, 'edited.txt');
+  await fs.writeFile(edited, 'before');
+  const editedBackup = `${edited}.00000000-0000-4000-8000-000000000002.bak`;
+  await fs.rename(edited, editedBackup);
+  await tools.call('edit_file', { path: 'edited.txt', old_string: 'before', new_string: 'after' });
+  assert.equal(await fs.readFile(edited, 'utf8'), 'after');
+  await assert.rejects(fs.lstat(editedBackup), { code: 'ENOENT' });
+
+  const ambiguous = path.join(root, 'ambiguous.txt');
+  await fs.writeFile(`${ambiguous}.00000000-0000-4000-8000-000000000003.bak`, 'first copy');
+  await fs.writeFile(`${ambiguous}.00000000-0000-4000-8000-000000000004.bak`, 'second copy');
+  await assert.rejects(tools.call('read_file', { path: 'ambiguous.txt' }), { code: 'ATOMIC_WRITE_RECOVERY_REQUIRED' });
+  assert.deepEqual((await fs.readdir(root)).filter((name) => name.startsWith('ambiguous.txt.')).sort(), [
+    'ambiguous.txt.00000000-0000-4000-8000-000000000003.bak',
+    'ambiguous.txt.00000000-0000-4000-8000-000000000004.bak',
+  ]);
+});
+
 test('file replacement and edits preserve existing POSIX permissions', async (t) => {
   if (process.platform === 'win32') return t.skip('Windows file permissions use ACLs rather than POSIX mode bits');
   const root = await createTempDirectory('xyst-tool-file-mode-');

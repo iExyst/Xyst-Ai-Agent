@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { atomicWriteFile } from '../platform/files.mjs';
+import { atomicWriteFile, restoreAtomicWriteFileBackup } from '../platform/files.mjs';
 import { resolveWindowsPowerShellPath, runProcess } from '../platform/process.mjs';
 import { resolveToolPath, displayPath } from '../platform/paths.mjs';
 import { resolveToolTimeoutMs, resolveToolTimeoutSeconds, TOOL_DEFINITIONS } from './schemas.mjs';
@@ -173,7 +173,7 @@ export function createBuiltinTools({
 async function readFile(root, args, config) {
   if (!isUnrestricted(config) && isSensitivePath(args.path))
     throw new Error('Reading credential or key material is blocked by the secret-safety policy');
-  const filePath = await resolveToolPath(root, args.path, { mustExist: true, machineScope: machineScope(config) });
+  const filePath = await resolveToolFilePath(root, args.path, config);
   if (!isUnrestricted(config) && (await isSensitiveResolvedPath(root, filePath)))
     throw new Error('Reading credential or key material is blocked by the secret-safety policy');
   const noFollow = constants.O_NOFOLLOW ?? 0;
@@ -218,6 +218,30 @@ function sameResolvedPath(left, right) {
 async function assertToolPathUnchanged(root, requestedPath, resolvedPath, config) {
   const currentPath = await resolveToolPath(root, requestedPath, { machineScope: machineScope(config) });
   if (!sameResolvedPath(currentPath, resolvedPath)) throw new Error('File target changed while preparing the write; retry the operation');
+}
+
+async function resolveToolFilePath(root, requestedPath, config) {
+  const scope = { machineScope: machineScope(config) };
+  const candidate = await resolveToolPath(root, requestedPath, scope);
+  if (!isUnrestricted(config) && (await isSensitiveResolvedPath(root, candidate)))
+    throw new Error('Accessing credential or key material is blocked by the secret-safety policy');
+  const existing = await fs.lstat(candidate).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!existing) {
+    const directory = await fs.lstat(path.dirname(candidate)).catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (directory?.isDirectory() && !directory.isSymbolicLink()) {
+      await restoreAtomicWriteFileBackup(candidate, {
+        maxBytes: toolFileLimit(config, config.tools?.max_file_bytes ?? DEFAULT_FILE_LIMIT),
+        beforeRestore: () => assertToolPathUnchanged(root, requestedPath, candidate, config),
+      });
+    }
+  }
+  return resolveToolPath(root, requestedPath, { ...scope, mustExist: true });
 }
 
 async function readFileLines(handle, startLine, endLine, maxBytes) {
@@ -333,7 +357,7 @@ async function editFile(root, args, config, context = {}) {
   if (!isUnrestricted(config) && isSensitivePath(args.path))
     throw new Error('Editing credential or key files is blocked by the secret-safety policy');
   if (!args.old_string) throw new Error('old_string must not be empty');
-  const filePath = await resolveToolPath(root, args.path, { mustExist: true, machineScope: machineScope(config) });
+  const filePath = await resolveToolFilePath(root, args.path, config);
   if (!isUnrestricted(config) && (await isSensitiveResolvedPath(root, filePath)))
     throw new Error('Editing credential or key files is blocked by the secret-safety policy');
   await assertFileChangeUnchanged(root, args, config, context.expectedFileChange);

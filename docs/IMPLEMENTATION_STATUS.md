@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## Interrupted Windows file replacement recovery — 2026-10-28
+
+- `read_file` and `edit_file` now recover a missing file from exactly one bounded, regular Windows replacement backup. Recovery checks the resolved target again, uses a no-overwrite hard link, and preserves multiple, invalid, linked, unsafe, or oversized candidates for manual recovery. The restored bytes are not rewritten or normalized.
+- The focused file-tool regression passes recovery by read and edit and proves ambiguous backups remain untouched. Atomic-write fallback tests pass 5/5 on this host (two Linux-only directory-flush checks skip on Windows); shared session/memory/usage/approval/package/subagent/feed recovery checks pass 13/13. Changed-file Biome and whitespace checks pass. Hosted confirmation is pending.
+
 ## OpenAI-compatible malformed response shapes — 2026-10-28
 
 - Model-list, non-streaming chat, and embedding endpoints validate the decoded JSON root before reading response fields. Valid JSON scalars, `null`, arrays, and null embedding entries return the stable `INVALID_RESPONSE` provider error instead of leaking a raw JavaScript `TypeError`; invalid UTF-8 embeddings also use that error code.
