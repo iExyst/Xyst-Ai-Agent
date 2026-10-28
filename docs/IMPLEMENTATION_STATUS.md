@@ -3,22 +3,22 @@
 ## Bounded runtime settings reads — 2026-10-28
 
 - Runtime settings now use the shared capped file-handle reader, stop at 64 KiB plus one byte, and revalidate identity/version before decoding. Concurrent growth or replacement is rejected rather than causing an unbounded read or applying stale preferences.
-- Focused settings recovery and injected-growth regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+- Focused settings recovery and injected-growth regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108) exercised the regression on Windows and Ubuntu under Node 22/24; only the existing host capability failures remain in the wider matrices.
 
 ## Bounded usage-budget ledger reads — 2026-10-28
 
 - The shared token/cost ledger now reads through the capped file-handle helper, stops at 4 MiB plus one byte, and verifies that the opened record and current path retain the same file version before decoding. Concurrent growth or replacement fails closed instead of risking unbounded allocation or stale limit accounting.
-- Focused ledger recovery and injected-growth regressions pass 3/3; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+- Focused ledger recovery and injected-growth regressions pass 3/3; changed-file Biome and whitespace checks pass. Exact-source run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108) exercised the regression on Windows and Ubuntu under Node 22/24; only the existing host capability failures remain in the wider matrices.
 
 ## Bounded session record reads — 2026-10-28
 
 - Session records now use the shared capped file-handle reader and stop at `MAX_SESSION_EXPORT_BYTES + 1`, even if a record grows after its initial metadata checks. Reads also revalidate the opened inode and file version before parsing so concurrent replacement or mutation fails closed.
-- Focused session size and injected-growth regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
+- Focused session size and injected-growth regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108) exercised the regression on Windows and Ubuntu under Node 22/24; only the existing host capability failures remain in the wider matrices.
 
 ## Hosted desktop runtime download reliability — 2026-10-28
 
-- Exact-source run [40633515977](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40633515977) on `74c76bf` passed security and all Ubuntu desktop builds/lifecycle checks, but the Windows job's pinned Node runtime download ended with a generic `terminated` error. Linux was initially stopped at 120 seconds; its package build now succeeds with a five-minute bound. The Windows fetch now retries transient transport interruptions up to three times while rechecking the official archive checksum on every attempt; exact-source hosted confirmation is pending.
-- The Linux DEB/AppImage build and lifecycle checks are current for `74c76bf`. The Windows package hashes in `dist/dev/SHA256SUMS.txt` remain historical until Windows completes successfully. Hosted Node matrix failures remain the known Ubuntu network-namespace restriction and Windows ConPTY initialization issue; independent security review and native Ubuntu Wayland acceptance remain open.
+- Exact-source run [40635157108](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40635157108) on `9b7b393` passed the security job and both Windows/Linux desktop build and lifecycle jobs. The runtime fetch retries transient interruptions up to three times, times out each attempt after five minutes, and validates the pinned checksum before cache installation.
+- `dist/dev/SHA256SUMS.txt` now matches the Windows NSIS, Linux DEB, and Linux AppImage artifacts from `9b7b393`; after this documentation update is committed, the source archive will be rebuilt from the new head and its checksum refreshed. The broader test matrix is still red only on the Windows ConPTY initialization (`0xC0000142`) and Ubuntu Bubblewrap loopback setup (`RTM_NEWADDR: Operation not permitted`) with its dependent signed-MCP test. Independent security review and native Ubuntu Desktop/Wayland acceptance remain open.
 
 ## Bounded application update replay-cache reads — 2026-10-28
 
