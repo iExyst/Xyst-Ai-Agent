@@ -119,6 +119,28 @@ async function verifyKeyboardSkipLink(page) {
   return { firstTabTarget: focusedLink.text, enterTarget: targetId };
 }
 
+async function verifyAppearanceAccessibility(page) {
+  await evaluate(page, "[...document.querySelectorAll('.sidebar .nav-item')].find(button => button.textContent.includes('Settings'))?.click()", 37);
+  const before = JSON.parse(await evaluate(page, "JSON.stringify((() => { const root=document.documentElement; const item=document.querySelector('.nav-item'); const navLabel=document.querySelector('.nav-label'); const probe=document.createElement('div'); probe.className='spinner'; probe.dataset.xystSmokeProbe='true'; document.body.append(probe); return { original:{ largeText:root.dataset.largeText==='true', highContrast:root.dataset.highContrast==='true', reducedMotion:root.dataset.reducedMotion==='true' }, before:item.getBoundingClientRect().height, borderBefore:getComputedStyle(root).getPropertyValue('--border').trim(), textBefore:getComputedStyle(navLabel).color, motionBefore:getComputedStyle(probe).animationDuration }; })())", 38));
+  const toggle = async (label, id) => evaluate(page, `(() => { const row=[...document.querySelectorAll('.toggle-row')].find(item=>item.querySelector('strong')?.textContent?.trim()===${JSON.stringify(label)}); const button=row?.querySelector('button[role=switch]'); if(!button) throw new Error('Could not find ${label} toggle'); button.click(); return button.getAttribute('aria-checked'); })()`, id);
+  for (const [index, label] of ["Larger text", "High contrast", "Reduced motion"].entries()) {
+    if (!before.original[{ "Larger text": "largeText", "High contrast": "highContrast", "Reduced motion": "reducedMotion" }[label]]) await toggle(label, 39 + index);
+  }
+  await new Promise((resolveWait) => setTimeout(resolveWait, 350));
+  const measurements = JSON.parse(await evaluate(page, "JSON.stringify((() => { const root=document.documentElement; const item=document.querySelector('.nav-item'); const navLabel=document.querySelector('.nav-label'); const probe=document.querySelector('[data-xyst-smoke-probe]'); return { after:item.getBoundingClientRect().height, zoom:Number(getComputedStyle(root).zoom), borderAfter:getComputedStyle(root).getPropertyValue('--border').trim(), textAfter:navLabel.style.color || getComputedStyle(navLabel).color, motionAfter:getComputedStyle(probe).animationDuration }; })())", 43));
+  for (const [index, label] of ["Larger text", "High contrast", "Reduced motion"].entries()) {
+    if (!before.original[{ "Larger text": "largeText", "High contrast": "highContrast", "Reduced motion": "reducedMotion" }[label]]) await toggle(label, 44 + index);
+  }
+  await evaluate(page, "document.querySelector('[data-xyst-smoke-probe]')?.remove(); [...document.querySelectorAll('.sidebar .nav-item')].find(button => button.textContent.includes('Overview'))?.click()", 47);
+  Object.assign(measurements, before);
+  const seconds = (value) => value.endsWith("ms") ? Number.parseFloat(value) / 1000 : Number.parseFloat(value);
+  assert.ok(measurements.zoom >= 1.14 && measurements.after >= measurements.before * 1.14, `Larger text should enlarge the renderer: ${JSON.stringify(measurements)}`);
+  assert.notEqual(measurements.borderAfter, measurements.borderBefore, `High contrast should change panel borders: ${JSON.stringify(measurements)}`);
+  assert.notEqual(measurements.textAfter, measurements.textBefore, `High contrast should brighten muted text: ${JSON.stringify(measurements)}`);
+  assert.ok(seconds(measurements.motionBefore) <= 0.00001 || seconds(measurements.motionAfter) < seconds(measurements.motionBefore) / 100, `Reduced motion should suppress spinner animation unless the OS already suppresses it: ${JSON.stringify(measurements)}`);
+  return measurements;
+}
+
 function stopInstalledCopies(executable) {
   const escaped = executable.replace(/'/g, "''");
   const command = `$target = '${escaped}'; Get-CimInstance Win32_Process -Filter "Name='Xyst.exe'" | Where-Object { $_.ExecutablePath -eq $target } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
@@ -152,10 +174,11 @@ try {
   const page = await Promise.race([waitForTarget(port), appError]);
   const snapshot = await waitForUi(page);
   const keyboard = await verifyKeyboardSkipLink(page);
+  const appearanceAccessibility = await verifyAppearanceAccessibility(page);
   const screenshot = await cdpCommand(page, "Page.captureScreenshot", { format: "png", fromSurface: true }, 2);
   assert.ok(screenshot?.data, "Packaged renderer did not return a screenshot");
   await writeFile(join(packageDir, "windows-gui-smoke.png"), Buffer.from(screenshot.data, "base64"));
-  process.stdout.write(`Clean Windows install UI smoke passed: ${JSON.stringify({ ...snapshot, keyboard })}\n`);
+  process.stdout.write(`Clean Windows install UI smoke passed: ${JSON.stringify({ ...snapshot, keyboard, appearanceAccessibility })}\n`);
 } finally {
   if (app?.pid) spawnSync("taskkill.exe", ["/PID", String(app.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
   if (app?.pid) stopInstalledCopies(installedExe);
