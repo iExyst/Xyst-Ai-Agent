@@ -2652,3 +2652,9 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - Automatic tool selection now recognizes common file and repository actions (`read`, `find`, `search`, `inspect`, `open`, `list`, and `locate`) and document targets such as guides and READMEs. Generic “do” wording no longer forces a tool-capable profile for a normal question; edit/update actions add quality-routing evidence.
 - Routing evaluation derives tool requirements the same way as the agent when a case has a task prompt. Four everyday cases cover file reads, repository search, a neutral configuration question, and a Windows/Linux install-guide update. The dataset passes 26/26; classifier comparison shows four improvements and no regressions against the tool-aware deterministic baseline. This remains a synthetic routing evaluation, not live-model quality validation.
 - Focused provider/routing tests pass 55/55; changed-file Biome checks and `git diff --check` pass.
+
+## Current-source Windows and Linux development packages — 2026-10-28
+
+- Windows x64 NSIS packaging completed from commit `afd9d5fe6dc5f48483ad67e848a899eebd7ea04d`; the installer is 28.19 MiB.
+- Ubuntu 24.04 x86-64 DEB packaging completed from the same source commit. Building under WSL initially exceeded memory, so the successful retry used two Rust build jobs. The AppImage packaging step was stopped because scanning the generated 441 MiB AppDir on the Windows-mounted workspace was taking several minutes; AppImage is optional and the DEB is the primary Linux installer.
+- Local artifact hashes are in `dist/dev/local-afd9d5f/SHA256SUMS.txt`. These local packages have not received installer lifecycle smoke, current-source hosted CI, or native Ubuntu Desktop/Wayland acceptance and remain development artifacts.
