@@ -428,6 +428,21 @@ function validateValue(schema, value, location) {
   if (schema.enum && !schema.enum.some((candidate) => isDeepStrictEqual(candidate, value)))
     throw new Error(`${location} must match one of the allowed values`);
   for (const branch of schema.allOf || []) validateValue(branch, value, location);
+  if (schema.anyOf) {
+    let matched = false;
+    for (const branch of schema.anyOf)
+      if (schemaMatches(branch, value, location)) {
+        matched = true;
+        break;
+      }
+    if (!matched) throw new Error(`${location} must match at least one schema`);
+  }
+  if (schema.oneOf) {
+    let matchingBranches = 0;
+    for (const branch of schema.oneOf) if (schemaMatches(branch, value, location)) matchingBranches += 1;
+    if (matchingBranches !== 1) throw new Error(`${location} must match exactly one schema`);
+  }
+  if (schema.not && schemaMatches(schema.not, value, location)) throw new Error(`${location} must not match the excluded schema`);
   if (schema.type === undefined) return;
   if (schema.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${location} must be an object`);
@@ -494,6 +509,15 @@ function validateValue(schema, value, location) {
     }
     for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`);
   } else throw new Error(`Unsupported tool schema type '${schema.type}'`);
+}
+
+function schemaMatches(schema, value, location) {
+  try {
+    validateValue(schema, value, location);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function canonicalJson(value) {

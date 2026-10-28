@@ -824,7 +824,8 @@ function mcpTimeoutPolicy(serverName) {
   };
 }
 
-function normalizeSchema(schema, depth) {
+function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
+  if (--budget.remaining < 0) throw mcpError('MCP tool input schema exceeds its validation budget', 'MCP_INVALID_SCHEMA');
   if (typeof schema === 'boolean') return schema;
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || depth > 8)
     throw mcpError('MCP tool input schema is invalid or too deeply nested', 'MCP_INVALID_SCHEMA');
@@ -859,6 +860,9 @@ function normalizeSchema(schema, depth) {
     'enum',
     'const',
     'allOf',
+    'anyOf',
+    'oneOf',
+    'not',
   ]);
   if (Object.keys(schema).some((key) => !allowed.has(key)))
     throw mcpError('MCP tool uses an unsupported JSON Schema keyword', 'MCP_INVALID_SCHEMA');
@@ -901,8 +905,15 @@ function normalizeSchema(schema, depth) {
   if (schema.allOf !== undefined) {
     if (!Array.isArray(schema.allOf) || schema.allOf.length === 0 || schema.allOf.length > 8)
       throw mcpError('MCP tool input schema has invalid allOf', 'MCP_INVALID_SCHEMA');
-    result.allOf = schema.allOf.map((item) => normalizeSchema(item, depth + 1));
+    result.allOf = schema.allOf.map((item) => normalizeSchema(item, depth + 1, budget));
   }
+  for (const key of ['anyOf', 'oneOf'])
+    if (schema[key] !== undefined) {
+      if (!Array.isArray(schema[key]) || schema[key].length === 0 || schema[key].length > 8)
+        throw mcpError(`MCP tool input schema has invalid ${key}`, 'MCP_INVALID_SCHEMA');
+      result[key] = schema[key].map((item) => normalizeSchema(item, depth + 1, budget));
+    }
+  if (schema.not !== undefined) result.not = normalizeSchema(schema.not, depth + 1, budget);
   for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'])
     if (schema[key] !== undefined) {
       if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[key]))
@@ -948,7 +959,7 @@ function normalizeSchema(schema, depth) {
     result.properties = Object.fromEntries(
       Object.entries(properties).map(([key, value]) => {
         if (!key || key.length > 128) throw mcpError('MCP tool input schema has an invalid property name', 'MCP_INVALID_SCHEMA');
-        return [key, normalizeSchema(value, depth + 1)];
+        return [key, normalizeSchema(value, depth + 1, budget)];
       }),
     );
     if (
@@ -963,14 +974,14 @@ function normalizeSchema(schema, depth) {
         (!schema.additionalProperties || typeof schema.additionalProperties !== 'object')
       )
         throw mcpError('MCP object schema has invalid additionalProperties', 'MCP_INVALID_SCHEMA');
-      result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1);
+      result.additionalProperties = normalizeSchema(schema.additionalProperties, depth + 1, budget);
     }
   } else if (['properties', 'required', 'additionalProperties'].some((key) => schema[key] !== undefined)) {
     throw mcpError('MCP scalar schema contains object keywords', 'MCP_INVALID_SCHEMA');
   }
   if (types.includes('array')) {
     if (schema.items === undefined) throw mcpError('MCP array schema requires an items schema', 'MCP_INVALID_SCHEMA');
-    result.items = normalizeSchema(schema.items, depth + 1);
+    result.items = normalizeSchema(schema.items, depth + 1, budget);
   } else if (schema.items !== undefined) throw mcpError('MCP scalar schema contains an items keyword', 'MCP_INVALID_SCHEMA');
   return result;
 }
