@@ -2517,6 +2517,23 @@ test("GitHub pagination keeps credentials on the configured API origin and path"
     assert.ok(requests.every((request) => new URL(request.url).origin !== "https://attacker.example" && !request.url.includes("github.example.test/steal")));
   } finally { globalThis.fetch = originalFetch; }
 });
+test("GitHub rate-limit errors explain primary reset and secondary retry guidance without replay", async () => {
+  const originalFetch = globalThis.fetch; let requests = 0;
+  const reset = 2_000_000_000;
+  const responses = [
+    Response.json({ message: "API rate limit exceeded for this user" }, { status: 403, headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(reset) } }),
+    Response.json({ message: "You have exceeded a secondary rate limit" }, { status: 403, headers: { "Retry-After": "90" } }),
+    Response.json({ message: "Rate limit exceeded" }, { status: 429 })
+  ];
+  globalThis.fetch = async () => { requests++; return responses.shift()!; };
+  const provider = new GitHubProvider({ get: async () => undefined } as never, { apiBase: "https://api.github.test" });
+  try {
+    await assert.rejects(provider.repository("example", "repo"), (error: unknown) => error instanceof GitHubError && error.status === 403 && /primary API rate limit reached/.test(error.message) && error.message.includes(new Date(reset * 1000).toISOString()));
+    await assert.rejects(provider.repository("example", "repo"), (error: unknown) => error instanceof GitHubError && error.status === 403 && /secondary rate limit/.test(error.message) && /at least 90 seconds/.test(error.message));
+    await assert.rejects(provider.repository("example", "repo"), (error: unknown) => error instanceof GitHubError && error.status === 429 && /at least 60 seconds/.test(error.message));
+    assert.equal(requests, 3, "rate-limited requests are reported rather than automatically replayed");
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("GitHub pull request review comments use guarded tools and current diff coordinates", async () => {
   const originalFetch = globalThis.fetch; const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
