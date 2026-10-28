@@ -2952,6 +2952,63 @@ store.close();
   assert.deepEqual(result.tasks, [{ task_key: "verify", state: "completed" }, { task_key: "write", state: "completed" }]);
 }));
 
+test("mission cancellation aborts concurrent inference and child processes without delayed side effects", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "mission-concurrent-cancellation.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
+  const processWorkspace = join(root, "process-task"); const inferenceWorkspace = join(root, "inference-task"); await mkdir(processWorkspace); await mkdir(inferenceWorkspace);
+  const marker = join(processWorkspace, "late-side-effect.txt");
+  config.set("global", "model.default", "cancel-test-model"); config.set("global", "orchestration.maxConcurrency", 2);
+  let inferenceStarted = false; let inferenceAborted = false;
+  const provider = {
+    redact: (value: string) => value,
+    models: async () => [{ type: "llm", key: "cancel-test-model", max_context_length: 8192, loaded_instances: [{ id: "loaded", config: { context_length: 8192 } }], capabilities: { trained_for_tool_use: true } }],
+    isLocalServer: () => true,
+    supportsLocalCliModelLifecycle: () => false,
+    streamChatWithTools: async (request: { messages: Array<Record<string, unknown>> }, _onText?: unknown, signal?: AbortSignal) => {
+      const conversation = JSON.stringify(request.messages);
+      if (conversation.includes("Task: process-worker")) {
+        const script = `setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'late'),1000); setInterval(()=>{},1000);`;
+        return { choices: [{ message: { role: "assistant", tool_calls: [{ id: `process-${randomUUID()}`, type: "function", function: { name: "run_process", arguments: JSON.stringify({ executable: process.execPath, args: ["-e", script], cwd: processWorkspace, timeout_ms: 3000 }) } }] } }] };
+      }
+      if (conversation.includes("Task: inference-worker")) {
+        inferenceStarted = true;
+        return new Promise((_resolve, reject) => {
+          if (signal?.aborted) { inferenceAborted = true; reject(new Error("Inference cancelled")); return; }
+          signal?.addEventListener("abort", () => { inferenceAborted = true; reject(new Error("Inference cancelled")); }, { once: true });
+        });
+      }
+      return { choices: [{ message: { role: "assistant", content: "Done." } }] };
+    }
+  };
+  const agent = new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never });
+  const runner = new PersistentMissionRunner({ store, config, events, agent });
+  try {
+    const mission = runner.repository.create({ name: "Cancel concurrent work", objective: "Stop both in-flight tasks safely", maxConcurrency: 2, tasks: [
+      { id: "process-worker", name: "process-worker", objective: "Start the delayed process", workspace: processWorkspace, dependsOn: [] },
+      { id: "inference-worker", name: "inference-worker", objective: "Hold inference until cancellation", workspace: inferenceWorkspace, dependsOn: [] }
+    ] });
+    const running = runner.run(mission.id);
+    const deadline = Date.now() + 5000; let processStarted = false;
+    while (Date.now() < deadline) {
+      processStarted = Boolean(store.db.prepare("SELECT 1 FROM tool_calls WHERE name='run_process' AND status='running'").get());
+      if (processStarted && inferenceStarted) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(processStarted, true, "the child process must be in flight before cancellation");
+    assert.equal(inferenceStarted, true, "the other task must be waiting on inference before cancellation");
+    runner.cancel(mission.id);
+    const result = await running;
+    assert.equal(result.status, "cancelled"); assert.equal(inferenceAborted, true);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(existsSync(marker), false, "the cancelled child process must not perform its delayed write");
+    const taskStates = store.db.prepare("SELECT state FROM mission_tasks WHERE mission_id=? ORDER BY task_key").all(mission.id) as Array<{ state: string }>;
+    assert.deepEqual(taskStates.map(({ state }) => state), ["pending", "pending"], "cancelled work remains resumable instead of being marked completed or failed");
+  } finally {
+    const current = runner.repository.list().find((item) => item.definition.name === "Cancel concurrent work");
+    if (current?.status === "running") runner.cancel(current.id);
+    store.close();
+  }
+}));
+
 test("mission concurrency runs independent tasks in distinct workspaces and serializes shared workspaces", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-concurrency.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   const firstWorkspace = join(root, "task-one"); const secondWorkspace = join(root, "task-two"); await mkdir(firstWorkspace); await mkdir(secondWorkspace);
