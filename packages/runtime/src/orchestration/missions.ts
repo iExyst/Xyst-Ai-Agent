@@ -327,10 +327,18 @@ export class PersistentMissionRunner {
     const activeRunId = acquired;
     const controller = new AbortController(); this.active.set(missionId, controller);
     this.activeRuns.set(missionId, activeRunId);
+    let leaseLost = false;
+    const ownsLiveLease = () => {
+      const lease = this.deps.store.db.prepare("SELECT owner_id,expires_at FROM runner_leases WHERE mission_id=?").get(missionId) as { owner_id: string; expires_at: string } | undefined;
+      return lease?.owner_id === this.ownerId && Date.parse(lease.expires_at) > Date.now();
+    };
+    const loseLease = () => { leaseLost = true; controller.abort(); };
     const externalAbort = () => controller.abort(); options.signal?.addEventListener("abort", externalAbort, { once: true });
     this.deps.events.emit("mission.started", { missionId, runId: activeRunId, trigger }, missionId);
     const heartbeat = setInterval(() => {
-      const at = new Date(); this.deps.store.db.prepare("UPDATE runner_leases SET expires_at=?,heartbeat_at=? WHERE mission_id=? AND owner_id=?").run(new Date(at.getTime() + leaseMs).toISOString(), at.toISOString(), missionId, this.ownerId);
+      const at = new Date();
+      const renewed = this.deps.store.db.prepare("UPDATE runner_leases SET expires_at=?,heartbeat_at=? WHERE mission_id=? AND owner_id=? AND expires_at>?").run(new Date(at.getTime() + leaseMs).toISOString(), at.toISOString(), missionId, this.ownerId, at.toISOString());
+      if (renewed.changes !== 1) { loseLease(); return; }
       this.deps.store.db.prepare("UPDATE mission_runs SET heartbeat_at=? WHERE id=?").run(at.toISOString(), activeRunId);
       const status = (this.deps.store.db.prepare("SELECT status FROM missions WHERE id=?").get(missionId) as { status: string } | undefined)?.status;
       if (status === "paused" || status === "cancelled" || status === "archived") controller.abort();
@@ -340,6 +348,8 @@ export class PersistentMissionRunner {
       const taskRows = () => this.deps.store.db.prepare("SELECT task_key,state,attempts,session_id,result_json,error FROM mission_tasks WHERE run_id=?").all(activeRunId) as Array<{ task_key: string; state: string; attempts: number; session_id: string | null; result_json: string | null; error: string | null }>;
       let whileRunning = true;
       while (whileRunning) {
+        if (!ownsLiveLease()) loseLease();
+        if (leaseLost) { state = "cancelled"; break; }
         if (controller.signal.aborted) { state = this.currentStatus(missionId) === "paused" ? "paused" : "cancelled"; break; }
         const rows = taskRows(); const states = new Map(rows.map((row) => [row.task_key, row]));
         const unresolvedAction = rows.find((row) => row.state === "reconciliation_required");
@@ -452,6 +462,8 @@ export class PersistentMissionRunner {
         const selectedAssignments = new Map(batch?.assignments.map((assignment) => [assignment.id, assignment]) ?? []);
         if (batch) this.deps.events.emit("mission.resources.planned", { missionId, runId: activeRunId, memoryBudgetBytes, estimatedAdditionalBytes: batch.estimatedAdditionalBytes, ...(batch.availableGpuMemoryBytes === undefined ? {} : { availableGpuMemoryBytes: batch.availableGpuMemoryBytes, estimatedAdditionalGpuMemoryBytes: batch.estimatedAdditionalGpuMemoryBytes ?? 0 }), concurrencyLimit: maxConcurrency, selected: batch.assignments.map(({ id, selectedModel, selectionReason, estimatedAdditionalBytes, estimatedAdditionalGpuMemoryBytes, admittedOverBudget }) => ({ taskId: id, model: selectedModel, reason: selectionReason, estimatedAdditionalBytes, ...(estimatedAdditionalGpuMemoryBytes === undefined ? {} : { estimatedAdditionalGpuMemoryBytes }), admittedOverBudget })), deferredTaskIds: batch.deferredTaskIds }, missionId);
         const executeTask = async (task: MissionTaskDefinition): Promise<MissionTaskExecutionOutcome> => {
+          if (!ownsLiveLease()) loseLease();
+          if (leaseLost) return { taskId: task.id!, status: "cancelled" };
           const row = states.get(task.id!)!; const attempt = row.attempts + 1;
           const profile = mission.definition.agents?.find((agent) => agent.id === task.agentId);
           const resourceAssignment = selectedAssignments.get(task.id!);
@@ -488,8 +500,10 @@ export class PersistentMissionRunner {
               ...(options.approveExternalAction ? { approveExternalAction: options.approveExternalAction } : {}),
               executionScope: `${activeRunId}:${task.id!}`,
               ...(row.session_id ? { sessionId: row.session_id } : {}), signal: taskController.signal,
-              onSession: (sessionId) => this.deps.store.db.prepare("UPDATE mission_tasks SET session_id=?,updated_at=? WHERE run_id=? AND task_key=?").run(sessionId, new Date().toISOString(), activeRunId, task.id!)
+              onSession: (sessionId) => this.deps.store.db.prepare("UPDATE mission_tasks SET session_id=?,updated_at=? WHERE run_id=? AND task_key=? AND EXISTS (SELECT 1 FROM runner_leases WHERE mission_id=? AND owner_id=? AND expires_at>?)").run(sessionId, new Date().toISOString(), activeRunId, task.id!, missionId, this.ownerId, new Date().toISOString())
             });
+            if (!ownsLiveLease()) loseLease();
+            if (leaseLost) return { taskId: task.id!, status: "cancelled" };
             const persistedAgent = this.deps.store.db.prepare("SELECT definition_json FROM agents WHERE id=?").get(agentRunId) as { definition_json: string } | undefined;
             if (persistedAgent) {
               const definition = JSON.parse(persistedAgent.definition_json) as Record<string, unknown>;
@@ -519,6 +533,8 @@ export class PersistentMissionRunner {
             return { taskId: task.id!, status: "completed" as const };
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            if (!ownsLiveLease()) loseLease();
+            if (leaseLost) return { taskId: task.id!, status: "cancelled" };
             if (message.startsWith("EXTERNAL_ACTION_UNCERTAIN:")) {
               this.deps.store.db.prepare("UPDATE mission_tasks SET state='reconciliation_required',error=?,updated_at=? WHERE run_id=? AND task_key=?").run(message.slice(0, 2000), new Date().toISOString(), activeRunId, task.id!);
               this.setAgentStatus(agentRunId, "reconciliation_required");
@@ -691,11 +707,15 @@ export class PersistentMissionRunner {
       clearInterval(heartbeat); options.signal?.removeEventListener("abort", externalAbort); this.active.delete(missionId);
       this.activeRuns.delete(missionId);
       const done = new Date().toISOString();
-      this.deps.store.db.prepare("UPDATE mission_runs SET state=?,finished_at=?,heartbeat_at=?,error=? WHERE id=?").run(state, done, done, errorMessage ?? null, activeRunId);
-      this.deps.store.db.prepare("DELETE FROM runner_leases WHERE mission_id=? AND owner_id=?").run(missionId, this.ownerId);
-      this.repository.setStatus(missionId, state === "paused" ? "paused" : state === "cancelled" ? "cancelled" : state);
-      if (trigger === "schedule") this.repository.setScheduleState(missionId, this.nextSchedule(missionId), done);
-      this.deps.events.emit("mission.finished", { missionId, runId: activeRunId, status: state, ...(errorMessage ? { error: errorMessage } : {}) }, missionId);
+      const finalized = this.deps.store.db.transaction(() => {
+        const released = this.deps.store.db.prepare("DELETE FROM runner_leases WHERE mission_id=? AND owner_id=? AND expires_at>?").run(missionId, this.ownerId, done);
+        if (released.changes !== 1) return false;
+        this.deps.store.db.prepare("UPDATE mission_runs SET state=?,finished_at=?,heartbeat_at=?,error=? WHERE id=?").run(state, done, done, errorMessage ?? null, activeRunId);
+        this.repository.setStatus(missionId, state === "paused" ? "paused" : state === "cancelled" ? "cancelled" : state);
+        if (trigger === "schedule") this.repository.setScheduleState(missionId, this.nextSchedule(missionId), done);
+        return true;
+      })();
+      if (finalized) this.deps.events.emit("mission.finished", { missionId, runId: activeRunId, status: state, ...(errorMessage ? { error: errorMessage } : {}) }, missionId);
     }
     return { missionId, runId: activeRunId, status: state };
   }

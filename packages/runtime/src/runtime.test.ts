@@ -2642,6 +2642,32 @@ test("mission runner leases prevent a second Node process from repeating active 
   }
 }));
 
+test("mission runner stops without finalizing state after another owner takes its lease", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "mission-lease-fenced.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  const mission = new MissionRepository(store).create({ name: "Fenced runner lease", objective: "Stop when ownership changes", tasks: [{ id: "main", objective: "Complete once", dependsOn: [] }] });
+  let enteredResolve!: () => void; const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+  let finishedEvents = 0; events.on("mission.finished", () => { finishedEvents++; });
+  const runner = new PersistentMissionRunner({ store, config, events, agent: { run: async (_objective: string, options: { signal?: AbortSignal }) => {
+    enteredResolve();
+    if (options.signal?.aborted) return { sessionId: "stale-session", model: "fake", turns: 1, status: "cancelled" as const, response: "cancelled" };
+    await new Promise<void>((resolve) => options.signal?.addEventListener("abort", () => resolve(), { once: true }));
+    return { sessionId: "stale-session", model: "fake", turns: 1, status: "cancelled" as const, response: "cancelled" };
+  } } as never });
+  try {
+    const run = runner.run(mission.id);
+    await Promise.race([entered, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("stale runner did not start")), 5_000))]);
+    const now = new Date().toISOString();
+    store.db.prepare("UPDATE runner_leases SET owner_id=?,expires_at=?,heartbeat_at=? WHERE mission_id=?").run("replacement-owner", new Date(Date.now() + 60_000).toISOString(), now, mission.id);
+    const result = await Promise.race([run, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("stale runner did not stop after losing its lease")), 5_000))]);
+    assert.equal(result.status, "cancelled");
+    assert.equal((store.db.prepare("SELECT owner_id FROM runner_leases WHERE mission_id=?").get(mission.id) as { owner_id: string }).owner_id, "replacement-owner");
+    assert.equal((store.db.prepare("SELECT status FROM missions WHERE id=?").get(mission.id) as { status: string }).status, "running");
+    assert.equal((store.db.prepare("SELECT state FROM mission_runs WHERE mission_id=?").get(mission.id) as { state: string }).state, "running");
+    assert.equal((store.db.prepare("SELECT state FROM mission_tasks WHERE mission_id=?").get(mission.id) as { state: string }).state, "running");
+    assert.equal(finishedEvents, 0, "a stale owner must not publish final state for the replacement runner");
+  } finally { store.close(); }
+}));
+
 test("disabled agent delegation permits one task and rejects delegated mission graphs", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-no-delegation.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   config.set("global", "orchestration.delegation.enabled", false);

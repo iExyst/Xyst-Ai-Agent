@@ -1816,3 +1816,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added a regression that launches a real second Node process using the compiled runtime and a separate SQLite connection to the same mission profile. While the child process holds the mission lease during agent execution, the parent runner is rejected before its agent is called; the child completes and the database contains exactly one mission run.
 - Focused cross-process test passed 1/1. The 1.5-second contention case does not establish long-duration stress, crash recovery at every lease boundary, or multi-host behavior; C4 remains partial.
+
+## Mission runner lease fencing · 2026-10-28
+
+- Added a deterministic stale-owner regression: while a runner agent is active, the persisted lease is replaced by a live successor owner. The stale runner observes failed renewal, aborts its agent signal, and cannot rewrite the successor's mission/run/task state or emit a final event.
+- Focused test: `mission runner stops without finalizing state after another owner takes its lease` passed locally on Windows. This is deterministic fencing evidence, not long-duration cross-process stress; C4 remains partial.
