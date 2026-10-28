@@ -174,7 +174,7 @@ fn run() -> io::Result<u32> {
             attribute_list,
             0,
             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
-            &pseudoconsole as *const _ as *const _,
+            pseudoconsole as *const _,
             std::mem::size_of_val(&pseudoconsole),
             null_mut(),
             null(),

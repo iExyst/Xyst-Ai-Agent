@@ -19,7 +19,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Scan repository history for secrets
-        run: docker run --rm --volume "${{ github.workspace }}:/repo" ghcr.io/gitleaks/gitleaks:v8.30.0 git --redact --verbose /repo
+        # Scan this checked-out revision and its ancestors; other remote branches may
+        # contain unrelated projects and must not affect this release line's gate.
+        run: docker run --rm --volume "${{ github.workspace }}:/repo" ghcr.io/gitleaks/gitleaks:v8.30.0 git --redact --verbose --log-opts=HEAD /repo
       - uses: dtolnay/rust-toolchain@stable
       - name: Audit locked Rust dependencies
         shell: bash
