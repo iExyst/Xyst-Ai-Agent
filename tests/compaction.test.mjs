@@ -242,6 +242,70 @@ test('compaction commits session state only after its archive and session write 
   store.save = save;
 });
 
+test('cancelled compaction preserves session history after the provider has returned', async (t) => {
+  const root = await createTempDirectory('xyst-compaction-cancel-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore(root);
+  const session = store.create({ model: 'local' });
+  session.messages = [
+    { role: 'user', content: 'old request' },
+    { role: 'assistant', content: 'old answer' },
+    { role: 'user', content: 'middle request' },
+    { role: 'assistant', content: 'middle answer' },
+    { role: 'user', content: 'recent request' },
+    { role: 'assistant', content: 'recent answer' },
+  ];
+  await store.save(session);
+  const originalMessages = structuredClone(session.messages);
+  const config = {
+    default_model: 'local',
+    models: {
+      local: {
+        provider: 'custom-test-provider',
+        base_url: 'http://unused.test/v1',
+        model: 'summary-model',
+        context_length: 8000,
+        supports_tools: false,
+        input_cost_per_million: 0,
+        output_cost_per_million: 0,
+      },
+    },
+    budgets: { max_output_tokens: 1000 },
+  };
+  const controller = new AbortController();
+  const cancelled = new Error('User cancelled compaction');
+
+  await assert.rejects(
+    compactSession(session, {
+      config,
+      workspaceRoot: root,
+      sessionStore: store,
+      signal: controller.signal,
+      reserveUsage: async () => ({ reservation: 'reserved' }),
+      settleUsage: async () => controller.abort(cancelled),
+      fetchImpl: async () => assert.fail('Injected provider should replace the HTTP transport'),
+      providerFactory: () => ({
+        listModels: async () => [],
+        chat: async () => ({
+          content: 'A valid summary.',
+          toolCalls: [],
+          usage: { inputTokens: 10, outputTokens: 4 },
+          finishReason: 'stop',
+        }),
+        stream: async function* () {},
+      }),
+    }),
+    (error) => error === cancelled,
+  );
+
+  assert.deepEqual(session.messages, originalMessages);
+  assert.equal(session.compaction_summary, undefined);
+  assert.equal(session.compaction_archive, undefined);
+  assert.deepEqual((await store.load(session.id)).messages, redactStructuredSecrets(originalMessages));
+  const archiveDirectory = path.join(root, '.agent', 'compactions', session.id);
+  assert.deepEqual(await fs.readdir(archiveDirectory).catch((error) => (error.code === 'ENOENT' ? [] : Promise.reject(error))), []);
+});
+
 test('empty compaction summaries leave source history and archive state unchanged', async (t) => {
   const root = await createTempDirectory('xyst-compaction-empty-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

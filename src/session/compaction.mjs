@@ -130,6 +130,7 @@ export async function compactSession(
     });
   const summary = redactSecrets(response.content).trim();
   if (!summary) throw new Error('Compaction model returned an empty summary; session was not changed');
+  signal?.throwIfAborted();
 
   const archive = {
     schema_version: SESSION_ARCHIVE_SCHEMA_VERSION,
@@ -147,6 +148,7 @@ export async function compactSession(
   candidate.compaction_model = model.name;
   candidate.messages = candidate.messages.slice(keepStart);
   try {
+    signal?.throwIfAborted();
     await sessionStore.save(candidate);
   } catch (error) {
     await fs.rm(archivePath, { force: true }).catch(() => {});
