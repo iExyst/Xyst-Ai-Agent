@@ -84,6 +84,31 @@ test('semantic scan reports bounded partial indexing rather than consuming an un
   assert.equal(result.truncated, true);
 });
 
+test('semantic index reads stop at the size limit plus one byte when it grows during reading', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-index-bounded-read-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const index = new SemanticWorkspaceIndex(root, { model: 'mock', embed: async (texts) => texts.map(() => [1, 0]) });
+  await fs.writeFile(path.join(root, 'source.txt'), 'vehicle data\n');
+  await index.search('vehicle');
+  const indexPath = path.join(root, '.agent', 'retrieval', 'semantic-index.json');
+  const probe = await fs.open(indexPath, 'r');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const read = fileHandlePrototype.read;
+  let bytesRead = 0;
+  fileHandlePrototype.read = async (buffer, offset, length) => {
+    buffer.fill(0, offset, offset + length);
+    bytesRead += length;
+    return { bytesRead: length, buffer };
+  };
+  try {
+    await assert.rejects(index.status(), { code: 'INDEX_FILE_LIMIT' });
+    assert.equal(bytesRead, 32 * 1024 * 1024 + 1);
+  } finally {
+    fileHandlePrototype.read = read;
+  }
+});
+
 test('semantic retrieval bounds ignore and exclusion policy reads', async (t) => {
   const root = await createTempDirectory('xyst-semantic-rule-limits-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

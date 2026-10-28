@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants, watch as watchFs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { atomicWriteJson, hasAtomicWriteBackup, restoreAtomicWriteBackup } from '../platform/files.mjs';
+import { atomicWriteJson, hasAtomicWriteBackup, readBoundedFileHandle, restoreAtomicWriteBackup } from '../platform/files.mjs';
 import { isPathInside } from '../platform/paths.mjs';
 import { isSensitivePath, redactSecrets } from '../platform/redaction.mjs';
 import { embeddingIdentity } from '../providers/embeddings.mjs';
@@ -395,11 +395,34 @@ export class SemanticWorkspaceIndex {
   }
 
   async #read() {
+    let handle;
     try {
-      const metadata = await fs.lstat(this.file);
+      const metadata = await fs.lstat(this.file, { bigint: true });
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_INDEX_BYTES)
-        throw new Error('Semantic index file is not a bounded regular file; inspect it before recovery');
-      const state = JSON.parse(await fs.readFile(this.file, 'utf8'));
+        throw Object.assign(new Error('Semantic index file is not a bounded regular file; inspect it before recovery'), {
+          code: 'INDEX_FILE_INVALID',
+        });
+      handle = await fs.open(this.file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+      const opened = await handle.stat({ bigint: true });
+      if (!opened.isFile() || !sameFileSnapshot(metadata, opened))
+        throw Object.assign(new Error('Semantic index file changed while opening; retry the retrieval operation'), {
+          code: 'INDEX_FILE_CHANGED',
+        });
+      const bytes = await readBoundedFileHandle(handle, MAX_INDEX_BYTES);
+      if (bytes === null)
+        throw Object.assign(new Error('Semantic index file exceeds 32 MiB; inspect it before recovery'), { code: 'INDEX_FILE_LIMIT' });
+      const afterRead = await handle.stat({ bigint: true });
+      const currentPath = await fs.lstat(this.file, { bigint: true });
+      if (
+        !sameFileSnapshot(opened, afterRead) ||
+        !sameFileSnapshot(opened, currentPath) ||
+        !currentPath.isFile() ||
+        currentPath.isSymbolicLink()
+      )
+        throw Object.assign(new Error('Semantic index file changed while reading; retry the retrieval operation'), {
+          code: 'INDEX_FILE_CHANGED',
+        });
+      const state = JSON.parse(bytes.toString('utf8'));
       if (state.version !== VERSION || !Array.isArray(state.entries) || state.entries.length > MAX_CHUNKS)
         throw new Error('Semantic index is invalid; clear it before rebuilding');
       if (
@@ -430,6 +453,8 @@ export class SemanticWorkspaceIndex {
     } catch (error) {
       if (error.code === 'ENOENT') return emptyState(this.model);
       throw error;
+    } finally {
+      await handle?.close().catch(() => {});
     }
   }
 

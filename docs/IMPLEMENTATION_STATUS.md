@@ -2584,3 +2584,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Project memory write-failure recovery — 2026-10-28
 
 - An injected atomic-write EIO regression proves the previous record remains byte-identical, the writer lock is removed, and a later append succeeds. The focused test passes; broader persistence-boundary injection remains open.
+
+## Bounded semantic-index persistence reads — 2026-10-28
+
+- The semantic index now reads through the shared 32 MiB capped file-handle reader and verifies the opened file identity/version before and after reading. Symlink opens are rejected where supported. The injected-growth regression stops at the configured cap plus one byte; full retrieval overflow soak remains open.
