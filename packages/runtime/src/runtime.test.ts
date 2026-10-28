@@ -2668,6 +2668,72 @@ test("mission runner stops without finalizing state after another owner takes it
   } finally { store.close(); }
 }));
 
+test("a replacement Node process resumes an expired lease without stale-runner finalization", { timeout: 15_000 }, async () => withTemp(async (root) => {
+  const databasePath = join(root, "process-takeover.sqlite"); const store = new XystStore(databasePath); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  const mission = new MissionRepository(store).create({ name: "Cross-process takeover", objective: "Finish once after a lease expires", tasks: [{ id: "main", objective: "Complete", dependsOn: [] }] });
+  let enteredResolve!: () => void; const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+  const parentRunner = new PersistentMissionRunner({ store, config, events, agent: { run: async (_objective: string, options: { signal?: AbortSignal }) => {
+    enteredResolve();
+    await new Promise<void>((resolve) => options.signal?.addEventListener("abort", () => resolve(), { once: true }));
+    return { sessionId: "first-process-session", model: "parent", turns: 1, status: "cancelled" as const, response: "lease lost" };
+  } } as never });
+  const storageUrl = new URL("../dist/storage.js", import.meta.url).href;
+  const eventsUrl = new URL("../dist/events.js", import.meta.url).href;
+  const missionsUrl = new URL("../dist/orchestration/missions.js", import.meta.url).href;
+  const childScript = `
+    const { XystStore, ConfigStore } = await import(${JSON.stringify(storageUrl)});
+    const { RuntimeEvents } = await import(${JSON.stringify(eventsUrl)});
+    const { PersistentMissionRunner } = await import(${JSON.stringify(missionsUrl)});
+    const store = new XystStore(process.env.XYST_LEASE_DB);
+    const runner = new PersistentMissionRunner({
+      store, config: new ConfigStore(store), events: new RuntimeEvents(),
+      agent: { run: async () => {
+        process.stdout.write("SUCCESSOR_ENTERED\\n");
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        return { sessionId: "successor-session", model: "child", turns: 1, status: "completed", response: "completed by successor" };
+      } }
+    });
+    try {
+      const result = await runner.run(process.env.XYST_LEASE_MISSION, { resume: true });
+      process.stdout.write("SUCCESSOR_DONE=" + result.status + "\\n");
+      store.close();
+    } catch (error) { store.close(); throw error; }
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", childScript], {
+    env: { ...process.env, XYST_LEASE_DB: databasePath, XYST_LEASE_MISSION: mission.id },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+  let stdout = ""; let stderr = "";
+  const childExited = new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (code) => resolve(code ?? -1)); });
+  const successorEntered = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`successor process did not acquire the expired lease: ${stderr}`)), 5_000);
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; if (stdout.includes("SUCCESSOR_ENTERED")) { clearTimeout(timeout); resolve(); } });
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.once("exit", (code) => { if (code !== 0) { clearTimeout(timeout); reject(new Error(`successor exited before agent work (${code}): ${stderr}`)); } });
+  });
+  try {
+    const firstRun = parentRunner.run(mission.id);
+    await Promise.race([entered, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("original process did not start agent work")), 5_000))]);
+    const expired = new Date(Date.now() - 1_000).toISOString();
+    store.db.prepare("UPDATE runner_leases SET expires_at=?,heartbeat_at=? WHERE mission_id=?").run(expired, expired, mission.id);
+    await successorEntered;
+    const staleResult = await Promise.race([firstRun, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("original process did not stop after takeover")), 5_000))]);
+    assert.equal(staleResult.status, "cancelled");
+    assert.equal((store.db.prepare("SELECT state FROM mission_runs WHERE mission_id=?").get(mission.id) as { state: string }).state, "running", "the stale process must not finalize the successor's resumed run");
+    assert.equal((store.db.prepare("SELECT owner_id FROM runner_leases WHERE mission_id=?").get(mission.id) as { owner_id: string }).owner_id === parentRunner.ownerId, false);
+    assert.equal(await childExited, 0, stderr);
+    assert.ok(stdout.includes("SUCCESSOR_DONE=completed"), stdout);
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM mission_runs WHERE mission_id=?").get(mission.id) as { count: number }).count, 1);
+    assert.equal((store.db.prepare("SELECT state FROM mission_runs WHERE mission_id=?").get(mission.id) as { state: string }).state, "completed");
+    assert.equal((store.db.prepare("SELECT status FROM missions WHERE id=?").get(mission.id) as { status: string }).status, "completed");
+    assert.equal((store.db.prepare("SELECT state FROM mission_tasks WHERE mission_id=?").get(mission.id) as { state: string }).state, "completed");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) { child.kill(); await childExited.catch(() => -1); }
+    store.close();
+  }
+}));
+
 test("disabled agent delegation permits one task and rejects delegated mission graphs", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-no-delegation.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   config.set("global", "orchestration.delegation.enabled", false);

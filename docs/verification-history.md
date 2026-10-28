@@ -1821,3 +1821,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added a deterministic stale-owner regression: while a runner agent is active, the persisted lease is replaced by a live successor owner. The stale runner observes failed renewal, aborts its agent signal, and cannot rewrite the successor's mission/run/task state or emit a final event.
 - Focused test: `mission runner stops without finalizing state after another owner takes its lease` passed locally on Windows. This is deterministic fencing evidence, not long-duration cross-process stress; C4 remains partial.
+
+## Cross-process takeover of an expired mission lease · 2026-10-28
+
+- Added a second process-level regression: the original process holds mission work, its persisted lease expires, and a separate Node process resumes that same run. The old process aborts and returns without finalizing the successor's active state; then the successor completes the run, and persisted run/task/mission state is completed exactly once.
+- Focused takeover test passed 1/1 on Windows. This proves one bounded expired-lease handoff; long-duration contention/restart stress remains open under C4.
