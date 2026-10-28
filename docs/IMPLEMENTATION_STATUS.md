@@ -2604,3 +2604,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 ## Provider finish-reason validation — 2026-10-28
 
 - OpenAI-compatible streamed and non-streamed responses now reject non-string and blank `finish_reason` values. Focused malformed-payload regressions and changed-file checks pass.
+
+## Provider and extension onboarding documentation — 2026-10-28
+
+- Existing setup docs cover loopback local-model discovery, remote HTTPS model profiles, environment and OS credential-store secrets, and provider-side billing/data handling. The maintained Hello World signed MCP example includes package build, verify, install, and enable commands; extension docs explain Linux no-network sandboxing and the host-OS permissions used elsewhere.
