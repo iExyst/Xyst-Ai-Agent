@@ -628,6 +628,16 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
           await new Promise((resolve) => requestAnimationFrame(resolve));
           void document.body.offsetWidth;
           const styles = getComputedStyle(root);
+          surfaceProbe.style.backgroundColor = styles.getPropertyValue('--surface').trim();
+          codeSurfaceProbe.style.backgroundColor = styles.getPropertyValue('--surface-code').trim();
+          raisedProbe.style.backgroundColor = styles.getPropertyValue('--surface-raised').trim();
+          textProbe.style.color = styles.getPropertyValue('--text').trim();
+          subtleTextProbe.style.color = styles.getPropertyValue('--text-subtle').trim();
+          strongTextProbe.style.color = styles.getPropertyValue('--text-strong').trim();
+          dangerTextProbe.style.color = styles.getPropertyValue('--danger-strong').trim();
+          mintTextProbe.style.color = styles.getPropertyValue('--brand-mint').trim();
+          mutedTextProbe.style.color = styles.getPropertyValue('--muted').trim();
+          warningSurfaceProbe.style.backgroundColor = styles.getPropertyValue('--warning-surface').trim();
           return {
             canvas: styles.getPropertyValue('--canvas').trim(),
             surface: styles.getPropertyValue('--surface').trim(),
