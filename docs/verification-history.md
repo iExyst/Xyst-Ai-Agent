@@ -1811,3 +1811,8 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added a regression with two independent `PersistentMissionRunner` instances and separate SQLite connections to one profile. While the first holds the mission lease inside its agent call, the second sees the live lease immediately, rejects without invoking the agent, and creates no second run; the lease owner then finishes successfully.
 - Focused test passed 1/1; full local verification passed (runtime 187 passed / 2 host-specific skips, CLI 26/26, release checks 5/5), workspace `npm run typecheck`, and `git diff --check`. This tests separate runtime/store instances in one process, not process-kill or long-duration multi-runner stress; C4 remains partial pending that broader coverage.
+
+## Cross-process mission runner lease isolation · 2026-10-28
+
+- Added a regression that launches a real second Node process using the compiled runtime and a separate SQLite connection to the same mission profile. While the child process holds the mission lease during agent execution, the parent runner is rejected before its agent is called; the child completes and the database contains exactly one mission run.
+- Focused cross-process test passed 1/1. The 1.5-second contention case does not establish long-duration stress, crash recovery at every lease boundary, or multi-host behavior; C4 remains partial.

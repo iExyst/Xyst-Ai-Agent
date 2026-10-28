@@ -2592,6 +2592,56 @@ test("independent mission runners sharing a profile cannot execute the same miss
   }
 }));
 
+test("mission runner leases prevent a second Node process from repeating active work", async () => withTemp(async (root) => {
+  const databasePath = join(root, "process-runner.sqlite"); const store = new XystStore(databasePath); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  const mission = new MissionRepository(store).create({ name: "Cross-process lease", objective: "Run once across runtimes", tasks: [{ id: "main", objective: "Complete", dependsOn: [] }] });
+  let parentAgentCalls = 0;
+  const parentRunner = new PersistentMissionRunner({ store, config, events, agent: { run: async () => { parentAgentCalls++; return { sessionId: randomUUID(), model: "parent", turns: 1, status: "completed" as const, response: "complete" }; } } as never });
+  const storageUrl = new URL("../dist/storage.js", import.meta.url).href;
+  const eventsUrl = new URL("../dist/events.js", import.meta.url).href;
+  const missionsUrl = new URL("../dist/orchestration/missions.js", import.meta.url).href;
+  const childScript = `
+    const { XystStore, ConfigStore } = await import(${JSON.stringify(storageUrl)});
+    const { RuntimeEvents } = await import(${JSON.stringify(eventsUrl)});
+    const { PersistentMissionRunner } = await import(${JSON.stringify(missionsUrl)});
+    const store = new XystStore(process.env.XYST_LEASE_DB);
+    const runner = new PersistentMissionRunner({
+      store, config: new ConfigStore(store), events: new RuntimeEvents(),
+      agent: { run: async () => {
+        process.stdout.write("AGENT_ENTERED\\n");
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        return { sessionId: "child-session", model: "child", turns: 1, status: "completed", response: "complete" };
+      } }
+    });
+    try { await runner.run(process.env.XYST_LEASE_MISSION); store.close(); }
+    catch (error) { store.close(); throw error; }
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", childScript], {
+    env: { ...process.env, XYST_LEASE_DB: databasePath, XYST_LEASE_MISSION: mission.id },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+  let stdout = ""; let stderr = "";
+  const childExited = new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (code) => resolve(code ?? -1)); });
+  const childEntered = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`child runner did not enter agent call: ${stderr}`)), 5_000);
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; if (stdout.includes("AGENT_ENTERED")) { clearTimeout(timeout); resolve(); } });
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.once("exit", (code) => { if (code !== 0) { clearTimeout(timeout); reject(new Error(`child runner exited before holding lease (${code}): ${stderr}`)); } });
+  });
+  try {
+    await childEntered;
+    await assert.rejects(parentRunner.run(mission.id), /live runner lease/);
+    assert.equal(await childExited, 0, stderr);
+    assert.equal(parentAgentCalls, 0, "the competing process must not invoke the agent");
+    assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM mission_runs WHERE mission_id=?").get(mission.id) as { count: number }).count, 1);
+    assert.equal((store.db.prepare("SELECT status FROM missions WHERE id=?").get(mission.id) as { status: string }).status, "completed");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) { child.kill(); await childExited.catch(() => -1); }
+    store.close();
+  }
+}));
+
 test("disabled agent delegation permits one task and rejects delegated mission graphs", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-no-delegation.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   config.set("global", "orchestration.delegation.enabled", false);
