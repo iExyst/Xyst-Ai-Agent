@@ -472,6 +472,12 @@ function validateValue(schema, value, location, state) {
         `${location} must contain between ${schema.minProperties || 0} and ${schema.maxProperties ?? 'unlimited'} properties`,
       );
     for (const key of schema.required || []) if (!Object.hasOwn(value, key)) throw new Error(`${location}.${key} is required`);
+    for (const [key, dependentNames] of Object.entries(schema.dependentRequired || {}))
+      if (Object.hasOwn(value, key))
+        for (const dependentName of dependentNames)
+          if (!Object.hasOwn(value, dependentName)) throw new Error(`${location}.${dependentName} is required when ${key} is present`);
+    for (const [key, dependentSchema] of Object.entries(schema.dependentSchemas || {}))
+      if (Object.hasOwn(value, key)) validateValue(dependentSchema, value, location, state);
     const patternEntries = Object.entries(schema.patternProperties || {});
     if (propertyCount > 128 && (patternEntries.length || schema.propertyNames !== undefined))
       throw new Error(`${location} has too many properties for pattern validation`);

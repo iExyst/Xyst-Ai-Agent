@@ -845,6 +845,8 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     'patternProperties',
     'propertyNames',
     'required',
+    'dependentRequired',
+    'dependentSchemas',
     'additionalProperties',
     'items',
     'minimum',
@@ -956,7 +958,15 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
   if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
     throw mcpError('MCP tool input schema has invalid uniqueItems', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined) result.uniqueItems = schema.uniqueItems;
-  const objectKeywords = ['properties', 'required', 'additionalProperties', 'patternProperties', 'propertyNames'];
+  const objectKeywords = [
+    'properties',
+    'required',
+    'dependentRequired',
+    'dependentSchemas',
+    'additionalProperties',
+    'patternProperties',
+    'propertyNames',
+  ];
   const hasObjectKeywords = objectKeywords.some((key) => schema[key] !== undefined);
   if (types.includes('object') || hasObjectKeywords) {
     if (
@@ -968,7 +978,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     if (Object.keys(properties).length > 64) throw mcpError('MCP object schema exceeds the property limit', 'MCP_INVALID_SCHEMA');
     result.properties = Object.fromEntries(
       Object.entries(properties).map(([key, value]) => {
-        if (!key || key.length > 128) throw mcpError('MCP tool input schema has an invalid property name', 'MCP_INVALID_SCHEMA');
+        if (key.length > 128) throw mcpError('MCP tool input schema has an invalid property name', 'MCP_INVALID_SCHEMA');
         return [key, normalizeSchema(value, depth + 1, budget)];
       }),
     );
@@ -980,6 +990,37 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     )
       throw mcpError('MCP tool input schema has invalid required properties', 'MCP_INVALID_SCHEMA');
     if (schema.required) result.required = [...new Set(schema.required)];
+    if (schema.dependentRequired !== undefined) {
+      if (!schema.dependentRequired || typeof schema.dependentRequired !== 'object' || Array.isArray(schema.dependentRequired))
+        throw mcpError('MCP object schema has invalid dependentRequired', 'MCP_INVALID_SCHEMA');
+      const dependencies = Object.entries(schema.dependentRequired);
+      if (dependencies.length > 64) throw mcpError('MCP dependentRequired exceeds its entry limit', 'MCP_INVALID_SCHEMA');
+      result.dependentRequired = Object.fromEntries(
+        dependencies.map(([key, names]) => {
+          if (
+            key.length > 128 ||
+            !Array.isArray(names) ||
+            names.length > 64 ||
+            new Set(names).size !== names.length ||
+            names.some((name) => typeof name !== 'string' || name.length > 128)
+          )
+            throw mcpError('MCP object schema has invalid dependentRequired entries', 'MCP_INVALID_SCHEMA');
+          return [key, names];
+        }),
+      );
+    }
+    if (schema.dependentSchemas !== undefined) {
+      if (!schema.dependentSchemas || typeof schema.dependentSchemas !== 'object' || Array.isArray(schema.dependentSchemas))
+        throw mcpError('MCP object schema has invalid dependentSchemas', 'MCP_INVALID_SCHEMA');
+      const dependencies = Object.entries(schema.dependentSchemas);
+      if (dependencies.length > 64) throw mcpError('MCP dependentSchemas exceeds its entry limit', 'MCP_INVALID_SCHEMA');
+      result.dependentSchemas = Object.fromEntries(
+        dependencies.map(([key, child]) => {
+          if (key.length > 128) throw mcpError('MCP dependentSchemas key is too long', 'MCP_INVALID_SCHEMA');
+          return [key, normalizeSchema(child, depth + 1, budget)];
+        }),
+      );
+    }
     if (schema.patternProperties !== undefined) {
       if (!schema.patternProperties || typeof schema.patternProperties !== 'object' || Array.isArray(schema.patternProperties))
         throw mcpError('MCP object schema has invalid patternProperties', 'MCP_INVALID_SCHEMA');
