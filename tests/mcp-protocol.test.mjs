@@ -31,7 +31,10 @@ test('MCP tool-call results validate content blocks and standard flags', () => {
   for (const invalid of [
     { resultType: 'complete', content: [{ type: 'text', text: 1 }] },
     { resultType: 'complete', content: [{ type: 'image', data: 'abc' }] },
+    { resultType: 'complete', content: [{ type: 'image', data: 'A===', mimeType: 'image/png' }] },
+    { resultType: 'complete', content: [{ type: 'audio', data: 'not base64', mimeType: 'audio/wav' }] },
     { resultType: 'complete', content: [{ type: 'resource', resource: { uri: 'file:///workspace/a.txt', blob: 42 } }] },
+    { resultType: 'complete', content: [{ type: 'resource', resource: { uri: 'file:///workspace/a.txt', blob: 'not base64' } }] },
     { resultType: 'complete', content: [], isError: 'false' },
   ]) {
     assert.throws(() => validateMcpResultType(invalid, { protocolVersion: '2026-07-28', serverName: 'fixture', method: 'tools/call' }), {
@@ -205,6 +208,10 @@ test('MCP resource reads and prompt messages validate returned content shapes', 
     [
       'resources/read',
       { resultType: 'complete', cacheScope: 'private', ttlMs: 0, contents: [{ uri: 'file:///workspace/a.txt', blob: 42 }] },
+    ],
+    [
+      'resources/read',
+      { resultType: 'complete', cacheScope: 'private', ttlMs: 0, contents: [{ uri: 'file:///workspace/a.txt', blob: 'not base64' }] },
     ],
     ['prompts/get', { resultType: 'complete', messages: [{ role: 'system', content: { type: 'text', text: 'ignored' } }] }],
     ['prompts/get', { resultType: 'complete', messages: [{ role: 'user', content: { type: 'text', text: 1 } }] }],

@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## MCP binary payload validation — 2026-10-28
+
+- MCP image/audio data and blob resource contents now enforce canonical base64 byte strings from the pinned `2026-07-28` schema. Malformed characters, padding, and pad bits are rejected before the result is passed to tool or resource handling.
+- The focused MCP protocol suite passes 8/8; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending. Broader MCP schema conformance remains open.
+
 ## Cross-platform source archive line endings and browser theme smoke — 2026-10-28
 
 - Windows worktrees can contain CRLF checkout bytes for Git-normalized text files. The source archive now normalizes valid UTF-8 text to LF before it records file sizes/hashes and writes the tarball; binary and invalid-UTF-8 data are preserved. Focused archive normalization/reproducibility regressions pass 2/2. Exact-source run [40649614506](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40649614506) generated identical archives on Windows and Ubuntu under Node 22/24 and matches the local build: 448 files, 7,811,909 bytes, SHA-256 `274d4a93d3b5cf9cb4b250babcf2dbe05442388ba5d4346b542fa0053e19a3de`.

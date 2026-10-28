@@ -147,7 +147,7 @@ function isContentBlock(value) {
   if (!isRecord(value) || !isOptionalMeta(value._meta)) return false;
   if (value.type === 'text') return typeof value.text === 'string' && isOptionalAnnotations(value.annotations);
   if (value.type === 'image' || value.type === 'audio')
-    return typeof value.data === 'string' && typeof value.mimeType === 'string' && isOptionalAnnotations(value.annotations);
+    return isBase64String(value.data) && typeof value.mimeType === 'string' && isOptionalAnnotations(value.annotations);
   if (value.type === 'resource_link') return isResourceLink(value);
   if (value.type === 'resource') return isResourceContents(value.resource) && isOptionalAnnotations(value.annotations);
   return false;
@@ -161,7 +161,21 @@ function isResourceContents(value) {
     (value.mimeType !== undefined && typeof value.mimeType !== 'string')
   )
     return false;
-  return (typeof value.text === 'string' || typeof value.blob === 'string') && isOptionalString(value.text) && isOptionalString(value.blob);
+  return (
+    (typeof value.text === 'string' || typeof value.blob === 'string') &&
+    isOptionalString(value.text) &&
+    (value.blob === undefined || isBase64String(value.blob))
+  );
+}
+
+function isBase64String(value) {
+  if (
+    typeof value !== 'string' ||
+    value.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+  )
+    return false;
+  return Buffer.from(value, 'base64').toString('base64') === value;
 }
 
 function isToolDefinition(value) {
