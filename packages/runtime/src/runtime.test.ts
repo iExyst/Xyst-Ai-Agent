@@ -3064,6 +3064,38 @@ test("mission concurrency runs independent tasks in distinct workspaces and seri
   store.close();
 }));
 
+test("mission concurrency stress keeps sixteen independent tasks within four worker slots", async () => withTemp(async (root) => {
+  const store = new XystStore(join(root, "mission-concurrency-stress.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
+  const workspaces = await Promise.all(Array.from({ length: 16 }, async (_, index) => {
+    const path = join(root, `worker-${String(index).padStart(2, "0")}`); await mkdir(path); return path;
+  }));
+  let active = 0; let peak = 0; const starts = new Map<string, number>();
+  const agent = { run: async (objective: string, options: { onSession?: (id: string) => void }) => {
+    const taskId = objective.match(/\n\nTask: ([^\n]+)/)?.[1] ?? "unknown";
+    starts.set(taskId, (starts.get(taskId) ?? 0) + 1);
+    active++; peak = Math.max(peak, active); const sessionId = `stress-${taskId}`; options.onSession?.(sessionId);
+    try {
+      const index = Number(taskId.slice(-2));
+      await new Promise((resolve) => setTimeout(resolve, 10 + (index % 4) * 5));
+      return { sessionId, model: "fake", selectionReason: "stress-test", turns: 1, status: "completed" as const, response: `completed ${taskId}` };
+    } finally { active--; }
+  } };
+  const runner = new PersistentMissionRunner({ store, config, events, agent: agent as never });
+  try {
+    const mission = runner.repository.create({ name: "Sixteen worker stress", objective: "Complete every independent assignment", maxConcurrency: 4, tasks: workspaces.map((workspace, index) => ({
+      id: `worker-${String(index).padStart(2, "0")}`, objective: `Independent assignment ${index}`, workspace, dependsOn: []
+    })) });
+    const result = await runner.run(mission.id);
+    assert.equal(result.status, "completed");
+    assert.equal(starts.size, 16, "every task should start");
+    assert.ok([...starts.values()].every((count) => count === 1), "no task should be duplicated during resource backfill");
+    assert.equal(peak, 4, "the scheduler should fill but never exceed the four-worker limit");
+    const rows = store.db.prepare("SELECT task_key,state,attempts FROM mission_tasks WHERE run_id=? ORDER BY task_key").all(result.runId) as Array<{ task_key: string; state: string; attempts: number }>;
+    assert.equal(rows.length, 16);
+    assert.ok(rows.every((row) => row.state === "completed" && row.attempts === 1), "every task checkpoint should complete exactly once");
+  } finally { store.close(); }
+}));
+
 test("mission resource admission backfills a slot as soon as a ready task completes", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "mission-backfill.sqlite")); const config = new ConfigStore(store); const events = new RuntimeEvents();
   const workspaces = await Promise.all(["fast", "slow", "backfill"].map(async (name) => { const path = join(root, name); await mkdir(path); return path; }));

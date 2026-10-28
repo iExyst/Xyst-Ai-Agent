@@ -1759,3 +1759,14 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added a runtime integration regression that pauses one persistent mission during inference three times, resumes the saved task after each interruption, checks the task remains pending with attempt counts preserved, then completes the fourth execution.
 - Focused test passed 1/1. This covers three sequential pause/resume cycles for one task; larger task graphs, concurrent tool batches, and broader delegated graphs remain unverified under A5.
+
+## Fresh isolated Qwen3.5 9B coding acceptance · 2026-10-28
+
+- Ran the current Xyst CLI with preloaded `qwen/qwen3.5-9b`, using a new temporary APPDATA directory and a separate temporary working directory outside the repository. Persisted session `9d01c460-4c90-47de-b7c1-a5335ceb74f4` created exactly `isLeapYear.mjs` and `isLeapYear.test.mjs` in that workspace.
+- The session ran the exact `node --test isLeapYear.test.mjs` command successfully (15/15), read both exact root files, and finished with persisted `task_complete verified=true` citing the successful `run_process` and both `file_read` tool calls. An independent rerun in the same workspace passed 15/15. Final SHA-256: `isLeapYear.mjs` `0F789E9D66FB5E37D93A5BF80DB6EA2BB763E6358B81C3C48BE654AF7FFA893B`; `isLeapYear.test.mjs` `D185B4DD25E4DD2166DBDA65A0DA66EC346328D4186F9BAF9261AE0A5D16AF6B`.
+- This is a second bounded coding-loop success; it does not establish reliability across tasks, model families, or long sessions. Earlier failed attempts remain non-passes. The model-generated files stayed outside the PC repository.
+
+## Mission concurrency stress with sixteen independent tasks · 2026-10-28
+
+- Added a deterministic `PersistentMissionRunner` integration regression with 16 independent tasks in distinct workspaces and `maxConcurrency: 4`. Each fake agent call has a short varied delay to exercise backfill. The test verifies all 16 task IDs start once, peak activity reaches exactly four without exceeding the limit, and every persisted task row completes with one attempt.
+- Focused stress test passed 1/1. This increases deterministic scheduling coverage; it does not measure real-model memory contention or sustained delegated-model reliability.
