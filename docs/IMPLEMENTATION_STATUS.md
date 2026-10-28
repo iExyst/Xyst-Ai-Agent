@@ -13,6 +13,7 @@
 ## Legacy MCP initialize response validation — 2026-10-28
 
 - Stdio and HTTP legacy handshakes now validate the required protocol version, capabilities, server implementation metadata, and optional instructions before using them. Focused shape regressions and the stdio fallback, legacy HTTP+SSE, and Streamable HTTP recovery integrations pass. Full MCP field-level conformance remains open; see the [official 2025-11-25 schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-11-25/schema.json).
+- Stdio discovery is now validated as modern before negotiation; only a JSON-RPC method-not-found response permits legacy fallback. Malformed discovery fails closed instead of downgrading. The focused no-downgrade regression passes, and the complete MCP protocol/transport suites pass 40 tests with one expected Linux Bubblewrap capability skip.
 
 ## MCP discovery extension-key validation — 2026-10-28
 

@@ -418,9 +418,10 @@ class McpStdioSession {
   async #negotiate() {
     let discovered = null;
     try {
-      discovered = await this.#request('server/discover', { _meta: modernMeta() }, Math.min(this.timeoutMs, 1500));
-    } catch {
-      /* Legacy servers answer initialize and may not implement discovery. */
+      discovered = await this.#request('server/discover', { _meta: modernMeta() }, Math.min(this.timeoutMs, 1500), MODERN_VERSION);
+    } catch (error) {
+      if (error.code !== 'MCP_REMOTE_METHOD_MISSING') throw error;
+      /* Only an explicit method-not-found response establishes legacy discovery fallback. */
     }
     if (discovered?.supportedVersions?.includes(MODERN_VERSION)) {
       this.capabilities = discovered.capabilities || {};
@@ -534,7 +535,7 @@ class McpStdioSession {
     return result;
   }
 
-  #request(method, params, timeoutMs = this.timeoutMs) {
+  #request(method, params, timeoutMs = this.timeoutMs, protocolVersion = this.protocolVersion) {
     if (this.closed || this.child.stdin.destroyed || this.child.stdin.writableEnded)
       return Promise.reject(mcpError(`MCP server '${this.name}' is unavailable`, 'MCP_SERVER_UNAVAILABLE'));
     const id = ++this.nextId;
@@ -543,7 +544,7 @@ class McpStdioSession {
         this.pending.delete(id);
         reject(mcpError(`MCP server '${this.name}' timed out during ${method}`, 'MCP_TIMEOUT'));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, method, protocolVersion: this.protocolVersion });
+      this.pending.set(id, { resolve, reject, timer, method, protocolVersion });
       const message = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
       try {
         this.child.stdin.write(message, (error) => {

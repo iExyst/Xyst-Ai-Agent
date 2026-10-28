@@ -22,6 +22,7 @@ function fixtureServerCode({
   resourceTemplate = null,
   malicious = false,
   toolResultType = null,
+  invalidDiscovery = false,
 } = {}) {
   return `
 const readline = require('node:readline');
@@ -41,7 +42,7 @@ const fail = (id, code, message) => process.stdout.write(JSON.stringify({ jsonrp
 lines.on('line', (line) => {
   const request = JSON.parse(line);
   if (request.method === 'server/discover') {
-    ${legacy ? "fail(request.id, -32601, 'method not found');" : "sendMethodResult(request, { supportedVersions: ['2026-07-28'], capabilities: { tools: {}, resources: {}, prompts: {}, private: { token: 'metadata-secret-canary' } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'fixture', version: 'token=metadata-secret-canary' } } });"}
+    ${legacy ? "fail(request.id, -32601, 'method not found');" : invalidDiscovery ? "sendMethodResult(request, { supportedVersions: '2026-07-28', capabilities: {} });" : "sendMethodResult(request, { supportedVersions: ['2026-07-28'], capabilities: { tools: {}, resources: {}, prompts: {}, private: { token: 'metadata-secret-canary' } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'fixture', version: 'token=metadata-secret-canary' } } });"}
   } else if (request.method === 'initialize') {
     send(request.id, { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } });
   } else if (request.method === 'notifications/initialized') {
@@ -75,6 +76,7 @@ function managerConfig({
   resourceTemplate = null,
   malicious = false,
   toolResultType = null,
+  invalidDiscovery = false,
 } = {}) {
   return {
     tools: { shell_enabled: true },
@@ -86,7 +88,18 @@ function managerConfig({
         fixture: {
           enabled: true,
           command: process.execPath,
-          args: ['-e', fixtureServerCode({ legacy, invalidTemplate, unsupportedTemplates, resourceTemplate, malicious, toolResultType })],
+          args: [
+            '-e',
+            fixtureServerCode({
+              legacy,
+              invalidTemplate,
+              unsupportedTemplates,
+              resourceTemplate,
+              malicious,
+              toolResultType,
+              invalidDiscovery,
+            }),
+          ],
           timeout_ms: 3000,
         },
       },
@@ -218,6 +231,19 @@ test('MCP stdio manager falls back to the legacy initialize handshake', async (t
   assert.equal(result.content[0].text, 'echo:old protocol');
 });
 
+test('MCP stdio does not downgrade a malformed discovery response to legacy', async (t) => {
+  const root = await createTempDirectory('xyst-mcp-invalid-discovery-');
+  const manager = new StdioMcpManager({ config: managerConfig({ invalidDiscovery: true }), workspaceRoot: root });
+  t.after(async () => {
+    await manager.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await manager.initialize();
+  assert.equal(manager.serverCatalog[0].connection_state, 'error');
+  assert.equal(manager.serverCatalog[0].error_code, 'MCP_INVALID_RESPONSE');
+  assert.deepEqual(manager.definitions, []);
+});
+
 test('MCP stdio rejects unsupported modern control-flow results instead of exposing them as tool output', async (t) => {
   const root = await createTempDirectory('xyst-mcp-control-flow-');
   const manager = new StdioMcpManager({ config: managerConfig({ toolResultType: 'input_required' }), workspaceRoot: root });
@@ -334,7 +360,7 @@ test('MCP startup isolates one failed server and retains healthy server tools', 
   assert.ok(manager.definitions.some((tool) => tool.name === 'mcp__fixture__echo'));
   const broken = manager.serverCatalog.find((server) => server.name === 'broken');
   assert.equal(broken.connection_state, 'error');
-  assert.equal(broken.error_code, 'MCP_SERVER_UNAVAILABLE');
+  assert.equal(broken.error_code, 'MCP_SPAWN_FAILED');
 });
 
 test('MCP startup handles a child that exits before accepting its first request', async (t) => {
