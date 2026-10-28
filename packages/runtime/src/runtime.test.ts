@@ -2392,6 +2392,24 @@ test("Git workflow stages and commits selected paths, fetches, and pushes withou
   await assert.rejects(gitStage(access, ["../outside.txt"], repo), /Invalid repository-relative path/);
 }));
 
+test("Git push rejection explains explicit non-fast-forward recovery without changing either branch", async () => withTemp(async (root) => {
+  const bare = join(root, "remote.git"); const seed = join(root, "seed"); const writerA = join(root, "writer-a"); const writerB = join(root, "writer-b");
+  await mkdir(seed); await git(["init", "--quiet", "--initial-branch=main"], { cwd: seed });
+  await git(["config", "user.name", "Xyst Test"], { cwd: seed }); await git(["config", "user.email", "xyst-test@example.invalid"], { cwd: seed });
+  await writeFile(join(seed, "README.md"), "base\n"); await git(["add", "README.md"], { cwd: seed }); await git(["commit", "--quiet", "-m", "base"], { cwd: seed });
+  await git(["init", "--bare", "--quiet", bare]); await git(["remote", "add", "origin", bare], { cwd: seed }); await git(["push", "--quiet", "-u", "origin", "main"], { cwd: seed });
+  await git(["clone", "--quiet", "--branch", "main", bare, writerA]); await git(["clone", "--quiet", "--branch", "main", bare, writerB]);
+  for (const repo of [writerA, writerB]) { await git(["config", "user.name", "Xyst Test"], { cwd: repo }); await git(["config", "user.email", "xyst-test@example.invalid"], { cwd: repo }); }
+  await writeFile(join(writerA, "README.md"), "writer A\n"); await git(["commit", "--quiet", "-am", "writer A"], { cwd: writerA });
+  await writeFile(join(writerB, "README.md"), "writer B\n"); await git(["commit", "--quiet", "-am", "writer B"], { cwd: writerB });
+  await gitPush(new AccessController(), "origin", "main", writerA);
+  const remoteHeadAfterA = await git(["rev-parse", "refs/heads/main"], { cwd: bare });
+  const writerBHeadBefore = await git(["rev-parse", "HEAD"], { cwd: writerB });
+  await assert.rejects(gitPush(new AccessController(), "origin", "main", writerB), /remote branch has commits.*Fetch it with git_fetch.*did not merge or force-push/s);
+  assert.equal(await git(["rev-parse", "refs/heads/main"], { cwd: bare }), remoteHeadAfterA, "a rejected push must leave the remote at the accepted commit");
+  assert.equal(await git(["rev-parse", "HEAD"], { cwd: writerB }), writerBHeadBefore, "a rejected push must not rewrite or integrate the local branch");
+}));
+
 test("GitHub webhook signatures are verified and delivery IDs are deduplicated", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "webhooks.sqlite")); const body = Buffer.from('{"repository":{"full_name":"owner/repo"},"issue":{"number":7}}');
   const signature = `sha256=${createHmac("sha256", "test-secret").update(body).digest("hex")}`;

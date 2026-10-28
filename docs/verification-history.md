@@ -1836,3 +1836,9 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added a Windows Task Scheduler lifecycle regression that runs the CLI's injectable PowerShell boundary for install, status, and uninstall. It decodes the actual UTF-16LE `-EncodedCommand`, checks quoted executable/CLI arguments, webhook options, at-logon trigger, limited interactive principal, single-instance/restart settings, status JSON parsing, and stop/unregister commands.
 - `npm run test --workspace @xyst/cli` passed 27/27 and workspace `npm run typecheck` passed on Windows. A separate `scripts/smoke-windows-mission-service.mjs` now installs the daemon through the real CLI on the disposable hosted Windows package runner, waits for Task Scheduler to report `Running`, then uninstalls and confirms the task is absent. It refuses to replace a preexisting task and cleans up after failures; this live smoke has not passed on the current [PR #55](https://github.com/iExyst/Xyst-Ai-Agent-PC/pull/55) head yet. No Windows Task Scheduler task has been registered on the user's PC. This covers one ephemeral runner session, not logoff/reboot recovery or long-term service behavior.
+
+## Divergent Git push recovery guidance · 2026-10-28
+
+- `git_push` now identifies non-fast-forward rejections and explains the safe next steps: fetch, inspect the divergence, and integrate explicitly. The error makes clear Xyst neither merged nor force-pushed; ordinary server branch-protection failures keep their Git response.
+- Added a local bare-remote regression with two independent writers. Writer A advances the remote; writer B's divergent push is rejected with the recovery guidance, and assertions confirm the remote and local commits remain unchanged. This is deterministic local Git evidence, not a live GitHub branch-protection or conflict test.
+- Verification is pending for this change.
