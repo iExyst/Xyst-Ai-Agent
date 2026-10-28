@@ -546,6 +546,23 @@ test('model listing drops blank and duplicate IDs and reports the sanitized resu
   assert.equal(result.truncated, true);
 });
 
+test('provider rejects null and non-object JSON response roots with a stable error code', async () => {
+  for (const payload of [null, [], 'unexpected']) {
+    const listProvider = new OpenAICompatibleProvider({
+      baseUrl: 'http://localhost/v1',
+      model: 'x',
+      fetchImpl: async () => Response.json(payload),
+    });
+    await assert.rejects(listProvider.listModels(), (error) => error.code === 'INVALID_RESPONSE');
+    const chatProvider = new OpenAICompatibleProvider({
+      baseUrl: 'http://localhost/v1',
+      model: 'x',
+      fetchImpl: async () => Response.json(payload),
+    });
+    await assert.rejects(chatProvider.chat([]), (error) => error.code === 'INVALID_RESPONSE');
+  }
+});
+
 test('non-streaming provider responses are size bounded', async () => {
   const provider = new OpenAICompatibleProvider({
     baseUrl: 'http://localhost/v1',

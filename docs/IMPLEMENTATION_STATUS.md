@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-28
 
+## OpenAI-compatible malformed root responses — 2026-10-28
+
+- Model-list and non-streaming chat endpoints now check that a decoded JSON response root is an object with the expected array before reading fields. Valid JSON scalars, `null`, and arrays return the stable `INVALID_RESPONSE` provider error instead of leaking a raw JavaScript `TypeError`.
+- The focused regression covers `null`, array, and string roots for both endpoints and passes 1/1. Changed-file Biome checks pass. Hosted confirmation is pending.
+
 ## Windows development installer rebuild — 2026-10-28
 
 - `pnpm build:desktop:windows-installer` completed from source commit `8f23da0`; the NSIS installer is 29,158,222 bytes with SHA-256 `0e490cfcde4b7a7341f2279f2573eb1c518fc8d9de6f3a89891940409665e1e7`. It is `NotSigned`. No fresh local install smoke was run. The development artifact and checksum are in local `dist/dev/`.

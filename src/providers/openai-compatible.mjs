@@ -53,7 +53,8 @@ export class OpenAICompatibleProvider {
     const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
     const response = await this.#fetch('/models', { method: 'GET', signal, timeoutSignal });
     const data = await parseJson(response, MAX_MODEL_LIST_RESPONSE_BYTES, 'Model list response', { signal, timeoutSignal });
-    if (!Array.isArray(data.data)) throw new ProviderError('Provider returned an invalid model list', { code: 'INVALID_RESPONSE' });
+    if (!isRecord(data) || !Array.isArray(data.data))
+      throw new ProviderError('Provider returned an invalid model list', { code: 'INVALID_RESPONSE' });
     const models = [];
     const seenIds = new Set();
     let truncated = data.data.length > MAX_MODELS;
@@ -94,6 +95,8 @@ export class OpenAICompatibleProvider {
       timeoutSignal,
     });
     const data = await parseJson(response, MAX_JSON_RESPONSE_BYTES, 'Provider response', { signal, timeoutSignal });
+    if (!isRecord(data) || !Array.isArray(data.choices))
+      throw new ProviderError('Provider returned an invalid assistant response', { code: 'INVALID_RESPONSE' });
     const choice = data.choices?.[0];
     if (!choice?.message) throw new ProviderError('Provider returned no assistant message', { code: 'INVALID_RESPONSE' });
     return normalizeResponse(choice.message, data.usage, choice.finish_reason);
@@ -408,6 +411,10 @@ function normalizeUsage(usage) {
   if (cachedInputTokens !== null && inputTokens !== null && cachedInputTokens <= inputTokens)
     normalized.cachedInputTokens = cachedInputTokens;
   return Object.values(normalized).some((value) => value !== null) ? normalized : null;
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseSseFrame(frame) {
