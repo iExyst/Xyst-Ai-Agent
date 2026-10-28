@@ -35,6 +35,7 @@ test('MCP tool-call results validate content blocks and standard flags', () => {
     { resultType: 'complete', content: [{ type: 'audio', data: 'not base64', mimeType: 'audio/wav' }] },
     { resultType: 'complete', content: [{ type: 'resource', resource: { uri: 'file:///workspace/a.txt', blob: 42 } }] },
     { resultType: 'complete', content: [{ type: 'resource', resource: { uri: 'file:///workspace/a.txt', blob: 'not base64' } }] },
+    { resultType: 'complete', content: [{ type: 'resource_link', uri: 'file:///workspace/a.txt', name: 'a.txt', size: -1 }] },
     {
       resultType: 'complete',
       content: [{ type: 'resource', resource: { uri: 'file:///workspace/a.txt', text: 'text', blob: 'YmxvYg==' } }],
@@ -127,6 +128,8 @@ test('MCP list results validate tool, resource, template, and prompt definitions
     ['tools/list', { ...cache, tools: [{ name: 'bad', inputSchema: { type: 'object' }, outputSchema: { $schema: 1 } }] }],
     ['resources/list', { ...cache, resources: [{ name: 'missing uri' }] }],
     ['resources/list', { ...cache, resources: [{ name: 'bad uri', uri: '/relative' }] }],
+    ['resources/list', { ...cache, resources: [{ name: 'negative size', uri: 'file:///report.txt', size: -1 }] }],
+    ['resources/list', { ...cache, resources: [{ name: 'fractional size', uri: 'file:///report.txt', size: 1.5 }] }],
     ['resources/templates/list', { ...cache, resourceTemplates: [{ name: 'missing template' }] }],
     ['resources/templates/list', { ...cache, resourceTemplates: [{ name: 'invalid template', uriTemplate: 'file:///docs/{/name' }] }],
     ['prompts/list', { ...cache, prompts: [{ name: 'bad', arguments: [{ name: 'x', required: 'yes' }] }] }],

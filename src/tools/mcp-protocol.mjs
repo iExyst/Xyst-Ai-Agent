@@ -238,7 +238,7 @@ function isResourceDefinition(value, modern) {
     isOptionalString(value.mimeType) &&
     isOptionalAnnotations(value.annotations) &&
     isOptionalIcons(value.icons) &&
-    (value.size === undefined || Number.isInteger(value.size))
+    (value.size === undefined || (Number.isInteger(value.size) && value.size >= 0))
   );
 }
 
@@ -303,7 +303,7 @@ function isResourceLink(value, modern) {
     isOptionalString(value.mimeType) &&
     isOptionalAnnotations(value.annotations) &&
     isOptionalIcons(value.icons) &&
-    (value.size === undefined || Number.isInteger(value.size))
+    (value.size === undefined || (Number.isInteger(value.size) && value.size >= 0))
   );
 }
 

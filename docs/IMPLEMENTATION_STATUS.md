@@ -69,6 +69,10 @@
 
 - Usage-ledger cleanup now removes only the uniquely recorded lock it acquired, and compares the original file identity when available. An injected replacement-writer regression passes; other persistence-boundary fault injection remains open.
 
+## MCP resource size validation — 2026-10-28
+
+- Resource and resource-link `size` values now require nonnegative integers under the pinned MCP schema. Focused protocol tests pass 8/8; full field-level conformance remains open.
+
 ## Bounded session record reads — 2026-10-28
 
 - Session records now use the shared capped file-handle reader and stop at `MAX_SESSION_EXPORT_BYTES + 1`, even if a record grows after its initial metadata checks. Reads also revalidate the opened inode and file version before parsing so concurrent replacement or mutation fails closed.
