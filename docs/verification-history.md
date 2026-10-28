@@ -1770,3 +1770,10 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - Added a deterministic `PersistentMissionRunner` integration regression with 16 independent tasks in distinct workspaces and `maxConcurrency: 4`. Each fake agent call has a short varied delay to exercise backfill. The test verifies all 16 task IDs start once, peak activity reaches exactly four without exceeding the limit, and every persisted task row completes with one attempt.
 - Focused stress test passed 1/1. This increases deterministic scheduling coverage; it does not measure real-model memory contention or sustained delegated-model reliability.
+
+## Exact output text followed by an explicitly named tool · 2026-10-28
+
+- An isolated live mission showed that an objective such as `alpha.txt containing exactly alpha-ok using file_create` could be misread as requiring the literal contents `alpha-ok using file_create`. That live attempt was stopped and is **not** an acceptance pass.
+- Updated completion-evidence inference to recognize a following `using`/`via`/`through` clause only when it names an available Xyst tool. A focused agent regression creates and reads `alpha.txt` with the exact contents `alpha-ok` and completes only from persisted `file_create` plus exact-path `file_read` evidence.
+- The focused regression passed. Full `npm test` passed: runtime 183 passed / 2 host-specific skips, CLI 26/26, release verification 5/5. Workspace `npm run typecheck` and `git diff --check` passed. This closes one deterministic completion-inference edge case; broader model reliability remains open.
+- A second isolated three-task Qwen3.5 9B mission retry (`23eef67b-fe8d-4e5e-9b58-2539716f8c9a`) also did **not** pass. The alpha task wrote and read `alpha.txt`, then the model attempted the beta task from within alpha's four-turn budget; the runner failed alpha at the turn limit, and the dependent verifier never ran. This is recorded as failed delegated-model evidence, not as an acceptance pass.

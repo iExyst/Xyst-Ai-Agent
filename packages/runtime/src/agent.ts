@@ -103,7 +103,7 @@ function inferNamedOutputPaths(criteria: string[]): string[] {
 }
 
 interface InferredFileContentRequirement { path: string; text: string; criterion: string }
-function inferExactFileContentRequirements(criteria: string[], outputPaths: string[]): InferredFileContentRequirement[] {
+function inferExactFileContentRequirements(criteria: string[], outputPaths: string[], availableTools: string[]): InferredFileContentRequirement[] {
   const requirements = new Map<string, InferredFileContentRequirement>();
   for (const path of outputPaths) {
     const fileName = basename(path);
@@ -114,10 +114,12 @@ function inferExactFileContentRequirements(criteria: string[], outputPaths: stri
       const tail = criterion.slice(matchIndex + fileName.length);
       const contentDirective = tail.match(/\b(?:exactly|single\s+line)\b/i);
       if (!contentDirective || /[.!?\r\n]/.test(tail.slice(0, contentDirective.index))) continue;
-      const boundary = String.raw`(?=,?\s+(?:then\b|and\s+(?:then\s+)?(?:use|call|read|verify|confirm|check)\b)|[.!?]|$)`;
+      const toolNames = availableTools.map((tool) => tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      const toolClause = toolNames ? String.raw`|(?:using|via|through)\s+(?:the\s+)?(?:${toolNames})\b` : "";
+      const boundary = new RegExp(String.raw`(?=,?\s+(?:then\b|and\s+(?:then\s+)?(?:use|call|read|verify|confirm|check)\b${toolClause})|[.!?]|$)`, "i");
       const quotedExact = tail.match(new RegExp(String.raw`\b(?:exactly|single\s+line)\s+(["'\x60])([\s\S]*?)\1`, "i"));
-      const singleLine = tail.match(new RegExp(String.raw`\bsingle\s+line\s+(?:containing\s+)?(.+?)${boundary}`, "i"));
-      const exact = tail.match(new RegExp(String.raw`\bexactly\s+(.+?)${boundary}`, "i"));
+      const singleLine = tail.match(new RegExp(String.raw`\bsingle\s+line\s+(?:containing\s+)?(.+?)${boundary.source}`, "i"));
+      const exact = tail.match(new RegExp(String.raw`\bexactly\s+(.+?)${boundary.source}`, "i"));
       const rawText = quotedExact?.[2] ?? singleLine?.[1] ?? exact?.[1];
       const text = rawText?.trim().replace(/^["'`]+|["'`]+$/g, "").trim();
       if (!text) continue;
@@ -592,7 +594,7 @@ export class AgentRunner {
       for (const outputPath of inferredOutputPaths) {
         if (!requiredCompletionCriteria.some((criterion) => normalizedOutputPath(criterion) === normalizedOutputPath(outputPath))) addCompletionCriterion(outputPath);
       }
-      for (const requirement of inferExactFileContentRequirements(criteria, inferredOutputPaths)) {
+      for (const requirement of inferExactFileContentRequirements(criteria, inferredOutputPaths, Object.keys(tools))) {
         inferredFileContentRequirements.set(requirement.criterion, requirement);
         addCompletionCriterion(requirement.criterion);
       }
