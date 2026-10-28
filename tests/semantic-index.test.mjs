@@ -260,6 +260,31 @@ test('semantic index reclaims a lock only after its recorded process identity is
   await assert.rejects(fs.lstat(lockPath), { code: 'ENOENT' });
 });
 
+test('semantic index preserves a lock owned by the current process', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-live-lock-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, '.agent', 'retrieval', 'index.lock');
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  const lockRecord = JSON.stringify({
+    schema_version: 1,
+    lock_id: 'b57bd019-c948-4a2a-a2e1-5debb132d2c5',
+    pid: process.pid,
+    hostname: os.hostname(),
+    process_identity: { platform: process.platform, pid: process.pid },
+    created_at: new Date().toISOString(),
+  });
+  await fs.writeFile(lockPath, lockRecord, { flag: 'wx', mode: 0o600 });
+  const index = new SemanticWorkspaceIndex(root, { model: 'live-lock-owner', embed: async () => [] });
+  const controller = new AbortController();
+  const reason = Object.assign(new Error('cancel same-process lock wait'), { code: 'CANCELLED' });
+  setTimeout(() => controller.abort(reason), 80).unref();
+  await assert.rejects(index.search('same process lock', { signal: controller.signal }), {
+    code: 'CANCELLED',
+    message: 'cancel same-process lock wait',
+  });
+  assert.equal(await fs.readFile(lockPath, 'utf8'), lockRecord);
+});
+
 test('semantic index in another process respects a held lock and cancellation', async (t) => {
   const root = await createTempDirectory('xyst-semantic-cross-process-lock-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
