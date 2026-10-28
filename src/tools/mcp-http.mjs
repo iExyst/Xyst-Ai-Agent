@@ -1030,6 +1030,9 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
     'dependentSchemas',
     'additionalProperties',
     'items',
+    'contains',
+    'minContains',
+    'maxContains',
     'minimum',
     'maximum',
     'minLength',
@@ -1112,7 +1115,7 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
     if (!Number.isFinite(schema.multipleOf) || schema.multipleOf <= 0) throw mcpError('MCP multipleOf invalid', 'MCP_INVALID_SCHEMA');
     out.multipleOf = schema.multipleOf;
   }
-  for (const k of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'])
+  for (const k of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties', 'minContains', 'maxContains'])
     if (schema[k] !== undefined) {
       if (!Number.isInteger(schema[k]) || schema[k] < 0 || schema[k] > 1_000_000)
         throw mcpError('MCP size bound invalid', 'MCP_INVALID_SCHEMA');
@@ -1127,6 +1130,7 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
     }
     out.pattern = schema.pattern;
   }
+  if (schema.contains !== undefined) out.contains = normalizeSchema(schema.contains, depth + 1, budget);
   if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
     throw mcpError('MCP uniqueItems invalid', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined) out.uniqueItems = schema.uniqueItems;
@@ -1219,11 +1223,11 @@ function normalizeSchema(schema, depth = 0, budget = { remaining: 512 }) {
   if (
     types.includes('array') ||
     schema.items !== undefined ||
-    (!hasType && ['minItems', 'maxItems', 'uniqueItems'].some((k) => schema[k] !== undefined))
+    (!hasType && ['minItems', 'maxItems', 'uniqueItems', 'contains'].some((k) => schema[k] !== undefined))
   ) {
     if (schema.items !== undefined) out.items = normalizeSchema(schema.items, depth + 1, budget);
   }
-  if (out.minimum > out.maximum || out.minLength > out.maxLength || out.minItems > out.maxItems)
+  if (out.minimum > out.maximum || out.minLength > out.maxLength || out.minItems > out.maxItems || out.minContains > out.maxContains)
     throw mcpError('MCP schema bounds are inconsistent', 'MCP_INVALID_SCHEMA');
   return out;
 }

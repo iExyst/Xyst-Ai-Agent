@@ -849,6 +849,9 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     'dependentSchemas',
     'additionalProperties',
     'items',
+    'contains',
+    'minContains',
+    'maxContains',
     'minimum',
     'maximum',
     'minLength',
@@ -933,7 +936,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
       throw mcpError('MCP tool input schema has invalid multipleOf', 'MCP_INVALID_SCHEMA');
     result.multipleOf = schema.multipleOf;
   }
-  for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'])
+  for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties', 'minContains', 'maxContains'])
     if (schema[key] !== undefined) {
       if (!Number.isInteger(schema[key]) || schema[key] < 0 || schema[key] > 1_000_000)
         throw mcpError('MCP tool input schema has invalid size bounds', 'MCP_INVALID_SCHEMA');
@@ -949,12 +952,15 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
     }
     result.pattern = schema.pattern;
   }
+  if (schema.contains !== undefined) result.contains = normalizeSchema(schema.contains, depth + 1, budget);
   if (result.minimum !== undefined && result.maximum !== undefined && result.minimum > result.maximum)
     throw mcpError('MCP tool input schema has inconsistent numeric bounds', 'MCP_INVALID_SCHEMA');
   if (result.minLength !== undefined && result.maxLength !== undefined && result.minLength > result.maxLength)
     throw mcpError('MCP tool input schema has inconsistent string bounds', 'MCP_INVALID_SCHEMA');
   if (result.minItems !== undefined && result.maxItems !== undefined && result.minItems > result.maxItems)
     throw mcpError('MCP tool input schema has inconsistent array bounds', 'MCP_INVALID_SCHEMA');
+  if (result.minContains !== undefined && result.maxContains !== undefined && result.minContains > result.maxContains)
+    throw mcpError('MCP tool input schema has inconsistent contains bounds', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean')
     throw mcpError('MCP tool input schema has invalid uniqueItems', 'MCP_INVALID_SCHEMA');
   if (schema.uniqueItems !== undefined) result.uniqueItems = schema.uniqueItems;
@@ -1051,7 +1057,7 @@ function normalizeSchema(schema, depth, budget = { remaining: 512 }) {
   if (
     types.includes('array') ||
     schema.items !== undefined ||
-    (!hasType && ['minItems', 'maxItems', 'uniqueItems'].some((key) => schema[key] !== undefined))
+    (!hasType && ['minItems', 'maxItems', 'uniqueItems', 'contains'].some((key) => schema[key] !== undefined))
   ) {
     if (schema.items !== undefined) result.items = normalizeSchema(schema.items, depth + 1, budget);
   }

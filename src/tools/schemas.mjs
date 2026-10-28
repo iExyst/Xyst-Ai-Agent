@@ -537,6 +537,17 @@ function validateValue(schema, value, location, state) {
         items.add(serialized);
       }
     }
+    if (schema.contains !== undefined) {
+      if (value.length > 10_000) throw new Error(`${location} is too large for contains validation`);
+      let matches = 0;
+      for (const [index, item] of value.entries()) {
+        if (schemaMatches(schema.contains, item, `${location}[${index}]`, state)) matches += 1;
+        if (schema.maxContains !== undefined && matches > schema.maxContains)
+          throw new Error(`${location} contains too many matching items`);
+      }
+      const minMatches = schema.minContains ?? 1;
+      if (matches < minMatches) throw new Error(`${location} contains too few matching items`);
+    }
     if (schema.items !== undefined)
       for (const [index, item] of value.entries()) validateValue(schema.items, item, `${location}[${index}]`, state);
   }
