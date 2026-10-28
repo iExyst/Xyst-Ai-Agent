@@ -153,6 +153,43 @@ test('session store advances its revision when rename committed but directory sy
   assert.equal((await store.load(session.id)).title, 'Retry with the committed revision');
 });
 
+test('session write failure preserves the committed record, releases its lock, and permits retry', async (t) => {
+  const root = await createTempDirectory('xyst-session-write-failure-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore(root);
+  const session = store.create({ messages: [{ role: 'user', content: 'Committed before failure.' }] });
+  await store.save(session);
+  const recordPath = path.join(root, '.agent', 'sessions', `${session.id}.json`);
+  const originalRecord = await fs.readFile(recordPath, 'utf8');
+  session.title = 'Retry after write failure';
+
+  const probe = await fs.open(path.join(root, 'probe'), 'w');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const writeFile = fileHandlePrototype.writeFile;
+  let writeCount = 0;
+  fileHandlePrototype.writeFile = async function (...args) {
+    writeCount += 1;
+    if (writeCount === 2) throw Object.assign(new Error('simulated temporary record write failure'), { code: 'EIO' });
+    return writeFile.apply(this, args);
+  };
+  try {
+    await assert.rejects(store.save(session), { code: 'EIO' });
+  } finally {
+    fileHandlePrototype.writeFile = writeFile;
+  }
+
+  assert.equal(session.revision, 1);
+  assert.equal(await fs.readFile(recordPath, 'utf8'), originalRecord);
+  assert.deepEqual(await fs.readdir(path.join(root, '.agent', 'session-locks')), []);
+  assert.deepEqual(await fs.readdir(path.join(root, '.agent', 'sessions')), [`${session.id}.json`]);
+  assert.equal((await store.load(session.id)).title, undefined);
+
+  await store.save(session);
+  assert.equal(session.revision, 2);
+  assert.equal((await store.load(session.id)).title, 'Retry after write failure');
+});
+
 test('session summaries expose pending assistant tool calls for crash recovery UI', async (t) => {
   const root = await createTempDirectory('xyst-session-pending-tool-summary-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
