@@ -2410,6 +2410,22 @@ test("restricted profiles block paths and executables outside explicit allowlist
   assert.throws(() => delegatedFull.assertCapability("network"), /denies network/);
 }));
 
+test("simultaneous patches with one read hash serialize and reject the stale writer", async () => withTemp(async (root) => {
+  const path = join(root, "concurrent.txt");
+  await writeFile(path, "value: original\n");
+  const original = await readText(path);
+  const outcomes = await Promise.allSettled([
+    patchText(path, original.sha256, "original", "first"),
+    patchText(path, original.sha256, "original", "second")
+  ]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  const rejected = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+  assert.match(String(rejected?.reason), /File changed since it was read/);
+  const final = await readText(path);
+  assert.ok(final.text === "value: first\n" || final.text === "value: second\n");
+  assert.equal(final.sha256, (outcomes.find((outcome): outcome is PromiseFulfilledResult<{ path: string; sha256: string }> => outcome.status === "fulfilled")?.value.sha256));
+}));
+
 test("restricted path checks return the canonical symlink target and block out-of-root links", async (t) => withTemp(async (root) => {
   const allowed = join(root, "allowed"); const denied = join(root, "denied");
   await mkdir(allowed); await mkdir(denied);

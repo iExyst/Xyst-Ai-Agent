@@ -1965,3 +1965,9 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 
 - On the combined PC Integration source at `2a61e1d549aa28e471e0673ee183e10d18951d5f`, ran the Windows-focused runtime regressions for long paths, drive/UNC/extended-UNC normalization, and junction resolution. All three passed with zero skips. The long-path case creates a nested Unicode path longer than 260 characters, atomically creates a UTF-8 file, reads it, then hash-guards and atomically patches it; it verifies the final text and line-ending normalization. Junction cases confirm restricted access resolves in-root links and rejects out-of-root links.
 - The exact source's push CI Windows job (`40744004302`) also passed its full `npm test` and desktop package steps. This closes those specific E1 acceptance cases; concurrent-edit races, additional filesystems, and UNC share operations remain open.
+
+## Concurrent workspace patches reject stale writers · 2026-10-28
+
+- `patchText` now serializes edits to the same normalized path within a runtime process. Each writer re-reads and validates its expected SHA-256 after obtaining the path lock, so simultaneous callers using one read hash cannot overwrite each other's atomic rename. Temporary files are cleaned if replacement fails.
+- Added a regression that starts two patch calls together using the same source hash. Exactly one succeeds, the other receives the stale-file error, and the final file matches the winner's returned hash. The focused test passed. Full Windows runtime suite passed 210, skipped 2 host-specific checks, failed 0; workspace `npm run typecheck` and `git diff --check` passed.
+- This protects concurrent Xyst writers in one Node process. A second Xyst process or external editor can still race the final hash-check/rename window; cross-process locking and external-editor coordination remain unverified.

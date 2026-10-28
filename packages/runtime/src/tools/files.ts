@@ -5,6 +5,21 @@ import { normalizeUserPath } from "../platform.js";
 
 const hash = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
 
+const pathLocks = new Map<string, Promise<void>>();
+async function withPathLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const key = process.platform === "win32" ? path.toLowerCase() : path;
+  const previous = pathLocks.get(key);
+  let release!: () => void;
+  const current = new Promise<void>((resolveLock) => { release = resolveLock; });
+  pathLocks.set(key, current);
+  await previous;
+  try { return await operation(); }
+  finally {
+    release();
+    if (pathLocks.get(key) === current) pathLocks.delete(key);
+  }
+}
+
 interface DecodedText { text: string; encoding: "utf-8" | "utf-16le" | "utf-16be"; encode(text: string): Buffer }
 function decodeText(buffer: Buffer): DecodedText {
   if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
@@ -82,17 +97,22 @@ export async function createText(path: string, content: string, overwrite = fals
 }
 
 export async function patchText(path: string, expectedSha256: string, oldText: string, newText: string): Promise<{ path: string; sha256: string }> {
-  const absolute = normalizeUserPath(path); const original = await readFile(absolute); if (hash(original) !== expectedSha256) throw new Error("File changed since it was read; reload it before patching");
-  const decoded = decodeText(original); const normalized = normalizeLineEndings(decoded.text); const source = normalizeLineEndings(oldText).text;
-  const first = normalized.text.indexOf(source);
-  if (first < 0) throw new Error("Patch source text was not found");
-  if (normalized.text.indexOf(source, first + source.length) >= 0) throw new Error("Patch source text is ambiguous; include more context");
-  const rawStart = normalized.rawOffsets[first]!; const rawEnd = normalized.rawOffsets[first + source.length]!;
-  const neighborhood = decoded.text.slice(Math.max(0, rawStart - 256), Math.min(decoded.text.length, rawEnd + 256));
-  const newline = neighborhood.includes("\r\n") ? "\r\n" : neighborhood.includes("\n") ? "\n" : "\n";
-  const replacement = normalizeLineEndings(newText).text.replace(/\n/g, newline);
-  const updatedText = decoded.text.slice(0, rawStart) + replacement + decoded.text.slice(rawEnd); const updated = decoded.encode(updatedText); const temp = `${absolute}.${randomUUID()}.tmp`;
-  await writeFile(temp, updated, { flag: "wx" }); await rename(temp, absolute); return { path: absolute, sha256: hash(updated) };
+  const absolute = normalizeUserPath(path);
+  return withPathLock(absolute, async () => {
+    const original = await readFile(absolute); if (hash(original) !== expectedSha256) throw new Error("File changed since it was read; reload it before patching");
+    const decoded = decodeText(original); const normalized = normalizeLineEndings(decoded.text); const source = normalizeLineEndings(oldText).text;
+    const first = normalized.text.indexOf(source);
+    if (first < 0) throw new Error("Patch source text was not found");
+    if (normalized.text.indexOf(source, first + source.length) >= 0) throw new Error("Patch source text is ambiguous; include more context");
+    const rawStart = normalized.rawOffsets[first]!; const rawEnd = normalized.rawOffsets[first + source.length]!;
+    const neighborhood = decoded.text.slice(Math.max(0, rawStart - 256), Math.min(decoded.text.length, rawEnd + 256));
+    const newline = neighborhood.includes("\r\n") ? "\r\n" : neighborhood.includes("\n") ? "\n" : "\n";
+    const replacement = normalizeLineEndings(newText).text.replace(/\n/g, newline);
+    const updatedText = decoded.text.slice(0, rawStart) + replacement + decoded.text.slice(rawEnd); const updated = decoded.encode(updatedText); const temp = `${absolute}.${randomUUID()}.tmp`;
+    try { await writeFile(temp, updated, { flag: "wx" }); await rename(temp, absolute); }
+    catch (error) { await rm(temp, { force: true }); throw error; }
+    return { path: absolute, sha256: hash(updated) };
+  });
 }
 
 export async function movePath(from: string, to: string): Promise<string> { const source = normalizeUserPath(from); const target = normalizeUserPath(to); await mkdir(dirname(target), { recursive: true }); await rename(source, target); return target; }
