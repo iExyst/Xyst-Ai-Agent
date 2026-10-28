@@ -1288,6 +1288,31 @@ test('goal lock is released when lock metadata inspection fails', async (t) => {
   assert.equal((await new GoalStore(root).add('Retry after lock metadata failure')).title, 'Retry after lock metadata failure');
 });
 
+test('goal write failure leaves no partial state or lock and permits retry', async (t) => {
+  const root = await createTempDirectory('xyst-goals-write-failure-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new GoalStore(root);
+  const probe = await fs.open(path.join(root, 'probe'), 'w');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const writeFile = fileHandlePrototype.writeFile;
+  let writeCount = 0;
+  fileHandlePrototype.writeFile = async function (...args) {
+    writeCount += 1;
+    if (writeCount === 2) throw Object.assign(new Error('simulated goal write failure'), { code: 'EIO' });
+    return writeFile.apply(this, args);
+  };
+  try {
+    await assert.rejects(store.add('Retry after interrupted goal save'), { code: 'EIO' });
+  } finally {
+    fileHandlePrototype.writeFile = writeFile;
+  }
+
+  assert.deepEqual(await fs.readdir(path.dirname(store.filePath)), []);
+  assert.equal((await store.add('Retry after interrupted goal save')).title, 'Retry after interrupted goal save');
+  assert.equal((await store.list()).length, 1);
+});
+
 test('goal progress appends from independent stores serialize without losing references', async (t) => {
   const root = await createTempDirectory('xyst-goals-concurrent-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
