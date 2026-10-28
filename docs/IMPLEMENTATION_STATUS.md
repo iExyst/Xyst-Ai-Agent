@@ -2756,3 +2756,7 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 - Tool, resource, and prompt abort signals now send `notifications/cancelled` with the original request ID to the stdio MCP server. The local pending promise rejects with `MCP_CANCELLED` and releases its timer and abort listener; timed-out calls also notify the server. A focused follow-up call confirms the server observed cancellation. The regression and changed-file checks pass locally; hosted Windows/Linux confirmation is pending.
 - Streamable HTTP and legacy SSE now send the same cancellation notification when a call is interrupted or times out. A focused regression checks request-ID propagation on both transports; changed-file checks pass and exact-source hosted confirmation is pending.
 - Run [40746519382](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40746519382) caught a legacy SSE shutdown error-priority regression; the closed-session code is restored and focused shutdown/cancellation cases pass locally. The run's Ubuntu lanes also hit hosted Bubblewrap namespace limits; corrected exact-source CI is pending.
+
+## MCP JSON Schema format annotations — 2026-10-28
+
+- The 2020-12 dialect declares `format` annotation behavior by default. Xyst no longer hard-rejects non-UUID strings for `format: "uuid"` when no format-assertion option was requested. A focused stdio manager regression, Biome check, and whitespace check pass; exact-source hosted confirmation is pending.

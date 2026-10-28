@@ -324,6 +324,7 @@ test('MCP stdio manager discovers modern servers, lists tools, validates, and ca
     deprecated: true,
     readOnly: true,
   });
+  assert.equal(validateArguments({ type: 'string', format: 'uuid' }, JSON.stringify('not-a-uuid')), 'not-a-uuid');
   assert.deepEqual(definition.parameters.properties.optional_null, { type: 'null' });
   assert.deepEqual(validateArguments(definition.parameters, { text: 'hello', optional_null: null }), {
     text: 'hello',

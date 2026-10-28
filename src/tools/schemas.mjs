@@ -2,8 +2,6 @@ import { MEMORY_SECTIONS } from '../memory/store.mjs';
 
 const string = { type: 'string' };
 const integer = { type: 'integer', minimum: 1 };
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 import { isDeepStrictEqual } from 'node:util';
 import vm from 'node:vm';
 
@@ -709,7 +707,6 @@ function validateValue(schema, value, location, state) {
       throw new Error(`${location} must be between ${schema.minLength || 0} and ${schema.maxLength ?? 'unlimited'} characters`);
     if (schema.maxBytes !== undefined && Buffer.byteLength(value) > schema.maxBytes)
       throw new Error(`${location} must be no larger than ${schema.maxBytes} UTF-8 bytes`);
-    if (schema.format === 'uuid' && !UUID_PATTERN.test(value)) throw new Error(`${location} must be a valid UUID`);
   } else if (schema.type === 'integer') {
     if (
       !Number.isInteger(value) ||
