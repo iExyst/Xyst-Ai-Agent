@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SemanticWorkspaceIndex, cosineSimilarity } from '../src/retrieval/semantic-index.mjs';
@@ -212,6 +213,51 @@ test('semantic index lock cleanup preserves a replacement lock from another writ
     throw error;
   }
   assert.equal(await fs.readFile(index.lock, 'utf8'), 'replacement writer lock');
+});
+
+test('semantic index in another process respects a held lock and cancellation', async (t) => {
+  const root = await createTempDirectory('xyst-semantic-cross-process-lock-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const lockPath = path.join(root, '.agent', 'retrieval', 'index.lock');
+  const lockRecord = JSON.stringify({ lock_id: 'current-writer', pid: process.pid, created_at: new Date().toISOString() });
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  await fs.writeFile(lockPath, lockRecord, { flag: 'wx', mode: 0o600 });
+  const moduleUrl = new URL('../src/retrieval/semantic-index.mjs', import.meta.url).href;
+  const childScript = `
+    import { SemanticWorkspaceIndex } from ${JSON.stringify(moduleUrl)};
+    const index = new SemanticWorkspaceIndex(process.argv[1], {
+      model: 'cross-process-lock-check',
+      embed: async () => { throw new Error('embedding must not start while the lock is held'); },
+    });
+    const controller = new AbortController();
+    const reason = Object.assign(new Error('cancel cross-process lock wait'), { code: 'CANCELLED' });
+    setTimeout(() => controller.abort(reason), 160).unref();
+    try {
+      await index.search('lock contention', { signal: controller.signal });
+      process.exitCode = 2;
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ code: error.code, message: error.message }));
+    }
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', childScript, root], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', (chunk) => (stdout += chunk));
+  child.stderr.setEncoding('utf8').on('data', (chunk) => (stderr += chunk));
+  const childResult = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => child.kill(), 3_000);
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once('close', (code, signal) => {
+      clearTimeout(timeout);
+      resolve({ code, signal });
+    });
+  });
+  assert.deepEqual(childResult, { code: 0, signal: null }, stderr);
+  assert.deepEqual(JSON.parse(stdout), { code: 'CANCELLED', message: 'cancel cross-process lock wait' });
+  assert.equal(await fs.readFile(lockPath, 'utf8'), lockRecord);
 });
 
 test('semantic retrieval bounds ignore and exclusion policy reads', async (t) => {

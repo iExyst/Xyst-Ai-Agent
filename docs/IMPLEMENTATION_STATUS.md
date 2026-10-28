@@ -2702,3 +2702,8 @@ Built the first runnable Node.js product slice on 2026-10-20. This checkpoint in
 
 - Draft-07 `dependencies` is now accepted on both MCP transports. Property dependency arrays map to required-property checks; schema dependencies map to dependent schemas, preserving conjunctions when old and new forms overlap. Entries, names, and depth remain bounded, and generated maps safely preserve special property names.
 - Focused stdio and Streamable HTTP validation checks pass 2/2. Changed-file Biome and whitespace checks pass; exact-source hosted confirmation is pending.
+
+## Semantic index cross-process lock behavior — 2026-10-28
+
+- Added a real child-process regression proving a second semantic-index writer honors an active lock, stops promptly on cancellation, does not start embedding, and preserves the first writer's lock record.
+- The focused Windows subprocess check passes in under one second; Biome and whitespace checks pass. Exact-source Windows/Linux CI is pending.
