@@ -82,6 +82,10 @@
 
 - Session and runtime-settings lock cleanup now removes a lock only when its unique record and file identity still match the lock acquired by that writer. Injected replacement-writer regressions pass for both stores; crash coverage for other persistence boundaries remains open.
 
+## Project-goal lock metadata failure recovery — 2026-10-28
+
+- Goal lock cleanup now survives an injected `EIO` during lock metadata inspection: the acquired lock record is removed and a retry can save the goal. The focused regression passes; other persistence-boundary fault injection remains open.
+
 ## Bounded session record reads — 2026-10-28
 
 - Session records now use the shared capped file-handle reader and stop at `MAX_SESSION_EXPORT_BYTES + 1`, even if a record grows after its initial metadata checks. Reads also revalidate the opened inode and file version before parsing so concurrent replacement or mutation fails closed.

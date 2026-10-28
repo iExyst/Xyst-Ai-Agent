@@ -1221,6 +1221,36 @@ test('project goals reject linked .agent directories and linked goals files', as
   await assert.rejects(store.list(), { code: 'GOAL_PATH_UNSAFE' });
 });
 
+test('goal lock is released when lock metadata inspection fails', async (t) => {
+  const root = await createTempDirectory('xyst-goals-lock-stat-eio-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new GoalStore(root);
+  const lockPath = path.join(root, '.agent', 'goals.lock');
+  const open = fs.open;
+  let injected = false;
+  fs.open = async (filePath, ...args) => {
+    const handle = await open(filePath, ...args);
+    if (path.resolve(filePath) !== path.resolve(lockPath) || injected) return handle;
+    injected = true;
+    return {
+      writeFile: handle.writeFile.bind(handle),
+      stat: async () => {
+        const error = new Error('injected goal lock metadata failure');
+        error.code = 'EIO';
+        throw error;
+      },
+      close: handle.close.bind(handle),
+    };
+  };
+  try {
+    await assert.rejects(store.add('Retry after lock metadata failure'), { code: 'EIO' });
+  } finally {
+    fs.open = open;
+  }
+  await assert.rejects(fs.access(lockPath), { code: 'ENOENT' });
+  assert.equal((await new GoalStore(root).add('Retry after lock metadata failure')).title, 'Retry after lock metadata failure');
+});
+
 test('goal progress appends from independent stores serialize without losing references', async (t) => {
   const root = await createTempDirectory('xyst-goals-concurrent-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

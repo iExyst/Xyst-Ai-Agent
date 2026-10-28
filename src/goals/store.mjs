@@ -289,15 +289,29 @@ export class GoalStore {
         await new Promise((resolve) => setTimeout(resolve, Math.min(20, Math.max(1, deadline - Date.now()))));
       }
     }
-    const identity = await handle.stat();
+    const lockRecord = JSON.stringify({
+      lock_id: randomUUID(),
+      pid: process.pid,
+      hostname: os.hostname(),
+      started_at: new Date().toISOString(),
+    });
+    let identity;
     try {
-      await handle.writeFile(JSON.stringify({ pid: process.pid, hostname: os.hostname(), started_at: new Date().toISOString() }));
+      await handle.writeFile(lockRecord);
+      identity = await handle.stat();
       return await operation();
     } finally {
       await handle.close().catch(() => {});
       const current = await fs.lstat(lockPath).catch(() => null);
-      if (identity.ino && current?.dev === identity.dev && current.ino === identity.ino)
-        await fs.rm(lockPath, { force: true }).catch(() => {});
+      const stableIdentity = identity && Number.isFinite(identity.ino) && identity.ino !== 0;
+      if (
+        current?.isFile() &&
+        !current.isSymbolicLink() &&
+        (!stableIdentity || (current.dev === identity.dev && current.ino === identity.ino))
+      ) {
+        const currentRecord = await fs.readFile(lockPath, 'utf8').catch(() => null);
+        if (currentRecord === lockRecord) await fs.rm(lockPath, { force: true }).catch(() => {});
+      }
     }
   }
 }
