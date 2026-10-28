@@ -1025,6 +1025,7 @@ function normalizeSchema(schema, depth = 0) {
     'maxItems',
     'x-mcp-header',
     'enum',
+    'const',
   ]);
   if (Object.keys(schema).some((key) => !allowed.has(key)))
     throw mcpError('MCP schema uses unsupported JSON Schema keyword', 'MCP_INVALID_SCHEMA');
@@ -1047,6 +1048,7 @@ function normalizeSchema(schema, depth = 0) {
     if (!Array.isArray(schema.enum) || schema.enum.length > 100) throw mcpError('MCP enum invalid', 'MCP_INVALID_SCHEMA');
     out.enum = schema.enum;
   }
+  if (Object.hasOwn(schema, 'const')) out.const = schema.const;
   for (const k of ['minimum', 'maximum'])
     if (schema[k] !== undefined) {
       if (!types.some((item) => ['integer', 'number'].includes(item)) || !Number.isFinite(schema[k]))

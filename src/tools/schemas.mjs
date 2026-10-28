@@ -410,6 +410,7 @@ export function validateArguments(schema, input) {
 function validateValue(schema, value, location) {
   if (schema === true) return;
   if (schema === false) throw new Error(`${location} is not allowed`);
+  if (Object.hasOwn(schema, 'const') && !isDeepStrictEqual(schema.const, value)) throw new Error(`${location} must match its fixed value`);
   if (Array.isArray(schema.type)) {
     const matches = schema.type.filter((type) => matchesSchemaType(type, value));
     if (matches.length === 0) throw new Error(`${location} must match one of the allowed types`);
