@@ -15,9 +15,8 @@ const outputDirectory = path.join(root, 'dist', 'desktop-runtime');
 const cacheDirectory = path.join(root, '.toolchains', 'desktop-runtime-cache');
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
 const MAX_RUNTIME_BYTES = 160 * 1024 * 1024;
-// GitHub-hosted runners can take several minutes to fetch the pinned runtime
-// archive from nodejs.org. Keep the transfer bounded without treating a slow
-// but progressing connection as a failed desktop build.
+const MAX_DOWNLOAD_ATTEMPTS = 3;
+// Keep each download bounded while allowing enough time for slow hosted runners.
 const DOWNLOAD_TIMEOUT_MS = 300_000;
 
 export async function readRuntimeSpec(platform = process.platform, arch = process.arch) {
@@ -50,25 +49,53 @@ async function downloadVerifiedArchive(spec) {
   const url = new URL(spec.artifact.archive, spec.release_url);
   if (url.protocol !== 'https:' || url.hostname !== 'nodejs.org')
     throw new Error('Desktop runtime URL must use the official Node.js HTTPS origin');
-  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`Could not download Node.js runtime (${response.status})`);
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && (declaredLength < 1 || declaredLength > MAX_ARCHIVE_BYTES)) {
-    throw new Error(`Node.js archive size is outside the ${MAX_ARCHIVE_BYTES}-byte limit`);
+  let archive;
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+      if (!response.ok) {
+        const error = new Error(`Node.js runtime download returned HTTP ${response.status}`);
+        error.retryable = response.status === 429 || response.status >= 500;
+        throw error;
+      }
+      const declaredLength = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declaredLength) && (declaredLength < 1 || declaredLength > MAX_ARCHIVE_BYTES)) {
+        const error = new Error(`Node.js archive size is outside the ${MAX_ARCHIVE_BYTES}-byte limit`);
+        error.retryable = false;
+        throw error;
+      }
+      const chunks = [];
+      let receivedBytes = 0;
+      for await (const chunk of response.body) {
+        receivedBytes += chunk.byteLength;
+        if (receivedBytes > MAX_ARCHIVE_BYTES) {
+          const error = new Error(`Node.js archive exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
+          error.retryable = false;
+          throw error;
+        }
+        chunks.push(Buffer.from(chunk));
+      }
+      archive = Buffer.concat(chunks, receivedBytes);
+      if (archive.length < 1 || archive.length > MAX_ARCHIVE_BYTES) {
+        const error = new Error(`Node.js archive exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
+        error.retryable = false;
+        throw error;
+      }
+      const digest = sha256Hex(archive);
+      if (digest !== spec.artifact.sha256) throw new Error('Node.js archive checksum mismatch');
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === MAX_DOWNLOAD_ATTEMPTS || error.retryable === false) {
+        throw new Error(`Could not download verified Node.js runtime after ${attempt} attempt(s): ${error.message}`, {
+          cause: error,
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
   }
-  const chunks = [];
-  let receivedBytes = 0;
-  for await (const chunk of response.body) {
-    receivedBytes += chunk.byteLength;
-    if (receivedBytes > MAX_ARCHIVE_BYTES) throw new Error(`Node.js archive exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
-    chunks.push(Buffer.from(chunk));
-  }
-  const archive = Buffer.concat(chunks, receivedBytes);
-  if (archive.length < 1 || archive.length > MAX_ARCHIVE_BYTES)
-    throw new Error(`Node.js archive exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
-  const digest = sha256Hex(archive);
-  if (digest !== spec.artifact.sha256)
-    throw new Error(`Node.js archive checksum mismatch: expected ${spec.artifact.sha256}, received ${digest}`);
+  if (!archive) throw new Error(`Could not download verified Node.js runtime: ${lastError?.message || 'unknown error'}`);
   const archivePath = path.join(cacheDirectory, spec.artifact.archive);
   await fs.mkdir(cacheDirectory, { recursive: true });
   // Keep the temporary download beside the cache target. The system temp folder

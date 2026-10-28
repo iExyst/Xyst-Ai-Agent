@@ -15,10 +15,10 @@
 - Session records now use the shared capped file-handle reader and stop at `MAX_SESSION_EXPORT_BYTES + 1`, even if a record grows after its initial metadata checks. Reads also revalidate the opened inode and file version before parsing so concurrent replacement or mutation fails closed.
 - Focused session size and injected-growth regressions pass 2/2; changed-file Biome and whitespace checks pass. Exact-source hosted CI is pending.
 
-## Hosted desktop runtime download timeout — 2026-10-28
+## Hosted desktop runtime download reliability — 2026-10-28
 
-- Hosted Ubuntu run [40632616590](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40632616590) passed the security job and built/smoke-tested the Windows NSIS installer from `0703caf`, but its Linux desktop job stopped while fetching the pinned Node runtime: the runtime script reported `terminated` after its 120-second fetch timeout. The script now allows five minutes for this bounded, checksum-verified download.
-- The exact-source Linux package build and lifecycle checks must pass before replacing the older development package hashes in `dist/dev/SHA256SUMS.txt`. Hosted Node matrix failures remain the known Ubuntu network-namespace restriction and Windows ConPTY initialization issue; independent security review and native Ubuntu Wayland acceptance remain open.
+- Exact-source run [40633515977](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40633515977) on `74c76bf` passed security and all Ubuntu desktop builds/lifecycle checks, but the Windows job's pinned Node runtime download ended with a generic `terminated` error. Linux was initially stopped at 120 seconds; its package build now succeeds with a five-minute bound. The Windows fetch now retries transient transport interruptions up to three times while rechecking the official archive checksum on every attempt; exact-source hosted confirmation is pending.
+- The Linux DEB/AppImage build and lifecycle checks are current for `74c76bf`. The Windows package hashes in `dist/dev/SHA256SUMS.txt` remain historical until Windows completes successfully. Hosted Node matrix failures remain the known Ubuntu network-namespace restriction and Windows ConPTY initialization issue; independent security review and native Ubuntu Wayland acceptance remain open.
 
 ## Bounded application update replay-cache reads — 2026-10-28
 
