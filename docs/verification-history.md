@@ -1934,3 +1934,10 @@ A live agent run that reached its turn limit without assistant text exposed a CL
 - The first test attempt failed because the generated test omitted `import { test } from "node:test"`, and the first completion check correctly failed because `median.mjs` had not yet been read. After the explicit resume instruction, Xyst fixed the import, ran exactly `node --test median.test.mjs` (12/12 passed), read both complete output files with Xyst `file_read`, then persisted `task_complete verified=true`. The final session status is `completed`; a separate independent rerun also passed 12/12. Temporary profile SQLite integrity is `ok`.
 - SHA-256: `median.mjs` `E364B85F11C9F54B6198D7739CFFC478623E85BEBE4583F3BE1F54E88ECE5ECD`; `median.test.mjs` `E2820493C20D8665F1064F4B7F1E36B716CC422E985135DED305CA1FB199AF5A`.
 - This adds one recovered, bounded coding-loop success to C1. The initial failure remains visible and does not count separately; this case does not prove broad or sustained coding reliability.
+
+## Isolated Qwen3.5 9B factorial coding acceptance · 2026-10-28
+
+- Fresh CLI session `ce8deaa2-a6aa-4842-b0e5-f79cfe66f66c` used a dedicated APPDATA profile and a working directory inside `.xyst-live-acceptance/coding-factorial-20261028/workspace`. It created `factorial.mjs` and `factorial.test.mjs`; no product source files were touched.
+- The model implemented iterative BigInt factorial with the requested input validation and boundary tests. Persisted Xyst tool evidence shows successful `task_complete verified=true`, one successful run-process result, and complete `file_read` evidence for both outputs; the final session status is `completed`. Exact `node --test factorial.test.mjs` passed 15/15 in an independent rerun, and profile SQLite integrity is `ok`.
+- SHA-256: `factorial.mjs` `08D151FDD31B20C232B25EF9FC9C13A7630F081BE5D9C816EB98FE9A904A8B56`; `factorial.test.mjs` `00C5CB4DF823A6FFBDAA8AB834DD5B8CF17E927D3132FF589C03B823E3C5351D`.
+- This adds one bounded C1 acceptance; it does not establish broad or sustained model reliability.
