@@ -3360,9 +3360,9 @@ test('approval policy edits during an active run persist before notifying the ru
     (session) => session.id === run.sessionId,
   );
   assert.equal(activeSession.run_id, runId);
+  await waitFor(() => run.events.some((event) => event.type === 'approval_required'));
   const runSnapshot = await (await fetch(`${url}/v1/runs/${runId}`, { headers: auth })).json();
   assert.equal(runSnapshot.last_event_sequence, run.events.at(-1).sequence);
-  await waitFor(() => run.events.some((event) => event.type === 'approval_required'));
   const approval = run.events.find((event) => event.type === 'approval_required');
   const pendingSnapshot = await (await fetch(`${url}/v1/runs/${runId}`, { headers: auth })).json();
   assert.deepEqual(
