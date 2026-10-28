@@ -118,7 +118,7 @@ test('Windows replacement fallback commits the temporary file and removes the ba
   });
 });
 
-test('Windows replacement fallback reports the new destination as committed if backup cleanup fails', async (t) => {
+test('Windows replacement fallback warns and succeeds if backup cleanup fails after commit', async (t) => {
   const root = await createTempDirectory('xyst-atomic-write-backup-cleanup-failure-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const destination = path.join(root, 'settings.json');
@@ -129,6 +129,7 @@ test('Windows replacement fallback reports the new destination as committed if b
     const remove = fs.rm;
     let backupPath;
     let destinationCommitAttempts = 0;
+    const warnings = [];
     fs.rename = async (source, target) => {
       if (source === destination && target.endsWith('.bak')) backupPath = target;
       if (source.endsWith('.tmp') && target === destination) {
@@ -142,13 +143,12 @@ test('Windows replacement fallback reports the new destination as committed if b
       return remove(target, options);
     };
     try {
-      await assert.rejects(atomicWriteFile(destination, 'replacement'), (error) => {
-        assert.equal(error.code, 'EACCES');
-        assert.equal(error.committed, true);
-        return true;
-      });
+      await atomicWriteFile(destination, 'replacement', { onPersistenceWarning: (error) => warnings.push(error) });
       assert.equal(await fs.readFile(destination, 'utf8'), 'replacement');
       assert.equal(await fs.readFile(backupPath, 'utf8'), 'original');
+      assert.equal(warnings.length, 1);
+      assert.equal(warnings[0].code, 'EACCES');
+      assert.equal(warnings[0].committed, true);
     } finally {
       fs.rename = rename;
       fs.rm = remove;

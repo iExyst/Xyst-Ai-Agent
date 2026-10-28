@@ -1,9 +1,9 @@
 # Xyst development build status — 2026-10-28
 
-## Windows atomic-replacement cleanup failure — 2026-10-28
+## Windows atomic-replacement cleanup warning — 2026-10-28
 
-- If Windows installs the replacement but cannot remove its previous-file backup, `atomicWriteFile` now tags the error as committed. The current destination and recovery backup are both preserved, and session writes can advance their in-memory revision instead of treating the visible commit as rolled back.
-- The focused platform-files suite passes the Windows replacement commit, cleanup-failure, rollback, and retained-backup cases (4/4). Exact-source hosted CI is pending.
+- If Windows installs a replacement but cannot remove the old-file backup, `atomicWriteFile` treats the write as successful, preserves the recovery backup, and reports a persistence warning. Session writes forward that warning while advancing their in-memory revision, so callers do not report failure after the new data is already visible.
+- The focused fault-injection regression passes (1/1); Biome and whitespace checks pass. Hosted run [40609176908](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40609176908) for the preceding commit passed security, formatting, and lint. Its Node matrices retain the known Windows ConPTY and Ubuntu Bubblewrap isolation failures; desktop package jobs were still running when last inspected. This warning-policy follow-up is awaiting hosted CI.
 
 ## Bounded tool result transport — 2026-10-27
 

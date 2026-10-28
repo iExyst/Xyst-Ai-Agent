@@ -7,7 +7,18 @@ import { randomUUID } from 'node:crypto';
  * existing destination through a recoverable backup when rename cannot replace
  * it directly (some filesystems and restricted environments return EPERM).
  */
-export async function atomicWriteFile(destination, content, { mode = 0o600, beforeReplace } = {}) {
+export async function atomicWriteFile(
+  destination,
+  content,
+  {
+    mode = 0o600,
+    beforeReplace,
+    onPersistenceWarning = () =>
+      process.emitWarning('An atomic write committed but its previous-file backup could not be removed', {
+        code: 'ATOMIC_WRITE_BACKUP_CLEANUP',
+      }),
+  } = {},
+) {
   const temporary = `${destination}.${randomUUID()}.tmp`;
   try {
     const existing = await fs.lstat(destination).catch((error) => {
@@ -37,7 +48,7 @@ export async function atomicWriteFile(destination, content, { mode = 0o600, befo
       await fs.rename(temporary, destination);
     } catch (error) {
       if (process.platform !== 'win32' || !['EPERM', 'EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
-      await replaceExisting(temporary, destination, beforeReplace);
+      await replaceExisting(temporary, destination, beforeReplace, onPersistenceWarning);
     }
     try {
       await syncParentDirectory(destination);
@@ -53,7 +64,7 @@ export async function atomicWriteFile(destination, content, { mode = 0o600, befo
   }
 }
 
-async function replaceExisting(temporary, destination, beforeReplace) {
+async function replaceExisting(temporary, destination, beforeReplace, onPersistenceWarning) {
   const backup = `${destination}.${randomUUID()}.bak`;
   let hasDestination = false;
   try {
@@ -76,10 +87,14 @@ async function replaceExisting(temporary, destination, beforeReplace) {
     try {
       await fs.rm(backup, { force: true });
     } catch (error) {
-      // The replacement rename committed. Callers must advance in-memory
-      // revisions even when cleanup of the previous copy needs recovery.
+      // The replacement rename committed. Preserve the previous copy and
+      // report a warning without turning the committed write into a failure.
       error.committed = true;
-      throw error;
+      try {
+        onPersistenceWarning?.(error);
+      } catch {
+        // A warning handler must not turn a committed write into a failure.
+      }
     }
   }
 }

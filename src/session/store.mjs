@@ -92,7 +92,11 @@ export class SessionStore {
       persistedSession.updated_at = nextUpdatedAt;
       validateSession(persistedSession);
       try {
-        await atomicWriteJson(destination, persistedSession, { mode: 0o600 });
+        await atomicWriteJson(destination, persistedSession, {
+          mode: 0o600,
+          onPersistenceWarning: (error) =>
+            this.onPersistenceWarning({ session_id: session.id, code: error.code || 'SESSION_BACKUP_CLEANUP_FAILED' }),
+        });
       } catch (error) {
         if (!error.committed) throw error;
         session.revision = nextRevision;
