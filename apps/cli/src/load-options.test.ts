@@ -94,13 +94,15 @@ test("mission templates provide valid task graphs and execute through the normal
   const documentVerifyObjective = documentTasks.find((task) => task.id === "verify-artifact")?.objective ?? "";
   assert.deepEqual(documentPlanTask?.expectedOutputs, ["artifact-plan.md"]);
   assert.match(documentPlanTask?.objective ?? "", /reopen that exact file with file_read/);
-  assert.match(documentCreateObjective, /do not repeat that heading in the body/);
+  assert.match(documentCreateObjective, /Do not repeat the title text anywhere in the body/);
   assert.match(documentVerifyObjective, /inspect the returned image pixels/);
   assert.match(documentVerifyObjective, /read-only verification task/);
   assert.match(documentVerifyObjective, /report it instead of changing the file/);
   assert.match(documentVerifyObjective, /PNG path alone is not visual evidence/);
   assert.match(documentVerifyObjective, /any repeated or missing content/);
   assert.match(documentVerifyObjective, /do not claim visual verification/);
+  assert.deepEqual(documentTasks.find((task) => task.id === "plan-artifact")?.allowedTools, ["file_create", "file_read"]);
+  assert.deepEqual(documentTasks.find((task) => task.id === "create-artifact")?.allowedTools, ["file_read", "office_create", "office_read"]);
   assert.deepEqual(documentTasks.find((task) => task.id === "verify-artifact")?.allowedTools, ["office_read", "office_preview"]);
   assert.throws(() => getMissionTemplate("unknown-template"), /Unknown mission template/);
 

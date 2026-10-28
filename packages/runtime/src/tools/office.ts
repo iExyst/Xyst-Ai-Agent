@@ -44,7 +44,10 @@ function removeLeadingDuplicateTitle(title: string, content: string, repeatTitle
   const lines = content.split(/\r?\n/);
   let firstContentLine = 0;
   while (firstContentLine < lines.length && !lines[firstContentLine]!.trim()) firstContentLine++;
-  if (lines[firstContentLine]?.trim() !== title.trim()) return content;
+  const firstLineTitle = lines[firstContentLine]?.trim().replace(/^#{1,6}\s+/, "");
+  const normalizedLine = firstLineTitle?.toLocaleLowerCase();
+  const normalizedTitle = title.trim().toLocaleLowerCase();
+  if (normalizedLine !== normalizedTitle && !normalizedLine?.startsWith(`${normalizedTitle} `) && !normalizedLine?.startsWith(`${normalizedTitle}:`) && !normalizedLine?.startsWith(`${normalizedTitle} -`)) return content;
   const body = lines.slice(firstContentLine + 1);
   while (body.length && !body[0]!.trim()) body.shift();
   return body.join("\n");
@@ -751,7 +754,14 @@ async function writeNewFile(path: string, data: Uint8Array): Promise<{ path: str
 function makePdfText(title: string, content: string): string[][] {
   const lines: string[] = [title, "", ...content.split(/\r?\n/).flatMap((line) => {
     if (!line) return [""];
-    const segments: string[] = []; for (let i = 0; i < line.length; i += 92) segments.push(line.slice(i, i + 92)); return segments;
+    const words = line.trim().split(/\s+/); const segments: string[] = []; let current = "";
+    for (const word of words) {
+      if (current && current.length + 1 + word.length > 92) { segments.push(current); current = word; }
+      else if (word.length > 92) { if (current) segments.push(current); current = word; }
+      else current = current ? `${current} ${word}` : word;
+    }
+    if (current) segments.push(current);
+    return segments;
   })];
   const pages: string[][] = []; let page: string[] = [];
   for (const line of lines) { if (page.length >= 48) { pages.push(page); page = []; } page.push(line); }

@@ -927,7 +927,7 @@ test("office preview result sends the rendered PNG pixels to the next model requ
       const previewBytes = await readFileAsync(join(root, "vision.png"));
       assert.equal(imageUrl, `data:image/png;base64,${previewBytes.toString("base64")}`);
       assert.match(String(parts.find((part) => part.type === "text")?.text), /vision\.png/);
-      if (round === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "forbidden-delete", type: "function", function: { name: "file_delete", arguments: JSON.stringify({ path: "vision.pdf" }) } }] } }] };
+      if (round === 2) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "forbidden-create", type: "function", function: { name: "office_create", arguments: JSON.stringify({ format: "pdf", path: "forbidden.pdf", title: "Forbidden", content: "Must not be created" }) } }] } }] };
       assert.match(String(request.messages.at(-1)?.content), /not allowed for this task/);
       return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "preview-complete", type: "function", function: { name: "task_complete", arguments: JSON.stringify({ evidence_tool_call_indexes: [1] }) } }] } }] };
     }
@@ -936,6 +936,9 @@ test("office preview result sends the rendered PNG pixels to the next model requ
     const result = await new AgentRunner({ store, config, sessions, events, access: new AccessController(), provider: provider as never, github: {} as never })
       .run("Inspect the rendered preview", { workspace: root, model: "test-model", maxTurns: 4, allowedTools: ["office_read", "office_preview"], completionCriteria: ["Inspect the rendered preview"], requiredToolEvidence: [{ tool: "office_preview" }] });
     assert.equal(result.status, "completed"); assert.equal(round, 3);
+    assert.equal(existsSync(join(root, "forbidden.pdf")), false, "a blocked external tool call must not execute");
+    const blocked = store.db.prepare("SELECT status,effect,output_json FROM tool_calls WHERE id='forbidden-create'").get() as { status: string; effect: string; output_json: string };
+    assert.equal(blocked.status, "failed"); assert.equal(blocked.effect, "read"); assert.match(blocked.output_json, /not allowed for this task/);
   } finally { store.close(); }
 }));
 
@@ -4621,7 +4624,7 @@ test("office DOCX and PDF creation removes a matching leading title by default a
   const office = createOfficeTools(new AccessController(), root);
   for (const format of ["docx", "pdf"] as const) {
     const path = `brief.${format}`;
-    await office.office_create!.execute({ format, path, title: "Workshop Brief", content: "\nWorkshop Brief\n\nDate: October 28, 2026\nChecklist" });
+    await office.office_create!.execute({ format, path, title: "Workshop Brief", content: "\n## Workshop Brief for New volunteers\n\nDate: October 28, 2026\nChecklist" });
     const normal = await office.office_read!.execute({ format, path }) as { text: string };
     assert.equal(normal.text.split("Workshop Brief").length - 1, 1, `${format} should render the title once`);
     assert.match(normal.text, /Date: October 28, 2026/);
@@ -4631,6 +4634,10 @@ test("office DOCX and PDF creation removes a matching leading title by default a
     const repeated = await office.office_read!.execute({ format, path: repeatPath }) as { text: string };
     assert.equal(repeated.text.split("Workshop Brief").length - 1, 2, `${format} should keep an explicitly requested repeated title`);
   }
+  await office.office_create!.execute({ format: "pdf", path: "wrapped.pdf", title: "Preparation", content: `${"x".repeat(80)} accessibility item` });
+  const wrapped = await office.office_read!.execute({ format: "pdf", path: "wrapped.pdf" }) as { text: string };
+  assert.match(wrapped.text, /accessibility/);
+  assert.doesNotMatch(wrapped.text, /accessibil\s+ity/);
 }));
 
 test("office preview renders DOCX, XLSX, and PPTX through installed LibreOffice", async (context) => {

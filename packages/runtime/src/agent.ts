@@ -968,9 +968,19 @@ ${projectInstructions ? `\nProject instructions:\n${projectInstructions}` : ""}$
             continue;
           }
           completionVerified = false;
+          if (allowedToolNames && !allowedToolNames.has(name)) {
+            const error = JSON.stringify({ error: `Tool ${name} is not allowed for this task` });
+            if (!this.deps.store.db.prepare("SELECT 1 FROM tool_calls WHERE id=?").get(callId)) {
+              const now = new Date().toISOString();
+              this.deps.store.db.prepare("INSERT INTO tool_calls(id,session_id,name,input_json,status,output_json,created_at,finished_at,effect) VALUES(?,?,?,?,?,?,?,?,?)")
+                .run(callId, sessionId, name || "unknown", this.deps.provider.redact(rawArgs), "failed", error, now, now, "read");
+            }
+            this.deps.events.emit("tool.failed", { id: callId, name, error: `Tool ${name} is not allowed for this task` }, sessionId);
+            save({ role: "tool", tool_call_id: callId, content: error });
+            continue;
+          }
           const tool = tools[name];
           try {
-            if (allowedToolNames && !allowedToolNames.has(name)) throw new Error(`Tool ${name} is not allowed for this task`);
             if (name === "task_complete" && callIndex !== toolCalls.length - 1) throw new Error("task_complete must be the final tool call in a response; verify only after all requested actions");
             if (!tool) throw new Error(`Unknown tool: ${name}`);
             const args = JSON.parse(rawArgs) as unknown;
