@@ -1,0 +1,22 @@
+{
+  "verifiedAtUtc": "2026-10-28T01:30:12Z",
+  "baseCommit": "90f6199d09b1aef20173f19c8b120da3f01e4a71",
+  "verification": "separate-process stdio MCP server initiated sampling round trip",
+  "model": "qwen/qwen3.5-9b",
+  "contextLength": 16384,
+  "modelWasAlreadyLoaded": true,
+  "modelLoadedOrUnloadedByCheck": false,
+  "externalNetworkUsed": false,
+  "samplingToolsCapabilityAdvertised": true,
+  "serverToolName": "wiki.lookup",
+  "serverToolInput": {
+    "query": "React migration key"
+  },
+  "serverExecutedTool": true,
+  "serverToolResult": "Migration key: XYST-RIVER-27",
+  "modelFinalAnswer": "The React migration key is: **XYST-RIVER-27**",
+  "limitations": [
+    "Local stdio child-process interoperability only; no remote Streamable HTTP or SSE server was used.",
+    "No OAuth flow, hosted MCP server, or broad model reliability claim is established."
+  ]
+}

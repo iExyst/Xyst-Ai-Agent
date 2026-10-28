@@ -3849,6 +3849,48 @@ test("MCP stdio transport starts a local server, discovers tools, calls them, an
   } finally { await connection.close(); }
 }));
 
+test("independent stdio MCP server negotiates sampling tools and completes a tool-result round trip", async () => withTemp(async (root) => {
+  const serverPath = join(root, "sampling-server.mjs"); const resultPath = join(root, "sampling-result.json");
+  await writeFile(serverPath, [
+    `import { McpServer } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/sdk/server/mcp.js"))};`,
+    `import { StdioServerTransport } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/sdk/server/stdio.js"))};`,
+    'const server = new McpServer({ name: "independent-sampling-fixture", version: "1.0.0" });',
+    'server.tool("exercise_sampling", "Exercise client sampling with a server-owned lookup tool", {}, async () => {',
+    '  const tools = [{ name: "wiki.lookup", description: "Find documentation", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }];',
+    '  const messages = [{ role: "user", content: { type: "text", text: "Find React documentation" } }];',
+    '  const first = await server.server.createMessage({ messages, maxTokens: 64, tools, toolChoice: { mode: "required" } });',
+    '  if (first.content?.type !== "tool_use") throw new Error("Client did not return a sampling tool use");',
+    '  const second = await server.server.createMessage({ messages: [...messages, { role: "assistant", content: first.content }, { role: "user", content: { type: "tool_result", toolUseId: first.content.id, content: [{ type: "text", text: "Server lookup found three React articles" }] } }], maxTokens: 64, tools, toolChoice: { mode: "auto" } });',
+    '  return { content: [{ type: "text", text: JSON.stringify({ capabilities: server.server.getClientCapabilities(), first, second }) }] };',
+    '});',
+    'await server.connect(new StdioServerTransport());'
+  ].join("\n"));
+
+  const modelRequests: Array<{ messages: unknown[]; tools: unknown[]; tool_choice?: string }> = [];
+  const sample = createMcpSamplingHandler({
+    chat: async () => { throw new Error("sampling with tools must use chatWithTools"); },
+    chatWithTools: async (request: typeof modelRequests[number]) => {
+      modelRequests.push(request);
+      if (modelRequests.length === 1) return { choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [{ id: "stdio-call-1", type: "function", function: { name: "xyst_mcp_tool_0", arguments: "{\"query\":\"React\"}" } }] } }] };
+      return { choices: [{ finish_reason: "stop", message: { content: "Found three React articles", tool_calls: [] } }] };
+    }
+  }, "qwen/local", "qwen/local:2");
+  const connection = await createMcpTools(new AccessController(), [{ id: "sampling", transport: "stdio", command: process.execPath, args: [serverPath], cwd: root }], { get: async () => undefined }, root, undefined, { sample });
+  try {
+    const call = connection.tools.mcp_sampling_exercise_sampling;
+    assert.ok(call, "independent sampling server tool should be exposed");
+    const response = await call.execute({}) as { result: { content: Array<{ text: string }> } };
+    const report = JSON.parse(response.result.content[0]!.text) as { capabilities: { sampling?: { tools?: unknown } }; first: { content: { type: string; name?: string; input?: unknown } }; second: { content: { type: string; text?: string } } };
+    assert.ok(report.capabilities.sampling?.tools, "client must advertise request-scoped sampling tools");
+    assert.equal(report.first.content.type, "tool_use");
+    assert.equal(report.first.content.name, "wiki.lookup");
+    assert.deepEqual(report.first.content.input, { query: "React" });
+    assert.equal(report.second.content.type, "text");
+    assert.equal(report.second.content.text, "Found three React articles");
+    assert.deepEqual(modelRequests[1]?.messages.at(-1), { role: "tool", tool_call_id: "stdio-call-1", content: "Server lookup found three React articles" });
+  } finally { await connection.close(); }
+}));
+
 test("automatic model switching retries once on another installed local model", async () => withTemp(async (root) => {
   const store = new XystStore(join(root, "switch.sqlite")); const config = new ConfigStore(store); const sessions = new SessionStore(store); const events = new RuntimeEvents();
   config.set("global", "model.autoSelect", true); config.set("global", "models.automaticSwitching", true);
