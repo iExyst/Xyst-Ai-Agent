@@ -956,6 +956,7 @@ function normalizeTool(server, tool) {
     throw mcpError(`MCP server '${server}' advertised an invalid tool`, 'MCP_INVALID_TOOL');
   const name = `mcp__${server}__${tool.name}`;
   if (name.length > 64) throw mcpError('MCP tool name exceeds provider limit', 'MCP_INVALID_TOOL');
+  const parameters = normalizeSchema(tool.inputSchema);
   const headerParameters = findHeaderParameters(tool.inputSchema);
   if (
     tool.outputSchema !== undefined &&
@@ -972,7 +973,7 @@ function normalizeTool(server, tool) {
         0,
         1600,
       ),
-    parameters: normalizeSchema(tool.inputSchema),
+    parameters,
     approval: 'ask',
     destructive: true,
     _mcp: { server, originalName: tool.name, headerParameters, ...(outputSchema ? { outputSchema } : {}) },
@@ -981,9 +982,15 @@ function normalizeTool(server, tool) {
 
 function findHeaderParameters(schema) {
   const headers = [];
-  const names = new Set();
-  const visit = (node, path = [], inArray = false) => {
+  const rootSchema = schema;
+  const visit = (node, path = [], inArray = false, refStack = new Set()) => {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    if (typeof node.$ref === 'string') {
+      if (refStack.has(node.$ref)) return;
+      const nextRefStack = new Set(refStack);
+      nextRefStack.add(node.$ref);
+      visit(resolveLocalSchemaReference(rootSchema, node.$ref), path, inArray, nextRefStack);
+    }
     if (Object.hasOwn(node, 'x-mcp-header')) {
       const value = node['x-mcp-header'];
       if (
@@ -994,13 +1001,21 @@ function findHeaderParameters(schema) {
       )
         throw mcpError('MCP tool has an invalid x-mcp-header annotation', 'MCP_INVALID_SCHEMA');
       const normalized = value.toLowerCase();
-      if (names.has(normalized)) throw mcpError('MCP tool repeats an x-mcp-header name', 'MCP_INVALID_SCHEMA');
-      names.add(normalized);
+      const prior = headers.find((header) => header.name.toLowerCase() === normalized);
+      if (prior) {
+        if (prior.path.length === path.length && prior.path.every((part, index) => part === path[index])) return;
+        throw mcpError('MCP tool repeats an x-mcp-header name', 'MCP_INVALID_SCHEMA');
+      }
       headers.push({ name: value, path });
     }
     if (node.type === 'object' && node.properties && typeof node.properties === 'object' && !Array.isArray(node.properties))
-      for (const [key, child] of Object.entries(node.properties)) visit(child, [...path, key], inArray);
-    if (node.type === 'array' && node.items) visit(node.items, path, true);
+      for (const [key, child] of Object.entries(node.properties)) visit(child, [...path, key], inArray, refStack);
+    if (node.type === 'array') {
+      if (node.items) visit(node.items, path, true, refStack);
+      for (const item of node.prefixItems || []) visit(item, path, true, refStack);
+    }
+    for (const key of ['allOf', 'anyOf', 'oneOf']) for (const branch of node[key] || []) visit(branch, path, inArray, refStack);
+    for (const key of ['not', 'if', 'then', 'else']) if (node[key]) visit(node[key], path, inArray, refStack);
   };
   visit(schema);
   return headers;

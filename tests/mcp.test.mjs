@@ -927,7 +927,11 @@ test('MCP Streamable HTTP negotiates modern protocol and accepts SSE responses',
                       };
     result.resultType ||= 'complete';
     if (request.method === 'tools/list') {
-      result.tools[0].inputSchema.$defs = { ShortText: { type: 'string', minLength: 2 } };
+      result.tools[0].inputSchema.$defs = {
+        ShortText: { type: 'string', minLength: 2 },
+        Region: { type: 'string', 'x-mcp-header': 'Region' },
+      };
+      result.tools[0].inputSchema.properties.region = { $ref: '#/$defs/Region' };
       result.tools[0].inputSchema.properties.ref_text = { $ref: '#/$defs/ShortText' };
       result.tools[0].inputSchema.properties.ref_tight = { $ref: '#/$defs/ShortText', maxLength: 3 };
     }
