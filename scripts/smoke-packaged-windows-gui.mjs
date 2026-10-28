@@ -119,6 +119,16 @@ async function verifyKeyboardSkipLink(page) {
   return { firstTabTarget: focusedLink.text, enterTarget: targetId };
 }
 
+async function verifyAppearanceAccessibility(page) {
+  const measurements = JSON.parse(await evaluate(page, "JSON.stringify((() => { const root = document.documentElement; const item = document.querySelector('.nav-item'); const navLabel = document.querySelector('.nav-label'); const original = { largeText: root.dataset.largeText, highContrast: root.dataset.highContrast, reducedMotion: root.dataset.reducedMotion }; const before = item.getBoundingClientRect().height; root.dataset.largeText = 'true'; const after = item.getBoundingClientRect().height; const zoom = Number(getComputedStyle(root).zoom); const borderBefore = getComputedStyle(root).getPropertyValue('--border').trim(); const textBefore = getComputedStyle(navLabel).color; root.dataset.highContrast = 'true'; const borderAfter = getComputedStyle(root).getPropertyValue('--border').trim(); const textAfter = getComputedStyle(navLabel).color; const probe = document.createElement('div'); probe.className = 'spinner'; document.body.append(probe); const motionBefore = getComputedStyle(probe).animationDuration; root.dataset.reducedMotion = 'true'; const motionAfter = getComputedStyle(probe).animationDuration; probe.remove(); for (const [key, value] of Object.entries(original)) { if (value === undefined) delete root.dataset[key]; else root.dataset[key] = value; } return { before, after, zoom, borderBefore, borderAfter, textBefore, textAfter, motionBefore, motionAfter }; })())", 37));
+  const seconds = (value) => value.endsWith("ms") ? Number.parseFloat(value) / 1000 : Number.parseFloat(value);
+  assert.ok(measurements.zoom >= 1.14 && measurements.after >= measurements.before * 1.14, `Larger text should enlarge the renderer: ${JSON.stringify(measurements)}`);
+  assert.notEqual(measurements.borderAfter, measurements.borderBefore, `High contrast should change panel borders: ${JSON.stringify(measurements)}`);
+  assert.notEqual(measurements.textAfter, measurements.textBefore, `High contrast should brighten muted text: ${JSON.stringify(measurements)}`);
+  assert.ok(seconds(measurements.motionAfter) < seconds(measurements.motionBefore) / 100, `Reduced motion should suppress spinner animation: ${JSON.stringify(measurements)}`);
+  return measurements;
+}
+
 function stopInstalledCopies(executable) {
   const escaped = executable.replace(/'/g, "''");
   const command = `$target = '${escaped}'; Get-CimInstance Win32_Process -Filter "Name='Xyst.exe'" | Where-Object { $_.ExecutablePath -eq $target } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
@@ -152,10 +162,11 @@ try {
   const page = await Promise.race([waitForTarget(port), appError]);
   const snapshot = await waitForUi(page);
   const keyboard = await verifyKeyboardSkipLink(page);
+  const appearanceAccessibility = await verifyAppearanceAccessibility(page);
   const screenshot = await cdpCommand(page, "Page.captureScreenshot", { format: "png", fromSurface: true }, 2);
   assert.ok(screenshot?.data, "Packaged renderer did not return a screenshot");
   await writeFile(join(packageDir, "windows-gui-smoke.png"), Buffer.from(screenshot.data, "base64"));
-  process.stdout.write(`Clean Windows install UI smoke passed: ${JSON.stringify({ ...snapshot, keyboard })}\n`);
+  process.stdout.write(`Clean Windows install UI smoke passed: ${JSON.stringify({ ...snapshot, keyboard, appearanceAccessibility })}\n`);
 } finally {
   if (app?.pid) spawnSync("taskkill.exe", ["/PID", String(app.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
   if (app?.pid) stopInstalledCopies(installedExe);

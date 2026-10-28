@@ -89,6 +89,16 @@ async function verifyKeyboardSkipLink(page) {
   return { firstTabTarget: focusedLink.text, enterTarget: targetId };
 }
 
+async function verifyAppearanceAccessibility(page) {
+  const measurements = JSON.parse(await evaluate(page, "JSON.stringify((() => { const root = document.documentElement; const item = document.querySelector('.nav-item'); const navLabel = document.querySelector('.nav-label'); const original = { largeText: root.dataset.largeText, highContrast: root.dataset.highContrast, reducedMotion: root.dataset.reducedMotion }; const before = item.getBoundingClientRect().height; root.dataset.largeText = 'true'; const after = item.getBoundingClientRect().height; const zoom = Number(getComputedStyle(root).zoom); const borderBefore = getComputedStyle(root).getPropertyValue('--border').trim(); const textBefore = getComputedStyle(navLabel).color; root.dataset.highContrast = 'true'; const borderAfter = getComputedStyle(root).getPropertyValue('--border').trim(); const textAfter = getComputedStyle(navLabel).color; const probe = document.createElement('div'); probe.className = 'spinner'; document.body.append(probe); const motionBefore = getComputedStyle(probe).animationDuration; root.dataset.reducedMotion = 'true'; const motionAfter = getComputedStyle(probe).animationDuration; probe.remove(); for (const [key, value] of Object.entries(original)) { if (value === undefined) delete root.dataset[key]; else root.dataset[key] = value; } return { before, after, zoom, borderBefore, borderAfter, textBefore, textAfter, motionBefore, motionAfter }; })())", 37));
+  const seconds = (value) => value.endsWith("ms") ? Number.parseFloat(value) / 1000 : Number.parseFloat(value);
+  assert.ok(measurements.zoom >= 1.14 && measurements.after >= measurements.before * 1.14, `Larger text should enlarge the renderer: ${JSON.stringify(measurements)}`);
+  assert.notEqual(measurements.borderAfter, measurements.borderBefore, `High contrast should change panel borders: ${JSON.stringify(measurements)}`);
+  assert.notEqual(measurements.textAfter, measurements.textBefore, `High contrast should brighten muted text: ${JSON.stringify(measurements)}`);
+  assert.ok(seconds(measurements.motionAfter) < seconds(measurements.motionBefore) / 100, `Reduced motion should suppress spinner animation: ${JSON.stringify(measurements)}`);
+  return measurements;
+}
+
 try {
   await access(appImage);
   app = spawn(appImage, ["--appimage-extract-and-run", "--no-sandbox", `--remote-debugging-port=${port}`, "--remote-allow-origins=*"], {
@@ -112,6 +122,7 @@ try {
   assert.ok(snapshot.buttons >= 10, `Expected the control room UI; got ${JSON.stringify(snapshot)}`);
   assert.ok(snapshot.body.includes("RUNTIME READY"), `Packaged runtime did not become ready: ${snapshot.body}`);
   const keyboard = await verifyKeyboardSkipLink(page);
+  const appearanceAccessibility = await verifyAppearanceAccessibility(page);
   const socket = new WebSocket(page.webSocketDebuggerUrl);
   try {
     await new Promise((resolveOpen, rejectOpen) => { socket.addEventListener("open", resolveOpen, { once: true }); socket.addEventListener("error", rejectOpen, { once: true }); });
@@ -124,7 +135,7 @@ try {
     assert.ok(image, "Packaged renderer did not return a screenshot");
     await writeFile(join(packageDir, "linux-gui-smoke.png"), Buffer.from(image, "base64"));
   } finally { socket.close(); }
-  process.stdout.write(`Linux AppImage renderer smoke passed: ${JSON.stringify({ title: snapshot.title, buttons: snapshot.buttons, width: snapshot.width, height: snapshot.height, keyboard, screenshot: join(packageDir, "linux-gui-smoke.png") })}\n`);
+  process.stdout.write(`Linux AppImage renderer smoke passed: ${JSON.stringify({ title: snapshot.title, buttons: snapshot.buttons, width: snapshot.width, height: snapshot.height, keyboard, appearanceAccessibility, screenshot: join(packageDir, "linux-gui-smoke.png") })}\n`);
 } finally {
   if (app?.pid) {
     try { process.kill(-app.pid, "SIGTERM"); } catch {}
