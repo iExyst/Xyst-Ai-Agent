@@ -175,7 +175,7 @@ export class OpenMeteoWeatherProvider {
 }
 
 function splitUsLocation(query) {
-  for (const [code, state] of Object.entries(US_STATES)) {
+  for (const [code, state] of Object.entries(US_STATES).sort((a, b) => b[1].length - a[1].length)) {
     for (const suffix of [code, state]) {
       if (!query.toLowerCase().endsWith(` ${suffix.toLowerCase()}`)) continue;
       const city = query.slice(0, -suffix.length).trim().replace(/,$/, '').trim();
