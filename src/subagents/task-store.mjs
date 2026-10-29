@@ -24,6 +24,28 @@ function getCurrentProcessIdentity() {
   return currentProcessIdentityPromise;
 }
 
+function assertSafeTaskDirectory(info) {
+  if (!info.isDirectory() || info.isSymbolicLink())
+    throw Object.assign(new Error('Subagent task store path contains a non-directory or symbolic link'), {
+      code: 'SUBAGENT_STORE_PATH_UNSAFE',
+    });
+}
+
+async function assertRegularTaskFile(file, { allowMissing = false } = {}) {
+  let info;
+  try {
+    info = await fs.lstat(file);
+  } catch (error) {
+    if (allowMissing && error.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (!info.isFile() || info.isSymbolicLink())
+    throw Object.assign(new Error('Subagent task store file must be a regular non-symlink file'), {
+      code: 'SUBAGENT_STORE_PATH_UNSAFE',
+    });
+  return info;
+}
+
 /** Persistent task history plus fail-closed cross-process execution slots. */
 export class SubagentTaskStore {
   constructor(stateRoot, { maxConcurrent = 2, lockWaitMs = 10_000 } = {}) {
@@ -382,8 +404,12 @@ export class SubagentTaskStore {
   }
 
   async #read() {
+    await this.#assertSafeTaskDirectory(this.directoryInfo);
     try {
-      return decodeTaskStore(await fs.readFile(this.file, 'utf8'));
+      await assertRegularTaskFile(this.file, { allowMissing: true });
+      const contents = await fs.readFile(this.file, 'utf8');
+      await this.#assertSafeTaskDirectory(this.directoryInfo);
+      return decodeTaskStore(contents);
     } catch (error) {
       if (error.code === 'ENOENT') {
         return (
@@ -402,15 +428,17 @@ export class SubagentTaskStore {
   }
 
   async #mutate(change, { persist = true } = {}) {
-    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+    this.directoryInfo = await this.#ensureSafeTaskDirectory();
     const deadline = Date.now() + this.lockWaitMs;
     let handle;
     let lockToken;
     while (!handle && Date.now() <= deadline) {
       try {
+        await this.#assertSafeTaskDirectory(this.directoryInfo);
         handle = await fs.open(this.mutationLock, 'wx', 0o600);
       } catch (error) {
         if (error.code !== 'EEXIST') throw error;
+        await this.#assertSafeTaskDirectory(this.directoryInfo);
         await this.#recoverMutationLock();
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
@@ -429,15 +457,23 @@ export class SubagentTaskStore {
         }),
       );
       await handle.sync();
+      await this.#assertSafeTaskDirectory(this.directoryInfo);
       const state = await this.#read();
       const result = change(state);
-      if (persist) await atomicWriteJson(this.file, state, { mode: 0o600 });
+      if (persist) {
+        await assertRegularTaskFile(this.file, { allowMissing: true });
+        await this.#assertSafeTaskDirectory(this.directoryInfo);
+        await atomicWriteJson(this.file, state, { mode: 0o600 });
+        await this.#assertSafeTaskDirectory(this.directoryInfo);
+      }
       return result;
     } finally {
       const openedInfo = await handle.stat().catch(() => null);
       await handle.close().catch(() => {});
       if (openedInfo) {
-        const currentInfo = await fs.lstat(this.mutationLock).catch(() => null);
+        const currentInfo = await this.#assertSafeTaskDirectory(this.directoryInfo)
+          .then(() => fs.lstat(this.mutationLock))
+          .catch(() => null);
         if (currentInfo?.isFile() && !currentInfo.isSymbolicLink() && sameFileIdentity(openedInfo, currentInfo)) {
           let currentRecord;
           try {
@@ -445,10 +481,48 @@ export class SubagentTaskStore {
           } catch {
             currentRecord = null;
           }
-          if (currentRecord?.lock_token === lockToken) await fs.rm(this.mutationLock).catch(() => {});
+          if (currentRecord?.lock_token === lockToken)
+            await this.#assertSafeTaskDirectory(this.directoryInfo)
+              .then(() => fs.rm(this.mutationLock))
+              .catch(() => {});
         }
       }
     }
+  }
+
+  async #ensureSafeTaskDirectory() {
+    const root = await fs.realpath(this.stateRoot);
+    let current = root;
+    for (const segment of ['.agent', 'subagents']) {
+      current = path.join(current, segment);
+      try {
+        await fs.mkdir(current, { mode: 0o700 });
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+      const info = await fs.lstat(current);
+      assertSafeTaskDirectory(info);
+    }
+    this.stateRoot = root;
+    this.directory = current;
+    this.file = path.join(current, 'tasks.json');
+    this.mutationLock = path.join(current, 'tasks.lock');
+    return fs.lstat(current);
+  }
+
+  async #assertSafeTaskDirectory(expectedInfo) {
+    const root = await fs.realpath(this.stateRoot);
+    if (root !== this.stateRoot)
+      throw Object.assign(new Error('Subagent task store workspace root changed'), { code: 'SUBAGENT_STORE_PATH_UNSAFE' });
+    let current = root;
+    for (const segment of ['.agent', 'subagents']) {
+      current = path.join(current, segment);
+      const info = await fs.lstat(current);
+      assertSafeTaskDirectory(info);
+      if (segment === 'subagents' && expectedInfo && !sameFileIdentity(expectedInfo, info))
+        throw Object.assign(new Error('Subagent task store directory changed'), { code: 'SUBAGENT_STORE_PATH_UNSAFE' });
+    }
+    return fs.lstat(current);
   }
 
   async #recoverMutationLock() {

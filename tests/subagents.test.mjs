@@ -11,7 +11,7 @@ import { SubagentManager } from '../src/subagents/manager.mjs';
 import { SubagentTaskStore } from '../src/subagents/task-store.mjs';
 import { acquireWorktreeLease, createWorktree, getGitFilterOverrides } from '../src/platform/worktrees.mjs';
 import { runProcess } from '../src/platform/process.mjs';
-import { createTempDirectory } from './helpers.mjs';
+import { createSymlinkOrSkip, createTempDirectory } from './helpers.mjs';
 
 async function git(cwd, ...args) {
   const result = await runProcess('git', args, { cwd, timeoutMs: 15_000 });
@@ -28,6 +28,36 @@ async function gitStatusWithoutFilters(cwd) {
   assert.equal(result.exitCode, 0, result.stderr);
   return result.stdout;
 }
+
+test('subagent task store refuses linked state directories without writing outside the workspace', async (t) => {
+  const root = await createTempDirectory('xyst-subagent-store-symlink-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const outside = path.join(root, 'outside');
+  await fs.mkdir(outside);
+  await fs.mkdir(path.join(root, '.agent'));
+  if (!(await createSymlinkOrSkip(t, outside, path.join(root, '.agent', 'subagents')))) return;
+
+  const store = new SubagentTaskStore(root);
+  await assert.rejects(store.create({ parentSessionId: randomUUID(), task: 'Do not redirect task state' }), {
+    code: 'SUBAGENT_STORE_PATH_UNSAFE',
+  });
+  await assert.rejects(fs.stat(path.join(outside, 'tasks.json')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(outside, 'tasks.lock')), { code: 'ENOENT' });
+});
+
+test('subagent task store refuses a linked task file without reading its target', async (t) => {
+  const root = await createTempDirectory('xyst-subagent-file-link-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SubagentTaskStore(root);
+  await fs.mkdir(store.directory, { recursive: true });
+  const outside = path.join(root, 'outside-tasks.json');
+  const contents = '{"schema_version":1,"tasks":[]}\n';
+  await fs.writeFile(outside, contents, { flag: 'wx' });
+  if (!(await createSymlinkOrSkip(t, outside, store.file, 'file'))) return;
+
+  await assert.rejects(store.list(), { code: 'SUBAGENT_STORE_PATH_UNSAFE' });
+  assert.equal(await fs.readFile(outside, 'utf8'), contents);
+});
 
 test('subagent task store persists bounded task records and enforces cross-process slots', async (t) => {
   const root = await createTempDirectory('xyst-subagent-store-');
