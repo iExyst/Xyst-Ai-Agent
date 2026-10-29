@@ -27,6 +27,7 @@ function config() {
         local: true,
         supports_tools: true,
         context_length: 16000,
+        context_mode: 'manual',
         input_cost_per_million: 0,
         output_cost_per_million: 0,
       },
@@ -122,6 +123,88 @@ test('agent completes a web lookup when a parallel page fetch exceeds the local 
   assert.ok(events.some((event) => event.type === 'context_trimmed' && event.compacted_tool_results > 0));
   const savedPage = result.session.messages.find((message) => message.tool_call_id === 'docs');
   assert.ok(JSON.parse(JSON.parse(savedPage.content).content.result).content.length > 10000);
+});
+
+test('automatic context uses the remote host allocation and reserves output space inside it', async (t) => {
+  const root = await createTempDirectory('xyst-host-context-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.models.local = { ...settings.models.local, context_mode: 'auto', base_url: 'http://remote.test/v1', context_length: 131072 };
+  const store = new SessionStore(root);
+  const session = store.create({ model: 'local' });
+  session.messages.push({ role: 'user', content: 'Old discussion. '.repeat(8000) }, { role: 'assistant', content: 'Old answer.' });
+  await store.save(session);
+  const events = [];
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: store,
+    onEvent: (event) => events.push(event),
+    fetchImpl: async (url, options) => {
+      if (url.endsWith('/api/v1/models'))
+        return Response.json({
+          models: [{ key: 'model-x', max_context_length: 131072, loaded_instances: [{ config: { context_length: 8192 } }] }],
+        });
+      if (!url.endsWith('/chat/completions')) return new Response('', { status: 404 });
+      const request = JSON.parse(options.body);
+      assert.ok(request.max_tokens <= 8192);
+      assert.ok(JSON.stringify(request.messages).length < 8192 * 4);
+      assert.doesNotMatch(JSON.stringify(request.messages), /Old discussion/);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'Continued within the host allocation.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+  const result = await runtime.run({ session, prompt: 'Continue the conversation.' });
+  assert.equal(result.status, 'complete');
+  assert.equal(settings.models.local.context_length, 131072, 'detection must not rewrite the saved profile');
+  assert.equal(result.session.routing_decision.factors.context_capacity.context_length, 8192);
+  assert.ok(events.some((event) => event.type === 'context_capacity_selected' && event.source === 'lm-studio-loaded'));
+});
+
+test('automatic failover refits conversation context before contacting a smaller model host', async (t) => {
+  const root = await createTempDirectory('xyst-small-host-fallback-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.models.local = { ...settings.models.local, base_url: 'http://primary.test/v1', context_length: 32000, retry_attempts: 0 };
+  settings.models.backup = {
+    ...settings.models.local,
+    base_url: 'http://backup.test/v1',
+    model: 'backup',
+    context_length: 131072,
+    context_mode: 'auto',
+  };
+  settings.routing = { fallback_chain: ['backup'] };
+  settings.budgets.max_input_tokens = 400000;
+  const store = new SessionStore(root);
+  const session = store.create({ model: 'local' });
+  session.messages.push({ role: 'user', content: 'Old discussion. '.repeat(3000) }, { role: 'assistant', content: 'Old answer.' });
+  await store.save(session);
+  let backupCalls = 0;
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: store,
+    fetchImpl: async (url, options) => {
+      if (url === 'http://backup.test/api/v1/models')
+        return Response.json({ models: [{ key: 'backup', loaded_instances: [{ config: { context_length: 8192 } }] }] });
+      if (url.endsWith('/v1/models')) return Response.json({ data: [{ id: url.includes('primary') ? 'model-x' : 'backup' }] });
+      if (!url.endsWith('/chat/completions')) return new Response('', { status: 404 });
+      const request = JSON.parse(options.body);
+      if (url.includes('primary')) {
+        assert.match(JSON.stringify(request.messages), /Old discussion/);
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) });
+      }
+      backupCalls += 1;
+      assert.doesNotMatch(JSON.stringify(request.messages), /Old discussion/);
+      assert.ok(request.max_tokens <= 8192);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'Smaller host completed.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+  const result = await runtime.run({ session, prompt: 'Continue the conversation.' });
+  assert.equal(result.status, 'complete');
+  assert.equal(backupCalls, 1);
+  assert.equal(result.session.routing_decision.factors.context_capacity.context_length, 8192);
 });
 
 test('agent scopes MCP tools to a persisted session selection and allows resetting to all servers', async (t) => {
@@ -788,6 +871,7 @@ test('agent persists routing factors and publishes fallback alternatives at run 
     base_url: 'http://localhost/v1',
     model: 'fallback-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: true,
   };
@@ -1098,6 +1182,7 @@ test('agent probes configured fallback endpoints and skips unavailable models be
     base_url: 'http://wrong-model.test/v1',
     model: 'expected-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: true,
   };
@@ -1106,6 +1191,7 @@ test('agent probes configured fallback endpoints and skips unavailable models be
     base_url: 'http://available.test/v1',
     model: 'remote-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
   };
@@ -1164,6 +1250,7 @@ test('automatic routing falls back after a model exhausts output on hidden reaso
     base_url: 'http://backup.test/v1',
     model: 'backup-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: true,
   };
@@ -1213,6 +1300,7 @@ test('automatic provider failover does not send project context to an unlisted r
     base_url: 'https://remote.example/v1',
     model: 'remote-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
   };
@@ -1267,6 +1355,7 @@ test('agent falls back after a pre-response connection refusal and records the r
     base_url: 'http://backup.test/v1',
     model: 'backup-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
     input_cost_per_million: 2,
@@ -1331,6 +1420,7 @@ test('automatic local failover prefers an already-loaded LM Studio profile', asy
     local: true,
     supports_tools: true,
     context_length: 16000,
+    context_mode: 'manual',
     coding_strength: 10,
     tool_calling_quality: 10,
   };
@@ -1341,6 +1431,7 @@ test('automatic local failover prefers an already-loaded LM Studio profile', asy
     local: true,
     supports_tools: true,
     context_length: 16000,
+    context_mode: 'manual',
     coding_strength: 1,
     tool_calling_quality: 1,
   };
@@ -1406,6 +1497,7 @@ test('automatic local failover preserves the order of an explicit fallback chain
     local: true,
     supports_tools: true,
     context_length: 16000,
+    context_mode: 'manual',
     coding_strength: 10,
     tool_calling_quality: 10,
   };
@@ -1416,6 +1508,7 @@ test('automatic local failover preserves the order of an explicit fallback chain
     local: true,
     supports_tools: true,
     context_length: 16000,
+    context_mode: 'manual',
     coding_strength: 1,
     tool_calling_quality: 1,
   };
@@ -1467,6 +1560,7 @@ test('agent falls back after a transient server response', async (t) => {
     base_url: 'http://backup.test/v1',
     model: 'backup-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
   };
@@ -1579,6 +1673,7 @@ test('agent falls back after a request timeout and charges uncertain provider in
     base_url: 'http://backup.test/v1',
     model: 'backup-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
     input_cost_per_million: 2,
@@ -1703,6 +1798,7 @@ test('agent retries a context-overflow response with an eligible configured fall
     base_url: 'http://backup.test/v1',
     model: 'backup-model',
     context_length: 32000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
   };
@@ -2072,6 +2168,7 @@ test('agent retries a rate-limited model but accounts its input conservatively a
     base_url: 'http://backup.test/v1',
     model: 'backup-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
     input_cost_per_million: 0.2,
@@ -2121,6 +2218,7 @@ test('exhausted rate-limited fallback chain releases failed output reservations'
     base_url: 'http://backup.test/v1',
     model: 'backup-model',
     context_length: 16000,
+    context_mode: 'manual',
     supports_tools: true,
     local: false,
   };

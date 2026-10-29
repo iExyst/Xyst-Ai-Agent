@@ -1,5 +1,6 @@
 import { selectModel, estimateTokens, calculateCost, buildRoutingPrompt, requiresToolsForTask, LIVE_LOOKUP_INTENT } from './router.mjs';
 import { prepareContext, ContextOverflowError } from './context.mjs';
+import { resolveContextCapacity } from '../providers/context-capacity.mjs';
 import { assertModelProvider, createOpenAICompatibleProvider } from '../providers/factory.mjs';
 import { normalizeExactFinalToken, requestedExactFinalToken } from './final-response.mjs';
 import { resolveModelApiKey } from '../config/load.mjs';
@@ -382,6 +383,20 @@ export class AgentRuntime {
     let modelContextLimit;
     let profileOutputLimit;
     let modelOutputLimit;
+    const contextCapacities = new Map();
+    const capacityKey = (profile) => `${profile.base_url}\n${profile.model}`;
+    const profileContextLimit = (profile) => contextCapacities.get(capacityKey(profile))?.context_length || profile.context_length || 8192;
+    const detectProfileContext = async (profile, sessionId) => {
+      const capacity = await resolveContextCapacity(profile, {
+        fetchImpl: this.fetchImpl,
+        signal,
+        apiKey: await resolveModelApiKey(profile, { secretStore: this.secretStore }),
+      });
+      contextCapacities.set(capacityKey(profile), capacity);
+      if (working.routing_decision?.factors) working.routing_decision.factors.context_capacity = capacity;
+      this.#emit({ type: 'context_capacity_selected', session_id: sessionId, model: profile.model, ...capacity });
+      return capacity;
+    };
     let tools = [];
     let allowedToolNames = new Set();
     const refreshBudgetRuntime = () => {
@@ -414,7 +429,7 @@ export class AgentRuntime {
       effectiveRecoveryInputReserve = recoveryInputReserve >= 128 ? recoveryInputReserve : 0;
       maxWorkingInputTokens = maxInputTokens - effectiveRecoveryInputReserve;
       if (modelChoice) {
-        modelContextLimit = modelChoice.config.context_length || maxInputTokens;
+        modelContextLimit = profileContextLimit(modelChoice.config);
         profileOutputLimit = modelChoice.config.max_output_tokens || Math.floor(modelContextLimit * 0.25);
         modelOutputLimit = Math.max(1, Math.min(maxOutputTokens, profileOutputLimit, modelContextLimit - 1));
       }
@@ -489,6 +504,7 @@ export class AgentRuntime {
             reason: 'management_api_unavailable',
           }),
       });
+      await detectProfileContext(profile, sessionId);
       return createModelProvider(this.providerFactory, profile, {
         secretStore: this.secretStore,
         fetchImpl: this.fetchImpl,
@@ -512,7 +528,7 @@ export class AgentRuntime {
         const nextDecision = {
           model: nextChoice.name,
           reason: 'user-requested model change at a safe checkpoint',
-          factors: nextChoice.factors,
+          factors: { ...nextChoice.factors, context_capacity: contextCapacities.get(capacityKey(nextChoice.config)) },
           alternatives: nextChoice.alternatives,
           selected_at: new Date().toISOString(),
         };
@@ -847,7 +863,7 @@ export class AgentRuntime {
     };
     const compactIfNeeded = async () => {
       if (compactionSettings.enabled !== true) return null;
-      const contextWindow = modelChoice.config.context_length || runInputLimit;
+      const contextWindow = profileContextLimit(modelChoice.config);
       const triggerTokens = Math.floor(contextWindow * (compactionSettings.trigger_ratio ?? 0.8));
       const userTurns = working.messages.filter((message) => message.role === 'user').length;
       if (userTurns <= (compactionSettings.keep_recent_turns ?? 2)) return null;
@@ -1186,7 +1202,8 @@ export class AgentRuntime {
       }`;
       const remainingInputBudget = maxWorkingInputTokens - inputTokensThisTurn;
       const modelContextOutputReserve = modelOutputLimit;
-      const contextInputCeiling = Math.min(remainingInputBudget, modelContextLimit - modelContextOutputReserve);
+      const contextHeadroom = modelChoice.config.context_mode === 'manual' ? 0 : Math.min(2048, Math.ceil(modelContextLimit * 0.05));
+      let contextInputCeiling = Math.min(remainingInputBudget, modelContextLimit - modelContextOutputReserve - contextHeadroom);
       let contextLimit = Math.max(0, contextInputCeiling - estimateTokens(turnTools));
       const createPreparedContext = (maxTokens, trimActiveToolHistory = false, dropActiveToolHistory = false) => {
         const preparedContext = prepareContext({
@@ -1537,14 +1554,27 @@ export class AgentRuntime {
             const previousModel = modelChoice.name;
             modelChoice = fallback.choice;
             provider = fallback.provider;
-            modelContextLimit = modelChoice.config.context_length || maxWorkingInputTokens;
+            await detectProfileContext(modelChoice.config, working.id);
+            modelContextLimit = profileContextLimit(modelChoice.config);
             profileOutputLimit = modelChoice.config.max_output_tokens || Math.floor(modelContextLimit * 0.25);
             modelOutputLimit = Math.max(1, Math.min(maxOutputTokens, profileOutputLimit, modelContextLimit - 1));
+            const fallbackHeadroom = modelChoice.config.context_mode === 'manual' ? 0 : Math.min(2048, Math.ceil(modelContextLimit * 0.05));
+            contextInputCeiling = Math.min(remainingInputBudget, modelContextLimit - modelOutputLimit - fallbackHeadroom);
+            contextLimit = Math.max(0, contextInputCeiling - estimateTokens(turnTools));
+            try {
+              const resized = createPreparedContext(contextLimit, true);
+              prepared = resized.prepared;
+              messages = resized.messages;
+              estimatedInput = resized.estimatedInput;
+            } catch (contextError) {
+              if (!(contextError instanceof ContextOverflowError)) throw contextError;
+              return this.#stop(working, 'context_overflow', 'The fallback model host has insufficient context for this request.');
+            }
             working.model = modelChoice.name;
             working.routing_decision = {
               model: modelChoice.name,
               reason: modelChoice.reason,
-              factors: modelChoice.factors,
+              factors: { ...modelChoice.factors, context_capacity: contextCapacities.get(capacityKey(modelChoice.config)) },
               alternatives: modelChoice.alternatives,
               availability: modelChoice.availability,
               selected_at: new Date().toISOString(),

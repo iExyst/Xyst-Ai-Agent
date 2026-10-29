@@ -3292,6 +3292,7 @@ function publicSettings(config) {
           'base_url',
           'model',
           'context_length',
+          'context_mode',
           'timeout_ms',
           'reasoning_effort',
           'prompt_cache_enabled',

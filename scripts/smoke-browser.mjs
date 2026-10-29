@@ -2162,6 +2162,10 @@ async function updateModelCapabilitySettings(protocol) {
         .find((item) => item.querySelector('legend')?.textContent === 'approval-smoke');
       if (!profile) return false;
       const context = profile.querySelector('[aria-label="approval-smoke context length in tokens"]');
+      const contextMode = profile.querySelector('[aria-label="approval-smoke context sizing"]');
+      if (!contextMode || contextMode.value !== 'auto') return false;
+      contextMode.value = 'manual';
+      contextMode.dispatchEvent(new Event('change', { bubbles: true }));
       const tools = profile.querySelector('[aria-label="approval-smoke Supports tool calls"]');
       const vision = profile.querySelector('[aria-label="approval-smoke Supports image input"]');
     const promptCache = profile.querySelector('[aria-label="approval-smoke Provider supports prompt cache controls"]');
@@ -2224,6 +2228,7 @@ async function updateModelCapabilitySettings(protocol) {
           profile.querySelector('[aria-label="approval-smoke Routing priority · 0–1000 (lower first)"]'),
         ];
         return {
+          contextMode: profile.querySelector('[aria-label="approval-smoke context sizing"]')?.value,
           contextLength: inputs[0]?.value || '',
           supportsTools: inputs[1]?.value || '',
           supportsVision: inputs[2]?.value || '',
@@ -2241,6 +2246,7 @@ async function updateModelCapabilitySettings(protocol) {
     lastSettings = settings;
     if (
       settings?.contextLength === '16384' &&
+      settings.contextMode === 'manual' &&
       settings.supportsTools === 'true' &&
       settings.supportsVision === 'true' &&
       settings.promptCacheEnabled === 'true' &&

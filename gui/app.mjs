@@ -1611,6 +1611,15 @@ async function submitPrompt(prompt) {
         const activity = appendActivity(`Loading local model · ${data.model}`, 'working');
         modelLoadRows.set(data.model, activity);
       }
+      if (event.type === 'context_capacity_selected') {
+        const mode = data.automatic ? 'Automatic context' : 'Manual context';
+        const note = !data.automatic
+          ? 'saved manual limit'
+          : data.source === 'configured-fallback'
+            ? 'conservative fallback · host capacity unavailable'
+            : 'model host capacity';
+        appendActivity(`${mode} · ${Number(data.context_length).toLocaleString()} tokens · ${note}`, 'complete');
+      }
       if (event.type === 'model_load_finished' || event.type === 'model_load_failed' || event.type === 'model_load_skipped') {
         const activity = modelLoadRows.get(data.model);
         if (activity) {
@@ -2292,15 +2301,34 @@ function createSettingsEditor(settings, usage) {
       profile.append(label);
       fields[key] = input;
     }
+    const contextModeLabel = node('label', 'budget-setting');
+    contextModeLabel.append(node('span', '', 'Context sizing'));
+    const contextMode = node('select', 'data-input');
+    for (const [value, text] of [
+      ['auto', 'Automatic · follow model host'],
+      ['manual', 'Manual limit'],
+    ]) {
+      const option = node('option', '', text);
+      option.value = value;
+      contextMode.append(option);
+    }
+    contextMode.value = definition.context_mode || 'auto';
+    contextMode.setAttribute('aria-label', `${profileName} context sizing`);
+    contextMode.addEventListener('change', () => {
+      contextMode.dataset.dirty = 'true';
+    });
+    contextModeLabel.append(contextMode);
+    profile.append(contextModeLabel);
+    fields.context_mode = contextMode;
     const contextLabel = node('label', 'budget-setting');
-    contextLabel.append(node('span', '', 'Context length · tokens'));
+    contextLabel.append(node('span', '', 'Manual limit / fallback · tokens'));
     const contextInput = node('input', 'data-input');
     contextInput.type = 'number';
     contextInput.min = '1';
     contextInput.max = '10000000';
     contextInput.step = '1';
     contextInput.value = definition.context_length ?? '';
-    contextInput.placeholder = 'Not configured';
+    contextInput.placeholder = 'Automatic fallback: 8192';
     contextInput.setAttribute('aria-label', `${profileName} context length in tokens`);
     contextInput.addEventListener('change', () => {
       contextInput.dataset.dirty = 'true';
@@ -2308,6 +2336,13 @@ function createSettingsEditor(settings, usage) {
     contextLabel.append(contextInput);
     profile.append(contextLabel);
     fields.context_length = contextInput;
+    profile.append(
+      node(
+        'p',
+        'muted-copy',
+        'Automatic uses the model host’s loaded capacity, up to your 250,000-token ceiling. Reply space and safety headroom are reserved inside that limit. Without host capacity data, the saved value is used with a conservative 8,192-token ceiling.',
+      ),
+    );
     const reasoningLabel = node('label', 'budget-setting');
     reasoningLabel.append(node('span', '', 'Reasoning effort'));
     const reasoningSelect = node('select', 'data-input');
@@ -2524,6 +2559,7 @@ function createSettingsEditor(settings, usage) {
     saveProfile.type = 'button';
     saveProfile.addEventListener('click', async () => {
       const patch = {};
+      if (fields.context_mode.dataset.dirty === 'true') patch.context_mode = fields.context_mode.value;
       for (const key of ['base_url', 'model']) if (fields[key].dataset.dirty === 'true') patch[key] = fields[key].value.trim();
       if (fields.context_length.dataset.dirty === 'true') {
         const rawValue = fields.context_length.value.trim();

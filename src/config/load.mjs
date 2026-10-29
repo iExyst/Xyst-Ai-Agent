@@ -463,6 +463,8 @@ export function validateConfig(config) {
     if (typeof model.model !== 'string' || !model.model.trim()) throw new TypeError(`models.${name}.model must be a non-empty string`);
     if (model.context_length !== undefined && (!Number.isInteger(model.context_length) || model.context_length < 1))
       throw new TypeError(`models.${name}.context_length must be a positive integer`);
+    if (model.context_mode !== undefined && !['auto', 'manual'].includes(model.context_mode))
+      throw new TypeError(`models.${name}.context_mode must be auto or manual`);
     if (
       model.temperature !== undefined &&
       (typeof model.temperature !== 'number' || !Number.isFinite(model.temperature) || model.temperature < 0 || model.temperature > 2)

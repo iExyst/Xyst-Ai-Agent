@@ -324,6 +324,7 @@ export function validateRuntimeOverrides(value) {
       'api_key_env',
       'api_key_secret',
       'context_length',
+      'context_mode',
       'timeout_ms',
       'retry_attempts',
       'reasoning_effort',
@@ -386,6 +387,8 @@ export function validateRuntimeOverrides(value) {
           (!Number.isSafeInteger(profile[key]) || profile[key] < 1 || profile[key] > 10_000_000)
         )
           throw new TypeError(`models.${name}.${key} must be a positive bounded integer`);
+      if (profile.context_mode !== undefined && profile.context_mode !== null && !['auto', 'manual'].includes(profile.context_mode))
+        throw new TypeError(`models.${name}.context_mode must be auto or manual`);
       if (
         'retry_attempts' in profile &&
         profile.retry_attempts !== null &&
