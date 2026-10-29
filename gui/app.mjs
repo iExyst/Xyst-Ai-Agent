@@ -223,6 +223,12 @@ function selectPrimaryTab(tab) {
 function showSettingsCategory() {
   for (const panel of document.querySelectorAll('#inline-settings-content [data-settings-panel]')) {
     panel.hidden = panel.dataset.settingsPanel !== selectedSettingsCategory;
+    if (!panel.hidden) {
+      document.getElementById('settings-page-title').textContent = panel.querySelector('h3').textContent;
+      document.getElementById('settings-page-description').textContent = panel.querySelector(
+        '.settings-category-heading .muted-copy',
+      ).textContent;
+    }
   }
   for (const button of document.querySelectorAll('#control-room-nav [data-settings-category]')) {
     button.setAttribute(
@@ -5153,6 +5159,15 @@ elements.new_session.addEventListener('click', () => {
   resetTimeline();
   renderSessions([...sessionsById.values()]);
   elements.prompt_input.focus();
+});
+document.getElementById('brand-home').addEventListener('click', () => {
+  if (runController) {
+    selectPrimaryTab('agent');
+    return;
+  }
+  elements.new_session.click();
+  elements.conversation_title.textContent = 'Control room';
+  elements.timeline.scrollTop = 0;
 });
 elements.refresh_sessions.addEventListener('click', () => void refreshSessions().catch(showError));
 elements.import_session.addEventListener('click', () => elements.import_session_file.click());

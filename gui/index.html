@@ -15,7 +15,7 @@
     <div id="app-frame" class="app-frame">
       <aside class="sidebar" aria-label="Workspace and sessions">
         <div class="brand-row">
-          <img class="brand-mark" src="/app/brand-icon.png" alt="Xyst AI Assistant">
+          <button id="brand-home" class="brand-home" type="button" aria-label="Return to control room" title="Control room"><svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true"><defs><symbol id="xyst-symbol" viewBox="0 0 40 40"><path d="M20 5v5m-4-5h8M10 16l-4 3v9l4 3m20-15 4 3v9l-4 3"/><rect x="10" y="11" width="20" height="23" rx="8"/><path d="m14 21 3-2m9 2-3-2m-8 9h10"/></symbol></defs><use href="#xyst-symbol"/></svg></button>
           <div class="brand-copy"><strong>XYST</strong><span>CONTROL ROOM</span></div>
           <span id="connection-indicator" class="connection-dot" title="Connecting" aria-label="Connecting"></span>
         </div>
@@ -44,7 +44,7 @@
           <button id="settings-button" type="button" aria-controls="settings-view">⚙ <span>Settings</span></button>
         </nav>
         <footer class="sidebar-footer">
-          <div class="workspace-avatar" aria-hidden="true"><img src="/app/brand-icon.png" alt=""></div>
+          <div class="workspace-avatar" aria-hidden="true"><svg viewBox="0 0 40 40"><use href="#xyst-symbol"/></svg></div>
           <div class="workspace-copy"><strong>Current workspace</strong><span id="workspace-status">Local · connecting</span></div>
           <span class="local-lock" title="Loopback service" aria-label="Loopback service">⌑</span>
         </footer>
@@ -134,9 +134,9 @@
         </section>
         </div>
 
-        <section id="settings-view" class="settings-view" role="tabpanel" aria-labelledby="settings-button" hidden>
+        <section id="settings-view" class="settings-view" role="region" aria-labelledby="settings-page-title" hidden>
           <div class="settings-page-heading">
-            <div><p class="eyebrow">XYST CONTROL ROOM</p><h1>Settings</h1><p>Manage models, agent behavior, safety, appearance, and data.</p></div>
+            <div><p class="eyebrow">XYST CONTROL ROOM</p><h1 id="settings-page-title">Models</h1><p id="settings-page-description"></p></div>
           </div>
           <div id="inline-settings-content" class="inline-settings-content"></div>
           <div id="settings-legacy-cards" hidden>

@@ -1189,6 +1189,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 #control-room-nav #settings-button { border-top: 1px solid var(--line); margin-top: 5px; }
 @media (max-width: 1000px) { .home-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 820px) { .home-work-grid { grid-template-columns: minmax(0, 1fr); } }
+.inline-settings-content .settings-category-heading { display: none; }
+.brand-home { display: grid; place-items: center; width: 42px; height: 42px; flex: none; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--brand-mint); cursor: pointer; }
+.brand-home:hover { border-color: var(--brand-mint); background: var(--surface-active); }
+.brand-home .brand-mark { display: block; width: 34px; height: 34px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; border: 0; background: transparent; box-shadow: none; }
+.workspace-avatar { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; color: var(--brand-mint); }
+.workspace-avatar svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .settings-category-content > .settings-page-card { grid-column: 1 / -1; width: 100%; margin: 0; }
 .settings-category-content .settings-card-heading { gap: 12px; }
 .settings-category-content .settings-card-heading h2 { font-size: 14px; }
