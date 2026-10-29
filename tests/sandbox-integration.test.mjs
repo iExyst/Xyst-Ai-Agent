@@ -72,14 +72,25 @@ test('Bubblewrap isolates host files and networking while allowing workspace wri
   assert.equal(write.exitCode, 0, write.stderr);
   assert.equal(await fs.readFile(path.join(workspace, 'sandbox-write-probe'), 'utf8'), '');
 
-  const stateProbe = await runIsolatedProcess('/bin/sh', ['-c', 'test ! -e /workspace/.agent/approvals/rules.json && mkdir -p /workspace/.agent/approvals && printf forged > /workspace/.agent/approvals/rules.json && cat /workspace/.agent/approvals/rules.json'], {
-    workspaceRoot: workspace,
-    timeoutMs: 10_000,
-  });
+  const stateProbe = await runIsolatedProcess(
+    '/bin/sh',
+    [
+      '-c',
+      'test ! -e /workspace/.agent/approvals/rules.json && mkdir -p /workspace/.agent/approvals && printf forged > /workspace/.agent/approvals/rules.json && cat /workspace/.agent/approvals/rules.json',
+    ],
+    {
+      workspaceRoot: workspace,
+      timeoutMs: 10_000,
+    },
+  );
   assert.equal(stateProbe.sandboxed, true);
   assert.equal(stateProbe.exitCode, 0, stateProbe.stderr);
   assert.equal(stateProbe.stdout, 'forged', 'the process should see only its private temporary state view');
-  assert.equal(await fs.readFile(approvalState, 'utf8'), '{"rules":["host-approval-canary"]}', 'sandbox writes must not alter host approval policy');
+  assert.equal(
+    await fs.readFile(approvalState, 'utf8'),
+    '{"rules":["host-approval-canary"]}',
+    'sandbox writes must not alter host approval policy',
+  );
 
   const readOnlyTarget = path.join(workspace, 'sandbox-read-only-probe');
   const readOnlyWrite = await runIsolatedProcess('/usr/bin/touch', ['/workspace/sandbox-read-only-probe'], {
@@ -234,7 +245,7 @@ test('Windows AppContainer helper reaches the shared Node process path and fails
 
   const stateProbeScript = [
     "$p = Join-Path $PWD '.agent\\approvals\\rules.json'",
-    "try { Get-Content -LiteralPath $p -ErrorAction Stop; exit 21 } catch {}",
+    'try { Get-Content -LiteralPath $p -ErrorAction Stop; exit 21 } catch {}',
     "try { Set-Content -LiteralPath $p -Value 'forged' -ErrorAction Stop; exit 22 } catch {}",
     "Write-Output 'approval-state-protected'",
   ].join('; ');
@@ -246,7 +257,11 @@ test('Windows AppContainer helper reaches the shared Node process path and fails
   });
   assert.equal(stateProbe.exitCode, 0, stateProbe.stderr);
   assert.match(stateProbe.stdout, /approval-state-protected/);
-  assert.equal(await fs.readFile(approvalState, 'utf8'), '{"rules":["host-approval-canary"]}', 'AppContainer must not read or mutate saved approval policy');
+  assert.equal(
+    await fs.readFile(approvalState, 'utf8'),
+    '{"rules":["host-approval-canary"]}',
+    'AppContainer must not read or mutate saved approval policy',
+  );
 
   const readOnlyFile = path.join(workspace, 'read-only-write.txt');
   const readOnlyWrite = await runIsolatedProcess('cmd.exe', ['/d', '/c', 'echo denied > read-only-write.txt'], {
