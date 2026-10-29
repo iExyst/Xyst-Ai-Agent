@@ -456,8 +456,19 @@ function normalizeSseLineEndings(frame) {
 function validateStreamEvent(event, state) {
   if (!event || typeof event !== 'object' || Array.isArray(event))
     throw new ProviderError('Provider returned an invalid event in its stream', { code: 'INVALID_STREAM' });
-  if (event.error !== undefined && event.error !== null)
+  if (event.error !== undefined && event.error !== null) {
+    const detail = (
+      typeof event.error === 'string' ? event.error : typeof event.error?.message === 'string' ? event.error.message : ''
+    ).slice(0, MAX_ERROR_RESPONSE_BYTES);
+    if (indicatesContextOverflow(detail)) throw new ProviderError('Provider context limit was exceeded', { code: 'CONTEXT_OVERFLOW' });
+    if (
+      /engine protocol predict request failed|inference (?:engine|server).*(?:failed|unavailable)|model (?:is )?(?:not loaded|unloaded)/i.test(
+        detail,
+      )
+    )
+      throw new ProviderError('The model inference engine is temporarily unavailable', { code: 'PROVIDER_UNAVAILABLE', retryable: true });
     throw new ProviderError('Provider returned an error event in its stream', { code: 'STREAM_FAILED' });
+  }
   const hasUsage = event.usage && typeof event.usage === 'object' && !Array.isArray(event.usage);
   if (event.choices !== undefined && !Array.isArray(event.choices))
     throw new ProviderError('Provider returned an invalid event in its stream', { code: 'INVALID_STREAM' });

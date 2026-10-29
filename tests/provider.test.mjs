@@ -1416,3 +1416,32 @@ test('provider stream error events fail without exposing provider-supplied error
     );
   }
 });
+
+test('streamed inference engine failures and context errors retain recovery codes without exposing details', async () => {
+  for (const [message, code, retryable] of [
+    ['Engine protocol predict request failed: fetch failed. private detail', 'PROVIDER_UNAVAILABLE', true],
+    ['maximum context length exceeded: private detail', 'CONTEXT_OVERFLOW', false],
+  ]) {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: 'http://localhost/v1',
+      model: 'x',
+      fetchImpl: async () =>
+        new Response(`data: ${JSON.stringify({ error: { message } })}\n\n`, {
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+    });
+    await assert.rejects(
+      async () => {
+        for await (const _event of provider.stream([])) {
+          /* consume */
+        }
+      },
+      (error) => {
+        assert.equal(error.code, code);
+        assert.equal(error.retryable, retryable);
+        assert.doesNotMatch(error.message, /private detail/);
+        return true;
+      },
+    );
+  }
+});
