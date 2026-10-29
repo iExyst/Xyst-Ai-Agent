@@ -17,6 +17,7 @@ const TOOLS = new Set([
   'search_files',
   'semantic_search',
   'web_search',
+  'web_fetch',
   'delegate_task',
   'write_file',
   'edit_file',

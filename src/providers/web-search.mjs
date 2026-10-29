@@ -4,6 +4,7 @@ const ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const WIKIPEDIA_ENDPOINT = 'https://en.wikipedia.org/w/api.php';
 const GDELT_ENDPOINT = 'https://api.gdeltproject.org/api/v2/doc/doc';
 const GOOGLE_NEWS_RSS_ENDPOINT = 'https://news.google.com/rss/search';
+const DUCKDUCKGO_ENDPOINT = 'https://html.duckduckgo.com/html/';
 const MAX_QUERY_LENGTH = 500;
 const MAX_RESULTS = 10;
 const MAX_RESULT_TEXT = 1200;
@@ -102,17 +103,18 @@ export class KeylessFallbackWebSearchProvider {
 
 /** Keyless live search across recent global news and reference sources. */
 export class AutomaticWebSearchProvider {
-  constructor({ news, reference, maxResults = MAX_RESULTS } = {}) {
+  constructor({ general, news, reference, maxResults = MAX_RESULTS } = {}) {
     if (!news || !reference) throw new TypeError('News and reference search providers are required');
     this.news = Array.isArray(news) ? news : [news];
     if (this.news.some((provider) => !provider || typeof provider.search !== 'function'))
       throw new TypeError('Every news search provider must implement search');
     this.reference = reference;
+    this.general = general;
     this.maxResults = Math.min(MAX_RESULTS, Math.max(1, maxResults));
   }
 
   async search(query, options) {
-    const providers = [...this.news, this.reference];
+    const providers = [...(this.general ? [this.general] : []), ...this.news, this.reference];
     const settled = await Promise.allSettled(providers.map((provider) => provider.search(query, options)));
     const available = settled.filter((result) => result.status === 'fulfilled').map((result) => result.value);
     if (!available.length)
@@ -143,6 +145,108 @@ export class AutomaticWebSearchProvider {
           : [],
       ),
     };
+  }
+}
+
+/** General public web results, without a required API key. */
+export class DuckDuckGoWebSearchProvider {
+  constructor({ config = {}, fetchImpl = fetch, now = Date.now } = {}) {
+    this.config = config;
+    this.fetchImpl = fetchImpl;
+    this.now = now;
+    this.sourceName = 'duckduckgo';
+    this.requestTimes = [];
+  }
+
+  async search(query, { signal, timeoutMs = this.config.timeout_ms || 10_000 } = {}) {
+    validateQuery(query, signal);
+    enforceRequestRate(this, 'Web search', this.now());
+    const url = new URL(DUCKDUCKGO_ENDPOINT);
+    url.searchParams.set('q', query.trim());
+    const response = await this.fetchImpl(url, {
+      headers: { accept: 'text/html', 'user-agent': 'Xyst-AI-Assistant/1.0 (public web search)' },
+      signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)].filter(Boolean)),
+      redirect: 'error',
+    });
+    if (!response.ok) throw new Error(`Public web search failed with HTTP ${response.status}`);
+    const html = await readTextLimited(response, MAX_RSS_RESPONSE_BYTES);
+    if (/anomaly\.js|challenge-form/i.test(html)) throw new Error('Public web search requires browser verification; trying other sources');
+    const results = [];
+    const seen = new Set();
+    const anchors = [...html.matchAll(/<a\b[^>]*class=["'][^"']*\bresult__a\b[^"']*["'][^>]*>[\s\S]*?<\/a>/gi)];
+    for (let index = 0; index < anchors.length; index += 1) {
+      const anchor = anchors[index];
+      const href = anchor[0].match(/\bhref=["']([^"']+)["']/i)?.[1];
+      if (!href) continue;
+      let target;
+      try {
+        const link = new URL(decodeXml(href), DUCKDUCKGO_ENDPOINT);
+        target = safeResultUrl(link.hostname === 'duckduckgo.com' && link.pathname === '/l/' ? link.searchParams.get('uddg') : link.href);
+      } catch {
+        continue;
+      }
+      if (!target || seen.has(target)) continue;
+      const title = cleanText(decodeXml(stripHtml(anchor[0])), 300);
+      if (!title) continue;
+      const section = html.slice(anchor.index + anchor[0].length, anchors[index + 1]?.index ?? html.length);
+      const snippet =
+        section.match(/<(?:a|td|div)\b[^>]*class=["'][^"']*\bresult__snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|td|div)>/i)?.[1] || '';
+      seen.add(target);
+      results.push({ title, url: target, snippet: cleanText(decodeXml(stripHtml(snippet)), MAX_RESULT_TEXT) });
+      if (results.length >= Math.min(MAX_RESULTS, this.config.max_results || MAX_RESULTS)) break;
+    }
+    return { provider: 'duckduckgo', query: query.trim(), results };
+  }
+}
+
+/** Read source pages and JSON APIs without shell quoting or parsing commands. */
+export class WebPageProvider {
+  constructor({ fetchImpl = fetch } = {}) {
+    this.fetchImpl = fetchImpl;
+  }
+
+  async read(url, { signal, timeoutMs = 10_000 } = {}) {
+    let target = safeResultUrl(url);
+    if (!target) throw new TypeError('url must be an HTTPS URL without embedded credentials (maximum 2048 characters)');
+    const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)].filter(Boolean));
+    for (let redirects = 0; redirects <= 3; redirects += 1) {
+      const response = await this.fetchImpl(target, {
+        headers: {
+          accept: 'text/html, application/json, text/plain, application/xml',
+          'user-agent': 'Xyst-AI-Assistant/1.0 (source reader)',
+        },
+        signal: requestSignal,
+        redirect: 'manual',
+      });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get('location');
+        await response.body?.cancel();
+        target = location ? safeResultUrl(new URL(location, target).href) : null;
+        if (!target || redirects === 3) throw new Error('Source page returned an unsupported redirect');
+        continue;
+      }
+      if (!response.ok) throw new Error(`Source page request failed with HTTP ${response.status}`);
+      const type = response.headers.get('content-type') || '';
+      if (!/^(?:text\/|application\/(?:json|[^; ]+\+json|xml|[^; ]+\+xml))(?:[^\r\n]*)$/i.test(type)) {
+        await response.body?.cancel();
+        throw new Error('Source reader supports text, HTML, XML, and JSON; this source requires a different reader');
+      }
+      const body = await readTextLimited(response, MAX_RSS_RESPONSE_BYTES);
+      const isHtml = /text\/html/i.test(type);
+      const title = isHtml ? cleanText(decodeXml(stripHtml(body.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '')), 300) : '';
+      const text = isHtml ? decodeXml(stripHtml(body.replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, ''))) : body;
+      const content = text
+        .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return {
+        url: target,
+        title,
+        fetched_at: new Date().toISOString(),
+        content: content.slice(0, 12_000),
+        truncated: content.length > 12_000,
+      };
+    }
   }
 }
 

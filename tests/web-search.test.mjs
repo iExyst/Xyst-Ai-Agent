@@ -3,15 +3,93 @@ import assert from 'node:assert/strict';
 import {
   AutomaticWebSearchProvider,
   BraveWebSearchProvider,
+  DuckDuckGoWebSearchProvider,
   GdeltWebSearchProvider,
   GoogleNewsRssProvider,
   KeylessFallbackWebSearchProvider,
   WikipediaWebSearchProvider,
+  WebPageProvider,
 } from '../src/providers/web-search.mjs';
 import { createBuiltinTools } from '../src/tools/builtins.mjs';
 import { TOOL_DEFINITIONS, validateArguments } from '../src/tools/schemas.mjs';
 
 const webConfig = { enabled: true, provider: 'brave', api_key_env: 'BRAVE_TEST_KEY', max_results: 2, timeout_ms: 2000 };
+
+test('source reader follows bounded HTTPS redirects and extracts page text and structured data', async () => {
+  const visited = [];
+  const provider = new WebPageProvider({
+    fetchImpl: async (url, options) => {
+      visited.push(url);
+      assert.equal(options.redirect, 'manual');
+      assert.equal(options.headers.authorization, undefined);
+      if (visited.length === 1) return new Response(null, { status: 302, headers: { location: '/source' } });
+      return new Response(
+        '<title>Official &amp; current</title><style>hide</style><script>doEvil()</script><main>Verified <b>facts</b>.</main>',
+        { headers: { 'content-type': 'text/html' } },
+      );
+    },
+  });
+  const page = await provider.read('https://example.com/start');
+  assert.deepEqual(visited, ['https://example.com/start', 'https://example.com/source']);
+  assert.equal(page.title, 'Official & current');
+  assert.match(page.content, /Verified facts/);
+  assert.doesNotMatch(page.content, /doEvil|hide/);
+  assert.equal(page.truncated, false);
+  assert.ok(Number.isFinite(Date.parse(page.fetched_at)));
+  const json = new WebPageProvider({ fetchImpl: async () => Response.json({ temperature: 12 }) });
+  assert.match((await json.read('https://example.com/api')).content, /"temperature":12/);
+  assert.equal(TOOL_DEFINITIONS.web_fetch.approval, 'ask');
+  assert.throws(() => validateArguments(TOOL_DEFINITIONS.web_fetch.parameters, '{}'), /url is required/);
+});
+
+test('source reader rejects unsafe redirects, unsupported formats and oversized responses', async () => {
+  const redirect = new WebPageProvider({
+    fetchImpl: async () => new Response(null, { status: 302, headers: { location: 'http://example.com/' } }),
+  });
+  await assert.rejects(redirect.read('https://example.com/'), /unsupported redirect/);
+  await assert.rejects(redirect.read('https://user:pass@example.com/'), /without embedded credentials/);
+  await assert.rejects(redirect.read('file:///etc/passwd'), /HTTPS/);
+  const loop = new WebPageProvider({ fetchImpl: async () => new Response(null, { status: 302, headers: { location: '/loop' } }) });
+  await assert.rejects(loop.read('https://example.com/'), /unsupported redirect/);
+  const binary = new WebPageProvider({ fetchImpl: async () => new Response('binary', { headers: { 'content-type': 'image/png' } }) });
+  await assert.rejects(binary.read('https://example.com/'), /different reader/);
+  const large = new WebPageProvider({
+    fetchImpl: async () => new Response('x'.repeat(1024 * 1024 + 1), { headers: { 'content-type': 'text/plain' } }),
+  });
+  await assert.rejects(large.read('https://example.com/'), /response limit/);
+});
+
+test('general web search returns source links and snippets without a key and bounds untrusted results', async () => {
+  let calls = 0;
+  const provider = new DuckDuckGoWebSearchProvider({
+    config: { max_results: 2 },
+    fetchImpl: async (url, options) => {
+      calls += 1;
+      assert.equal(new URL(url).searchParams.get('q'), 'official documentation');
+      assert.equal(options.headers.authorization, undefined);
+      assert.equal(options.redirect, 'error');
+      return new Response(`<html>
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fnodejs.org%2Fen%2Fdocs&amp;rut=x">Node.js &amp; docs</a>
+      <a class="result__snippet">Read the <b>official</b> documentation.</a>
+      <a class="result__a" href="javascript:alert(1)">Unsafe</a>
+      <a class="result__a" href="https://user:password@example.com/">Credential</a>
+      <a class="result__a" href="https://nodejs.org/en/docs">Duplicate</a>
+      <a class="result__a" href="https://example.org/">Second</a>
+      <a class="result__a" href="https://example.net/">Over limit</a></html>`);
+    },
+  });
+  const result = await provider.search('official documentation');
+  assert.equal(calls, 1);
+  assert.deepEqual(result.results, [
+    { title: 'Node.js & docs', url: 'https://nodejs.org/en/docs', snippet: 'Read the official documentation.' },
+    { title: 'Second', url: 'https://example.org/', snippet: '' },
+  ]);
+  await assert.rejects(provider.search(''), /query must contain/);
+  const challenged = new DuckDuckGoWebSearchProvider({ fetchImpl: async () => new Response('<form id="challenge-form">Verify</form>') });
+  await assert.rejects(challenged.search('test'), /browser verification/);
+  const oversized = new DuckDuckGoWebSearchProvider({ fetchImpl: async () => new Response('x'.repeat(1024 * 1024 + 1)) });
+  await assert.rejects(oversized.search('test'), /response limit/);
+});
 
 test('Brave adapter sends an approved query with a secret header and returns bounded safe result fields', async () => {
   let request;

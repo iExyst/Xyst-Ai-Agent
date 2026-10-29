@@ -1702,7 +1702,6 @@ test('agent fits optional tool schemas to a small model context and restores the
   assert.equal(firstTools.includes('computer_control'), false);
   assert.equal(firstTools.includes('start_background_process'), false);
   assert.deepEqual(events.find((event) => event.type === 'context_trimmed')?.dropped_tools, [
-    'get_weather',
     'computer_control',
     'start_background_process',
     'list_background_processes',
@@ -1716,6 +1715,32 @@ test('agent fits optional tool schemas to a small model context and restores the
   const nextRunTools = requests[1].tools.map((tool) => tool.function.name);
   assert.ok(nextRunTools.includes('computer_control'));
   assert.ok(nextRunTools.includes('start_background_process'));
+});
+
+test('agent keeps internet tools available without lookup keywords in a small model context', async (t) => {
+  const root = await createTempDirectory('xyst-agent-always-internet-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.models.local.context_length = 8192;
+  settings.budgets.max_input_tokens = 16_000;
+  settings.web_search = { enabled: true, provider: 'automatic' };
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: new SessionStore(root),
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      const names = request.tools.map((tool) => tool.function.name);
+      assert.ok(names.includes('web_search'));
+      assert.ok(names.includes('web_fetch'));
+      assert.ok(names.includes('get_weather'));
+      assert.match(request.messages[0].content, /You may decide to search even when the user did not explicitly ask/);
+      assert.equal(request.tool_choice, undefined);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'Hello.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+  assert.equal((await runtime.run({ prompt: 'Hello there.' })).status, 'complete');
 });
 
 test('agent retains lookup tools when a short follow-up supplies the missing location or topic', async (t) => {
@@ -2967,6 +2992,10 @@ test('agent falls back from keyless Brave to Google News when GDELT is unavailab
         assert.equal(options.headers['x-subscription-token'], undefined);
         throw new Error('GDELT temporarily unavailable');
       }
+      if (String(url).startsWith('https://html.duckduckgo.com/')) {
+        webRequests += 1;
+        return new Response('temporarily unavailable', { status: 503 });
+      }
       if (String(url).startsWith('https://news.google.com/rss/search')) {
         webRequests += 1;
         assert.equal(options.headers.authorization, undefined);
@@ -3014,7 +3043,7 @@ test('agent falls back from keyless Brave to Google News when GDELT is unavailab
   const result = await runtime.run({ prompt: 'What is the latest stable Node.js release?' });
   assert.equal(result.status, 'complete');
   assert.equal(modelRequests.length, 2);
-  assert.equal(webRequests, 4, 'GDELT, Google News fallback, reference search, and extract request');
+  assert.equal(webRequests, 5, 'general web, GDELT, Google News fallback, reference search, and extract request');
   assert.equal(modelRequests[0].tool_choice, 'required');
   assert.equal(modelRequests[0].max_tokens, 512, 'the forced lookup turn should reserve only a short tool-call response');
   const initialSearchPolicy = modelRequests[0].messages.find((message) => message.role === 'system')?.content || '';

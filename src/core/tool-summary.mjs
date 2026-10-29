@@ -33,6 +33,8 @@ export function summarizeToolResult(tool, result) {
     return `Child task ${status}; ${paths} changed paths reported.`;
   }
   if (tool === 'web_search' && Array.isArray(value.results)) return `Found ${value.results.length} results.`;
+  if (tool === 'web_fetch' && typeof value.content === 'string')
+    return `Read ${value.content.length} characters from source${value.truncated ? ' (truncated)' : ''}.`;
 
   return 'Completed; result is in the conversation.';
 }

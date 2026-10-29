@@ -26,6 +26,7 @@ export function decideToolPermission(tool, args, { shellEnabled = false, unrestr
 
 function summarize(name, args) {
   if (name === 'web_search') return `Send this query to the configured web search provider: ${JSON.stringify(args.query)}`;
+  if (name === 'web_fetch') return `Read this source URL: ${JSON.stringify(redactSecrets(args.url))}`;
   if (name === 'semantic_search')
     return `Send redacted workspace text and this query to the configured embedding service: ${JSON.stringify(args.query)}`;
   if (name === 'delegate_task') return `Create a separate Git worktree and delegate: ${JSON.stringify(args.task.slice(0, 240))}`;

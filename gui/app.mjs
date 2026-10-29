@@ -3084,7 +3084,7 @@ function createSettingsEditor(settings, usage) {
   webSearchProviderLabel.append(node('span', '', 'Search source'));
   const webSearchProvider = node('select', 'data-picker');
   for (const [value, label] of [
-    ['automatic', 'Automatic · live news + references, no API key'],
+    ['automatic', 'Automatic · web, news & references, no API key'],
     ['wikipedia', 'Wikipedia · free, no API key'],
     ['brave', 'Brave Search · broader web, optional API key'],
   ]) {
@@ -3116,7 +3116,7 @@ function createSettingsEditor(settings, usage) {
     'muted-copy',
     settings.web_search?.credential_configured
       ? 'A Brave credential reference is configured. Enter a new key only to replace it. If the key is unavailable or rejected, Xyst switches to keyless search automatically.'
-      : 'No Brave key is configured. Automatic live news and reference lookups work without one; add a Brave key only for broader web coverage.',
+      : 'No Brave key is configured. Automatic web, news, and reference lookups work without one; add a Brave key to use Brave Search.',
   );
   const updateWebSearchProviderFields = () => {
     const needsCredential = webSearchProvider.value === 'brave';
@@ -3125,7 +3125,7 @@ function createSettingsEditor(settings, usage) {
     webSearchState.hidden = !needsCredential;
     webSearchEnabledLabel.lastChild.textContent = needsCredential
       ? 'Enable live lookups; use Brave when its key is available'
-      : 'Enable automatic keyless news and reference lookups';
+      : 'Enable automatic web, news, and reference lookups';
   };
   webSearchProvider.addEventListener('change', () => {
     webSearchProvider.dataset.dirty = 'true';

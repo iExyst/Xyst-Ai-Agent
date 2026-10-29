@@ -26,6 +26,7 @@ export function createBuiltinTools({
   config = {},
   processManager = null,
   webSearchProvider = null,
+  webPageProvider = null,
   weatherProvider = null,
   subagentManager = null,
   semanticIndex = null,
@@ -46,6 +47,7 @@ export function createBuiltinTools({
     TOOL_DEFINITIONS.edit_file,
   ];
   if (config.web_search?.enabled === true && webSearchProvider) definitions.splice(3, 0, TOOL_DEFINITIONS.web_search);
+  if (config.web_search?.enabled === true && webPageProvider) definitions.splice(3, 0, TOOL_DEFINITIONS.web_fetch);
   if (weatherProvider) definitions.splice(3, 0, TOOL_DEFINITIONS.get_weather);
   if (config.subagents?.enabled === true && subagentManager)
     definitions.splice(3, 0, TOOL_DEFINITIONS.delegate_task, TOOL_DEFINITIONS.retry_subagent_task);
@@ -100,6 +102,7 @@ export function createBuiltinTools({
         timeoutMs: resolveToolTimeoutMs(TOOL_DEFINITIONS.web_search, config),
       }),
     get_weather: async (args, context) => weatherProvider.getWeather(args.location, { signal: context.signal }),
+    web_fetch: async (args, context) => webPageProvider.read(args.url, { signal: context.signal }),
     delegate_task: async (args, context) =>
       subagentManager.delegate({
         task: args.task,

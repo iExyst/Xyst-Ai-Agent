@@ -168,6 +168,7 @@ const TOOL_EXECUTION_POLICIES = {
     timeout: { kind: 'config_ms', config_path: 'web_search.timeout_ms', default_ms: 10_000, min_ms: 1_000, max_ms: 60_000 },
   },
   get_weather: { timeout: { kind: 'fixed_ms', milliseconds: 10_000 } },
+  web_fetch: { timeout: { kind: 'fixed_ms', milliseconds: 10_000 } },
   delegate_task: {
     timeout: { kind: 'config_ms', config_path: 'subagents.timeout_ms', default_ms: 300_000, min_ms: 1_000, max_ms: 1_800_000 },
   },
@@ -284,6 +285,19 @@ const builtinToolDefinitions = {
       type: 'object',
       properties: { query: { type: 'string', minLength: 1, maxLength: 500 } },
       required: ['query'],
+      additionalProperties: false,
+    },
+    approval: 'ask',
+    destructive: false,
+  },
+  web_fetch: {
+    name: 'web_fetch',
+    description:
+      'Read an HTTPS source page or JSON API as text. Use to verify search results, read official sources, and check live details. No login or JavaScript execution; assisted mode requires approval.',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', minLength: 1, maxLength: 2048 } },
+      required: ['url'],
       additionalProperties: false,
     },
     approval: 'ask',
