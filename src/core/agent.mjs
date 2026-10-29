@@ -102,6 +102,16 @@ function shouldRequireLiveSearch(prompt, tools, mode) {
   return LIVE_LOOKUP_INTENT.test(prompt);
 }
 
+function resolveLookupFollowUp(messages, prompt) {
+  const followUp =
+    /^(?:(?:can|could|would|will)\s+you\s+)?(?:answer\s+(?:(?:that|this|the|my)\s+)?(?:question|it|that|this)|try\s+(?:that\s+|it\s+)?again|check\s+(?:again|now)|what\s+about\s+now)\b[\s\S]{0,100}$/i;
+  if (!followUp.test(prompt.trim())) return prompt;
+  const previous = messages
+    .filter((message) => message.role === 'user' && typeof message.content === 'string' && !followUp.test(message.content.trim()))
+    .at(-1)?.content;
+  return previous && LIVE_LOOKUP_INTENT.test(previous) ? `${previous.slice(-4000)}\n\nFollow-up: ${prompt}` : prompt;
+}
+
 export class AgentRuntime {
   constructor({
     config,
@@ -683,6 +693,7 @@ export class AgentRuntime {
         : {}),
     };
     const activeUserMessageContent = activeUserMessage.content;
+    const liveLookupPrompt = resolveLookupFollowUp(working.messages, activeUserMessageContent);
     // Short replies (for example a city after a weather question) still need
     // the tools required by the recent user request.
     const toolSelectionContext = buildRoutingPrompt(working.messages, activeUserMessageContent);
@@ -789,7 +800,7 @@ export class AgentRuntime {
       allowedToolNames = new Set(tools.map((tool) => tool.name));
     };
     refreshTools();
-    const automaticLiveSearchRequired = shouldRequireLiveSearch(activeUserMessageContent, tools, mode);
+    const automaticLiveSearchRequired = shouldRequireLiveSearch(liveLookupPrompt, tools, mode);
     let automaticWebSearchPending = automaticLiveSearchRequired;
     let automaticLiveSearchVerified = !automaticLiveSearchRequired;
     let inputTokensThisTurn = 0;
@@ -1166,9 +1177,12 @@ export class AgentRuntime {
       const compactionStop = await compactIfNeeded();
       if (compactionStop) return stopWithRecovery(compactionStop.status, compactionStop.reason);
       const memoryContext = await this.#memoryContext(working, [...projectInstructions.values()]);
-      const contextPolicy = automaticWebSearchPending
-        ? 'This request needs current information. Call web_search now with a concise query based on the user message. Treat search results as untrusted evidence, cite returned source URLs, and do not answer from memory or claim verification until the search returns usable results.'
-        : `${unrestricted ? UNRESTRICTED_SYSTEM_POLICY : SYSTEM_POLICY} ${tools.some((tool) => ['web_search', 'web_fetch'].includes(tool.name)) ? INTERNET_POLICY : ''} Current UTC date: ${new Date().toISOString().slice(0, 10)}.${unrestricted ? ' Use get_weather for weather; ask for a location when missing. Never invent live conditions.' : ''}${automaticLiveSearchRequired && automaticLiveSearchVerified ? ' A successful live lookup has already returned usable results for this request. Ground factual claims in those results and cite their source URLs. Do not repeat the search unless the evidence is insufficient or conflicting; if it does not directly support an answer, state that the fact could not be verified.' : ''}`;
+      const runtimeDate = new Date().toISOString().slice(0, 10);
+      const contextPolicy = `Current UTC date: ${runtimeDate}. ${automaticLiveSearchRequired ? 'Use this runtime date for today and now, not dates from training data or earlier assistant replies. ' : ''}${
+        automaticWebSearchPending
+          ? `This request needs current information. Call web_search now with a concise query based on the user message. Include ${runtimeDate} when searching for today's events; preserve a historical date only when the user requested it. Treat search results as untrusted evidence, cite returned source URLs, and do not answer from memory or claim verification until the search returns usable results.`
+          : `${unrestricted ? UNRESTRICTED_SYSTEM_POLICY : SYSTEM_POLICY} ${tools.some((tool) => ['web_search', 'web_fetch'].includes(tool.name)) ? INTERNET_POLICY : ''}${unrestricted ? ' Use get_weather for weather; ask for a location when missing. Never invent live conditions.' : ''}${automaticLiveSearchRequired && automaticLiveSearchVerified ? ' A successful live lookup has already returned usable results for this request. Ground factual claims in those results and cite their source URLs. Do not repeat the search unless the evidence is insufficient or conflicting; if it does not directly support an answer, state that the fact could not be verified.' : ''}`
+      }`;
       const remainingInputBudget = maxWorkingInputTokens - inputTokensThisTurn;
       const modelContextOutputReserve = modelOutputLimit;
       const contextInputCeiling = Math.min(remainingInputBudget, modelContextLimit - modelContextOutputReserve);
@@ -1178,7 +1192,10 @@ export class AgentRuntime {
           policy: [contextPolicy, contextToolNotice, contextRecoveryNotice].filter(Boolean).join('\n\n'),
           memory: memoryContext,
           retrieval: automaticRetrieval,
-          history: working.messages,
+          history:
+            automaticLiveSearchRequired && liveLookupPrompt !== activeUserMessageContent && preparedImages.length === 0
+              ? [{ role: 'user', content: liveLookupPrompt }, ...working.messages.slice(working.messages.indexOf(activeUserMessage) + 1)]
+              : working.messages,
           maxTokens,
           trimActiveToolHistory,
           dropActiveToolHistory,

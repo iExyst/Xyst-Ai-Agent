@@ -3070,6 +3070,70 @@ test('agent falls back from keyless Brave to Google News when GDELT is unavailab
   assert.match(JSON.stringify(observation.content), /google-news/);
 });
 
+test('live lookup retries use the runtime date and fresh evidence instead of stale assistant date claims', async (t) => {
+  const root = await createTempDirectory('xyst-live-follow-up-date-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.tools = { autonomy: 'unrestricted' };
+  settings.web_search = { enabled: true, provider: 'wikipedia' };
+  const store = new SessionStore(root);
+  const session = store.create();
+  session.messages.push(
+    { role: 'user', content: 'What is the president doing today?' },
+    { role: 'assistant', content: 'Today is October 27, 2024; articles from 2026 are fictional.' },
+  );
+  await store.save(session);
+  let modelCalls = 0;
+  const runtimeDate = new Date().toISOString().slice(0, 10);
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: store,
+    fetchImpl: async (url, options) => {
+      if (String(url).startsWith('https://en.wikipedia.org/')) {
+        if (new URL(url).searchParams.get('prop') === 'extracts') return Response.json({ query: { pages: [] } });
+        return Response.json({ query: { search: [{ pageid: 1, title: 'Live source', snippet: 'Verified current events.' }] } });
+      }
+      const request = JSON.parse(options.body);
+      modelCalls += 1;
+      assert.ok(request.messages[0].content.startsWith(`Current UTC date: ${runtimeDate}.`));
+      assert.match(JSON.stringify(request.messages), /What is the president doing today/);
+      assert.doesNotMatch(JSON.stringify(request.messages), /October 27, 2024|articles from 2026 are fictional/);
+      if (modelCalls === 1) {
+        assert.equal(request.tool_choice, 'required');
+        assert.match(request.messages[0].content, /Include .*when searching for today's events/);
+        return Response.json({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'fresh-live-search',
+                    type: 'function',
+                    function: { name: 'web_search', arguments: JSON.stringify({ query: `president events ${runtimeDate}` }) },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      assert.match(JSON.stringify(request.messages), /Verified current events/);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'The live source returned current events.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+  const result = await runtime.run({ session, prompt: 'can you answer that question now?' });
+  assert.equal(result.status, 'complete');
+  assert.equal(modelCalls, 2);
+  assert.equal(
+    result.session.messages[1].content,
+    'Today is October 27, 2024; articles from 2026 are fictional.',
+    'saved transcript remains intact',
+  );
+});
+
 test('agent refuses to complete a live-information request if the model omits the required search call', async (t) => {
   const root = await createTempDirectory('xyst-agent-required-live-search-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
