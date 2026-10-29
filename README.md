@@ -117,6 +117,9 @@ Subagent task records identify their owning process without persisting its comma
 
 ## Project map
 
+For keeping build caches and old packages from filling the checkout, see
+[Workspace storage and cleanup](docs/WORKSPACE_STORAGE.md).
+
 - `src/core/` — agent orchestration, budgets, context trimming, routing, and events
 - `src/providers/` — normalized provider interface and OpenAI-compatible HTTP/SSE implementation
 - `src/platform/` — path containment, child processes, and native desktop accessibility adapters
