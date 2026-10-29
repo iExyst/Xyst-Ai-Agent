@@ -183,7 +183,7 @@ jobs:
           XYST_LINUX_UPGRADE_SMOKE: 'true'
       - name: Smoke test Linux AppImage under Xvfb
         if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1800x1200x24' pnpm smoke:desktop:linux-appimage
+        run: xvfb-run -a -s '-screen 0 1800x1200x24' dbus-run-session -- pnpm smoke:desktop:linux-appimage
       - name: Upload Windows NSIS installer
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4

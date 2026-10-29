@@ -273,7 +273,7 @@ async function smokeInstalledDesktopWindow({ packageName, smokeRoot }) {
   }
 
   const smokeScript = path.join(ROOT, 'scripts', 'smoke-linux-desktop-window.mjs');
-  const desktopCommand = desktopUser ? 'runuser' : 'dbus-run-session';
+  const desktopCommand = desktopUser ? 'runuser' : 'xvfb-run';
   const desktopArgs = desktopUser
     ? [
         '-u',
@@ -288,14 +288,14 @@ async function smokeInstalledDesktopWindow({ packageName, smokeRoot }) {
         `XDG_STATE_HOME=${path.join(configHome, 'state')}`,
         `XDG_CACHE_HOME=${path.join(configHome, 'cache')}`,
         `XDG_RUNTIME_DIR=${runtimeDirectory}`,
-        'dbus-run-session',
-        '--',
         'xvfb-run',
         '-a',
         '-s',
         '-screen 0 1800x1200x24',
+        'dbus-run-session',
+        '--',
       ]
-    : ['--', 'xvfb-run', '-a', '-s', '-screen 0 1800x1200x24'];
+    : ['-a', '-s', '-screen 0 1800x1200x24', 'dbus-run-session', '--'];
   desktopArgs.push(process.execPath, smokeScript, '--executable', executable, '--workspace', workspace, '--config-home', configHome);
   const result = await runChecked(desktopCommand, desktopArgs, { timeoutMs: 120_000 });
   const smoke = parseSmokeJson(result.stdout);
