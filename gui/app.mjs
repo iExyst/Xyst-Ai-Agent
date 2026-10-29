@@ -207,6 +207,7 @@ function selectPrimaryTab(tab) {
   }
   elements.mode_workspace.hidden = !mode;
   elements.settings_view.hidden = Boolean(mode);
+  elements.settings_button.setAttribute('aria-current', mode ? 'false' : 'page');
   if (mode) {
     elements.run_mode.value = mode;
     elements.active_mode_label.textContent =
@@ -507,7 +508,51 @@ function renderMainOverview(settings) {
   const host = elements.welcome.querySelector('#main-overview');
   if (!host) return;
   const tools = elements.memory_button.closest('.settings-page-card');
-  host.replaceChildren(createSettingsOverview(settings), tools);
+  const cards = node('div', 'home-status-grid');
+  const profiles = Object.keys(settings.models || {});
+  for (const [label, value, detail] of [
+    ['RUNTIME', 'Ready', 'Connected to local runtime'],
+    ['MODEL PROFILES', String(profiles.length).padStart(2, '0'), 'Available in your configuration'],
+    ['AUTOMATION', settings.tools?.autonomy === 'unrestricted' ? 'Unrestricted' : 'Assisted', 'Current access profile'],
+    ['WORKSPACE', 'Local', 'Files and tools on this computer'],
+  ]) {
+    const card = node('article', 'home-status-card');
+    card.append(node('span', 'eyebrow', label), node('strong', '', value), node('span', 'muted-copy', detail));
+    cards.append(card);
+  }
+  host.replaceChildren(cards);
+  elements.welcome.querySelector('#home-tools').replaceChildren(tools);
+  const model = settings.models?.[settings.default_model];
+  const modelPanel = elements.welcome.querySelector('#home-model-status');
+  const manage = node('button', 'home-manage-model', 'Manage models →');
+  manage.type = 'button';
+  manage.addEventListener('click', () => {
+    selectedSettingsCategory = 'models';
+    selectPrimaryTab('settings');
+  });
+  modelPanel.replaceChildren(
+    node('p', 'eyebrow', 'INFERENCE ENGINE'),
+    node('h2', '', 'Model status'),
+    node('div', 'home-model-orbit', '◈'),
+    node('strong', 'home-model-name', model?.model || 'No default model'),
+    node(
+      'p',
+      'muted-copy',
+      model
+        ? `${model.local ? 'Local' : 'Remote'} provider · ${model.supports_tools ? 'Tool support configured' : 'Text profile'}`
+        : 'Choose a model to start a conversation.',
+    ),
+    manage,
+  );
+  setHomeLayout(!elements.welcome.hidden);
+}
+
+function setHomeLayout(home) {
+  const composer = elements.prompt_form.closest('.composer-wrap');
+  const slot = elements.welcome.querySelector('#home-task-slot');
+  if (home && slot) slot.append(composer);
+  else elements.mode_workspace.append(composer);
+  elements.mode_workspace.classList.toggle('home-layout', home);
 }
 
 function ensureModelPickerOption(profile) {
@@ -671,10 +716,12 @@ function node(tag, className, text) {
 function resetTimeline() {
   elements.timeline.replaceChildren(elements.welcome);
   elements.welcome.hidden = false;
+  setHomeLayout(true);
   elements.approval_region.replaceChildren();
 }
 
 function addMessage(role, content = '') {
+  setHomeLayout(false);
   elements.welcome.hidden = true;
   const message = node('article', `message ${role}`);
   message.dataset.role = role;
@@ -1055,6 +1102,7 @@ async function openSession(id) {
     elements.conversation_title.textContent = session.title || 'Conversation';
     elements.run_mode.value = ['agent', 'plan', 'review'].includes(session.mode) ? session.mode : 'agent';
     selectPrimaryTab(elements.run_mode.value);
+    setHomeLayout(false);
     elements.timeline.replaceChildren();
     elements.approval_region.replaceChildren();
     elements.welcome.hidden = true;
@@ -1995,46 +2043,6 @@ function settingRow(label, value) {
   const row = node('div', 'setting-row');
   row.append(node('span', '', label), node('span', '', String(value ?? 'Not configured')));
   return row;
-}
-
-function createSettingsOverview(settings) {
-  const overview = node('section', 'settings-overview');
-  overview.append(
-    node('h3', '', 'Your setup at a glance'),
-    node('p', 'muted-copy', 'A quick view of the settings that shape each Xyst run.'),
-  );
-  const cards = node('div', 'settings-overview-grid');
-  const configuredModels = Object.keys(settings.models || {}).length;
-  const webSearch = settings.web_search?.enabled
-    ? settings.web_search.provider === 'brave'
-      ? settings.web_search.credential_configured
-        ? 'Brave search connected'
-        : 'Automatic search fallback'
-      : settings.web_search.provider === 'automatic'
-        ? 'Automatic keyless search'
-        : 'Wikipedia references'
-    : 'Off';
-  const autonomy = settings.tools?.autonomy === 'unrestricted' ? 'Unrestricted' : 'Assisted';
-  const sandbox = settings.sandbox?.mode || 'None';
-  const entries = [
-    ['Default model', settings.default_model || 'Automatic', '◈'],
-    ['Model profiles', `${configuredModels} configured`, '⌕'],
-    ['Automation', autonomy, '✳'],
-    ['Sandbox', sandbox, '⬡'],
-    ['Web search', webSearch, '⌁'],
-    ['Child agents', settings.subagents?.enabled ? `${settings.subagents.max_concurrent || 2} concurrent max` : 'Off', '◎'],
-  ];
-  for (const [label, value, icon] of entries) {
-    const card = node('article', 'settings-overview-card');
-    card.append(
-      node('span', 'settings-overview-icon', icon),
-      node('span', 'settings-overview-label', label),
-      node('strong', 'settings-overview-value', value),
-    );
-    cards.append(card);
-  }
-  overview.append(cards);
-  return overview;
 }
 
 function createSettingsEditor(settings, usage) {
@@ -5188,6 +5196,7 @@ elements.primary_tabs.addEventListener('keydown', (event) => {
 });
 elements.discover_models_button.addEventListener('click', () => void refreshLocalModels());
 elements.settings_discover_models.addEventListener('click', () => void refreshLocalModels());
+elements.settings_button.addEventListener('click', () => selectPrimaryTab('settings'));
 document.getElementById('control-room-nav').addEventListener('click', (event) => {
   const button = event.target.closest('[data-settings-category]');
   if (!button) return;

@@ -41,6 +41,7 @@
           <button type="button" data-settings-category="data">⌕ <span>Data & search</span></button>
           <button type="button" data-settings-category="updates">↻ <span>Updates</span></button>
           <button type="button" data-settings-category="usage">▤ <span>Usage & limits</span></button>
+          <button id="settings-button" type="button" aria-controls="settings-view">⚙ <span>Settings</span></button>
         </nav>
         <footer class="sidebar-footer">
           <div class="workspace-avatar" aria-hidden="true"><img src="/app/brand-icon.png" alt=""></div>
@@ -76,19 +77,21 @@
           <button class="primary-tab" id="tab-agent" role="tab" type="button" aria-selected="true" aria-controls="mode-workspace" data-mode="agent"><span class="tab-glyph" aria-hidden="true">✳</span>Agent</button>
           <button class="primary-tab" id="tab-plan" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="plan"><span class="tab-glyph" aria-hidden="true">⌁</span>Plan</button>
           <button class="primary-tab" id="tab-review" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="review"><span class="tab-glyph" aria-hidden="true">◈</span>Review</button>
-          <span class="tab-spacer"></span>
-          <button class="primary-tab settings-tab" id="settings-button" role="tab" type="button" aria-selected="false" aria-controls="settings-view"><span class="tab-glyph" aria-hidden="true">⚙</span>Settings</button>
         </nav>
 
         <div id="status-banner" class="status-banner" role="status" hidden></div>
         <div id="mode-workspace" role="tabpanel" aria-labelledby="tab-agent" class="mode-workspace">
         <section id="timeline" class="timeline" aria-label="Conversation" aria-live="polite">
           <div id="welcome" class="welcome-state">
-            <div class="welcome-orbit" aria-hidden="true"><img src="/app/brand-icon.png" alt=""></div>
-            <p class="eyebrow">YOUR LOCAL CODING PARTNER</p>
-            <h1>What are we<br><span>working on?</span></h1>
-            <p class="welcome-description">Ask a question, explore the codebase, or plan your next change. Xyst AI Assistant will keep its work in this workspace.</p>
+            <p class="eyebrow">LOCAL SYSTEM / OVERVIEW</p>
+            <h1>Good to see you, <span>Operator.</span></h1>
+            <p class="welcome-description">Your control room is ready. Start a task or manage your local agent.</p>
             <div id="main-overview" class="main-overview"></div>
+            <div class="home-work-grid">
+              <section class="home-task-card" aria-labelledby="home-task-title"><p class="eyebrow">DIRECT LINE</p><h2 id="home-task-title">Give Xyst a task</h2><p class="muted-copy">Ask Xyst to inspect your workspace, make a change, or plan the next step.</p><div id="home-task-slot"></div></section>
+              <aside id="home-model-status" class="home-model-status" aria-label="Model status"></aside>
+            </div>
+            <div id="home-tools"></div>
             <div class="suggestion-row">
               <button class="suggestion-card" type="button" data-prompt="Explain how this project is structured."><span>01</span><strong>Understand a codebase</strong><small>Map the important pieces</small><b aria-hidden="true">↗</b></button>
               <button class="suggestion-card" type="button" data-prompt="Review this project for correctness and security issues."><span>02</span><strong>Review a change</strong><small>Find issues before they ship</small><b aria-hidden="true">↗</b></button>
