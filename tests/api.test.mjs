@@ -1086,8 +1086,8 @@ test('local control API authenticates, rejects hostile origins and streams a com
   assert.match(appCode, /encodeImageFile/);
   assert.match(appCode, /toggleRunPause/);
   assert.match(appCode, /sendRunDirection/);
-  assert.match(appCode, /Web search/);
-  assert.match(appCode, /Subagents/);
+  assert.match(appCode, /Live web search/);
+  assert.match(appCode, /Agent orchestration/);
   const timelineModule = await fetch(`${url}/app/timeline.mjs`);
   assert.equal(timelineModule.status, 200);
   assert.match(await timelineModule.text(), /parseStoredToolObservation/);
@@ -2083,9 +2083,8 @@ test('local control API settings snapshot never exposes credential references or
   assert.match(body, /"filesystem_scope":"machine"/);
   const shell = await fs.readFile(new URL('../gui/app.mjs', import.meta.url), 'utf8');
   assert.match(shell, /Semantic retrieval/);
-  assert.match(shell, /This month · estimated cost/);
-  assert.match(shell, /Automatic compaction/);
-  assert.match(shell, /Automation mode/);
+  assert.match(shell, /Usage detail · last 45 days/);
+  assert.match(shell, /Automation access/);
   assert.match(shell, /async function openSkills/);
   assert.match(shell, /detail\.textContent =/);
   assert.match(shell, /window\.confirm\(`Semantic search sends redacted workspace excerpts/);

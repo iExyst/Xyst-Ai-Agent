@@ -92,10 +92,11 @@ export class KeylessFallbackWebSearchProvider {
   }
 
   async search(query, options) {
+    validateQuery(query, options?.signal);
     try {
       return await this.primary.search(query, options);
     } catch (error) {
-      if (!['WEB_SEARCH_CREDENTIAL_MISSING', 'WEB_SEARCH_AUTH_FAILED'].includes(error.code)) throw error;
+      if (options?.signal?.aborted) throw options.signal.reason || error;
       return this.fallback.search(query, options);
     }
   }
@@ -495,7 +496,8 @@ function canonicalResultUrl(value) {
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password) return null;
     url.hash = '';
-    return url.href.replace(/\/$/, '').toLowerCase();
+    // Hosts are normalized by URL; paths and query values are case-sensitive.
+    return url.href;
   } catch {
     return null;
   }

@@ -298,6 +298,9 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
           const frame = document.querySelector('#app-frame');
           const main = document.querySelector('.main-panel');
           const timeline = document.querySelector('#timeline');
+          // Home embeds the composer in a scrollable dashboard card.
+          // Confirm it can be brought into view rather than requiring a fixed footer.
+          document.querySelector('.composer-wrap')?.scrollIntoView({ block: 'nearest' });
           const frameRect = rect('#app-frame');
           const mainRect = rect('.main-panel');
           const composerRect = rect('.composer-wrap');
@@ -360,7 +363,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
         document.querySelector('#tab-review').click();
         const review = { mode: document.querySelector('#run-mode').value, selected: document.querySelector('#tab-review').getAttribute('aria-selected') };
         document.querySelector('#settings-button').click();
-        const settings = { visible: !document.querySelector('#settings-view').hidden, selected: document.querySelector('#settings-button').getAttribute('aria-selected') };
+        const settings = { visible: !document.querySelector('#settings-view').hidden, selected: String(document.querySelector('#settings-button').getAttribute('aria-current') === 'page') };
         document.querySelector('#tab-agent').click();
         document.querySelector('#tab-agent').focus();
         document.querySelector('#tab-agent').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
@@ -413,7 +416,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await waitForToast(protocol, 'Connected browser-local-smoke from browser-smoke.');
     const settingsAfterLocalConnection = await evaluate(
       protocol,
-      `(() => ({ visible: !document.querySelector('#settings-view').hidden, selected: document.querySelector('#settings-button').getAttribute('aria-selected') }))()`,
+      `(() => ({ visible: !document.querySelector('#settings-view').hidden, selected: String(document.querySelector('#settings-button').getAttribute('aria-current') === 'page') }))()`,
     );
     assert.deepEqual(settingsAfterLocalConnection, { visible: true, selected: 'true' }, 'Adding a local model must leave Settings open');
     const secondaryModelPreserved = await evaluate(
@@ -447,6 +450,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     );
     await evaluate(protocol, `document.querySelector('#settings-discover-models').click()`);
     assert.ok(await waitForLocalModelChoice(protocol, 'browser-unloaded-smoke'), 'The unloaded LM Studio test model was not discovered');
+    await evaluate(protocol, `document.querySelector('#local-model-results details').open = true`);
     const unloadedModelState = await evaluate(
       protocol,
       `(() => {
@@ -459,7 +463,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
           rowCount: document.querySelectorAll('#local-model-results .local-model-row').length,
           resultsText: document.querySelector('#local-model-results')?.innerText || '',
           settingsVisible: !document.querySelector('#settings-view')?.hidden,
-          selectedSettingsTab: document.querySelector('#settings-button')?.getAttribute('aria-selected') || '',
+          selectedSettingsTab: String(document.querySelector('#settings-button')?.getAttribute('aria-current') === 'page'),
           modelOptionPresent: [...document.querySelector('#model-picker').options].some((item) => item.textContent.includes('browser-unloaded-smoke')),
         };
       })()`,
@@ -662,16 +666,16 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
         return {
           dark,
           light,
-          logoLoaded: document.querySelector('.welcome-orbit img')?.naturalWidth > 0,
+          logoLoaded: document.querySelector('#brand-home svg')?.getBoundingClientRect().width > 0,
         };
       })()`,
     );
     assert.deepEqual(
       themeRendering.dark.brand,
-      { cyan: '#58eaff', mint: '#a1fff1', lime: '#c5ff48', violet: '#b78aff', blue: '#176cff' },
-      'Dark theme must use the colors from the Xyst alien artwork',
+      { cyan: '#8cd5ad', mint: '#a1dbb9', lime: '#8cd5ad', violet: '#a5b8ac', blue: '#176cff' },
+      'Dark theme must use the control room palette',
     );
-    assert.match(themeRendering.dark.sidebarBackground, /linear-gradient/, 'Dark theme sidebar must use the branded surface treatment');
+    assert.equal(themeRendering.dark.sidebarBackground, 'none', 'Dark sidebar uses a flat surface');
     assert.equal(themeRendering.dark.colorScheme, 'dark');
     assert.equal(
       themeRendering.dark.surfaces.settings,
@@ -716,10 +720,10 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       assistantMeta: themeRendering.dark.reference.mint,
     }))
       assert.equal(themeRendering.dark.surfaces[name], value, `Dark ${name} must use its Xyst semantic token`);
-    assert.equal(themeRendering.dark.surfaces.suggestionRadius, '12px', 'Suggestion cards must use the rounded Xyst shape language');
+    assert.equal(themeRendering.dark.surfaces.suggestionRadius, '7px', 'Suggestion cards must use the rounded Xyst shape language');
     assert.match(themeRendering.dark.surfaces.assistantBadge, /brand-icon\.png/, 'Assistant messages must carry the Xyst alien mark');
     assert.equal(themeRendering.light.surface, '#ffffff', 'Light theme must preserve readable light surfaces');
-    assert.match(themeRendering.light.sidebarBackground, /linear-gradient/, 'Light theme sidebar must keep the branded surface treatment');
+    assert.match(themeRendering.light.sidebarBackground, /linear-gradient/, 'Light sidebar keeps its light surface treatment');
     assert.equal(themeRendering.light.colorScheme, 'light');
     assert.equal(
       themeRendering.light.surfaces.settings,
@@ -764,13 +768,9 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       assistantMeta: themeRendering.light.reference.mint,
     }))
       assert.equal(themeRendering.light.surfaces[name], value, `Light ${name} must use its Xyst semantic token`);
-    assert.equal(
-      themeRendering.light.surfaces.suggestionRadius,
-      '12px',
-      'Light suggestion cards must keep the rounded Xyst shape language',
-    );
+    assert.equal(themeRendering.light.surfaces.suggestionRadius, '7px', 'Light suggestion cards must keep the rounded Xyst shape language');
     assert.notEqual(themeRendering.dark.canvas, themeRendering.light.canvas, 'Dark and light themes must remain distinct');
-    assert.equal(themeRendering.logoLoaded, true, 'The welcome screen must load the Xyst alien brand image');
+    assert.equal(themeRendering.logoLoaded, true, 'The sidebar must show the control room home mark');
 
     const tree = await protocol.call('Accessibility.getFullAXTree');
     const accessibleNodes = tree.nodes.filter((node) => !node.ignored);
@@ -809,7 +809,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     const liveSearchChoices = await evaluate(
       protocol,
       `(() => {
-        const section = [...document.querySelectorAll('#settings-content fieldset')]
+        const section = [...document.querySelectorAll('#inline-settings-content fieldset')]
           .find((item) => item.querySelector('legend')?.textContent === 'Live web search');
         const source = section?.querySelector('select');
         if (!section || !source) return null;
@@ -826,10 +826,8 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     assert.deepEqual(liveSearchChoices, { values: ['automatic', 'wikipedia', 'brave'], keylessFieldsHidden: true, keyEntryShown: true });
     const braveFallback = await saveWebSearchProvider(protocol, 'brave');
     assert.equal(braveFallback.provider, 'brave');
-    assert.match(braveFallback.status, /Automatic keyless live results/);
     const restoredKeylessSearch = await saveWebSearchProvider(protocol, 'automatic');
     assert.equal(restoredKeylessSearch.provider, 'automatic');
-    assert.match(restoredKeylessSearch.status, /Automatic · live news \+ references/);
     const capabilitySettings = await updateModelCapabilitySettings(protocol);
     assert.equal(capabilitySettings.contextLength, '16384');
     assert.equal(capabilitySettings.supportsTools, 'true');
@@ -1062,6 +1060,11 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     assert.ok(mockProvider.outputCaps[1] <= 300, 'the active-run output cap and reserve constrain the next request');
 
     progress('checking project goal conversation controls');
+    assert.equal(
+      await evaluate(protocol, `document.querySelector('#goals-button')?.getBoundingClientRect().height > 0`),
+      true,
+      'Workspace tools must remain accessible after opening the completed conversation',
+    );
     await evaluate(protocol, `document.querySelector('#goals-button').click()`);
     await waitForGoalPanel(protocol, 'No project goals yet.');
     await evaluate(
@@ -2049,20 +2052,17 @@ function connectDevtoolsWebSocket(url) {
 }
 
 async function waitForUpdateChoices(protocol) {
-  await evaluate(
-    protocol,
-    `document.querySelector('#settings-button').click(); document.querySelector('#advanced-settings-button').click()`,
-  );
+  await evaluate(protocol, `document.querySelector('#control-room-nav [data-settings-category="updates"]').click()`);
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const state = await evaluate(
       protocol,
       `(() => {
-        const section = [...document.querySelectorAll('#settings-content fieldset')]
+        const section = [...document.querySelectorAll('#inline-settings-content fieldset')]
           .find((item) => item.querySelector('legend')?.textContent === 'Application updates');
         if (!section) return null;
         return {
-          open: document.querySelector('#settings-dialog')?.open === true,
+          open: !document.querySelector('#settings-view').hidden,
           checkModes: [...section.querySelectorAll('select[name="app_updates.mode"] option')].map((option) => option.textContent),
           releaseChannels: [...section.querySelectorAll('select[name="app_updates.channel"] option')].map((option) => option.textContent),
           feedLabel: section.querySelector('input[type="url"]')?.closest('label')?.innerText.replace(/\\s+/g, ' ').trim() || '',
@@ -2097,7 +2097,7 @@ async function updateModelCapabilitySettings(protocol) {
   const submitted = await evaluate(
     protocol,
     `(() => {
-      const profile = [...document.querySelectorAll('#settings-content fieldset.provider-profile-editor')]
+      const profile = [...document.querySelectorAll('#inline-settings-content fieldset.provider-profile-editor')]
         .find((item) => item.querySelector('legend')?.textContent === 'approval-smoke');
       if (!profile) return false;
       const context = profile.querySelector('[aria-label="approval-smoke context length in tokens"]');
@@ -2147,7 +2147,7 @@ async function updateModelCapabilitySettings(protocol) {
     const settings = await evaluate(
       protocol,
       `(() => {
-        const profile = [...document.querySelectorAll('#settings-content fieldset.provider-profile-editor')]
+        const profile = [...document.querySelectorAll('#inline-settings-content fieldset.provider-profile-editor')]
           .find((item) => item.querySelector('legend')?.textContent === 'approval-smoke');
         if (!profile) return null;
         const save = [...profile.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Save profile');
@@ -2201,7 +2201,7 @@ async function saveWebSearchProvider(protocol, provider) {
   const submitted = await evaluate(
     protocol,
     `(() => {
-      const form = document.querySelector('#settings-content form.runtime-settings-form');
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
       const section = [...(form?.querySelectorAll('fieldset') || [])]
         .find((item) => item.querySelector('legend')?.textContent === 'Live web search');
       const source = section?.querySelector('select');
@@ -2214,20 +2214,17 @@ async function saveWebSearchProvider(protocol, provider) {
     })()`,
   );
   assert.equal(submitted, true, 'Live web search provider should be editable in Runtime settings');
-  const expectedStatus = provider === 'brave' ? /Automatic keyless live results/ : /Automatic · live news \+ references/;
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const state = await evaluate(
       protocol,
       `(() => {
-        const source = [...document.querySelectorAll('#settings-content form.runtime-settings-form fieldset')]
+        const source = [...document.querySelectorAll('#inline-settings-content form.runtime-settings-form fieldset')]
           .find((item) => item.querySelector('legend')?.textContent === 'Live web search')?.querySelector('select');
-        const row = [...document.querySelectorAll('#settings-content .setting-row')]
-          .find((item) => item.firstElementChild?.textContent === 'Web search');
-        return { provider: source?.value || null, status: row?.lastElementChild?.textContent || '' };
+        return { provider: source?.value || null, dirty: source?.dataset.dirty === 'true', saving: source?.closest('form')?.querySelector('button[type="submit"]')?.disabled ?? true };
       })()`,
     );
-    if (state.provider === provider && expectedStatus.test(state.status)) return state;
+    if (state.provider === provider && !state.dirty && !state.saving) return state;
     await delay(50);
   }
   throw new Error(`Live web search provider did not save as ${provider}`);
@@ -2237,7 +2234,7 @@ async function updateRoutingRoleSettings(protocol) {
   const submitted = await evaluate(
     protocol,
     `(() => {
-      const form = document.querySelector('#settings-content form.runtime-settings-form');
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
       const review = form?.querySelector('select[name="review_model"]');
       const plan = form?.querySelector('select[name="plan_model"]');
       const save = form?.querySelector('button[type="submit"]');
@@ -2258,7 +2255,7 @@ async function updateRoutingRoleSettings(protocol) {
       const roles = await evaluate(
         protocol,
         `(() => {
-          const form = document.querySelector('#settings-content form.runtime-settings-form');
+          const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
           const review = form?.querySelector('select[name="review_model"]');
           const plan = form?.querySelector('select[name="plan_model"]');
           return {
@@ -2279,7 +2276,7 @@ async function updateRoutingRoleSettings(protocol) {
   await evaluate(
     protocol,
     `(() => {
-      const form = document.querySelector('#settings-content form.runtime-settings-form');
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
       const review = form.querySelector('select[name="review_model"]');
       const plan = form.querySelector('select[name="plan_model"]');
       review.value = '';
@@ -2296,7 +2293,7 @@ async function updateSubagentSettings(protocol) {
   const enabled = await evaluate(
     protocol,
     `(() => {
-      const form = document.querySelector('#settings-content form.runtime-settings-form');
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
       const toggle = form?.querySelector('[name="subagents.enabled"]');
       const concurrency = form?.querySelector('[name="subagents.max_concurrent"]');
       const save = form?.querySelector('button[type="submit"]');
@@ -2317,7 +2314,7 @@ async function updateSubagentSettings(protocol) {
     const state = await evaluate(
       protocol,
       `(() => {
-        const form = document.querySelector('#settings-content form.runtime-settings-form');
+        const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
         const toggle = form?.querySelector('[name="subagents.enabled"]');
         const concurrency = form?.querySelector('[name="subagents.max_concurrent"]');
         return {
@@ -2339,7 +2336,7 @@ async function updateSubagentSettings(protocol) {
   const disabled = await evaluate(
     protocol,
     `(() => {
-      const form = document.querySelector('#settings-content form.runtime-settings-form');
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
       const toggle = form?.querySelector('[name="subagents.enabled"]');
       const save = form?.querySelector('button[type="submit"]');
       if (!toggle || !save) return false;
@@ -2356,7 +2353,7 @@ async function updateSubagentSettings(protocol) {
     const state = await evaluate(
       protocol,
       `(() => {
-        const form = document.querySelector('#settings-content form.runtime-settings-form');
+        const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
         const toggle = form?.querySelector('[name="subagents.enabled"]');
         const concurrency = form?.querySelector('[name="subagents.max_concurrent"]');
         return {
@@ -2379,7 +2376,7 @@ async function updateUiShortcutSettings(protocol) {
     const result = await evaluate(
       protocol,
       `(() => {
-        const form = document.querySelector('#settings-content form.runtime-settings-form');
+        const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
         const bindings = ${JSON.stringify(bindings)};
         const inputs = {
           toggle_sidebar: form?.querySelector('[aria-label="Toggle sidebar shortcut"]'),
@@ -2401,7 +2398,7 @@ async function updateUiShortcutSettings(protocol) {
     evaluate(
       protocol,
       `(() => {
-        const form = document.querySelector('#settings-content form.runtime-settings-form');
+        const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
         return {
           toggleSidebar: form?.querySelector('[aria-label="Toggle sidebar shortcut"]')?.value ?? null,
           newSession: form?.querySelector('[aria-label="Start new session shortcut"]')?.value ?? null,
@@ -2439,12 +2436,12 @@ async function updateUiShortcutSettings(protocol) {
 async function updateDataDirectorySettings(protocol, directory) {
   const defaultDirectory = await evaluate(
     protocol,
-    `document.querySelector('#settings-content [aria-label="Xyst AI Assistant user data directory"]')?.value || ''`,
+    `document.querySelector('#inline-settings-content [aria-label="Xyst AI Assistant user data directory"]')?.value || ''`,
   );
   const submitted = await evaluate(
     protocol,
     `(() => {
-      const form = document.querySelector('#settings-content form.runtime-settings-form');
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
       const input = form?.querySelector('[aria-label="Xyst AI Assistant user data directory"]');
       if (!input) return false;
       input.value = ${JSON.stringify(directory)};
@@ -2460,7 +2457,7 @@ async function updateDataDirectorySettings(protocol, directory) {
     const state = await evaluate(
       protocol,
       `(() => {
-        const form = document.querySelector('#settings-content form.runtime-settings-form');
+        const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
         const input = form?.querySelector('[aria-label="Xyst AI Assistant user data directory"]');
         return { directory: input?.value || '', saving: form?.querySelector('button[type="submit"]')?.disabled ?? true, dirty: input?.dataset.dirty === 'true' };
       })()`,
@@ -2476,10 +2473,10 @@ async function updateDataDirectorySettings(protocol, directory) {
   await evaluate(
     protocol,
     `(() => {
-      const button = [...document.querySelectorAll('#settings-content button')].find((item) => item.textContent.trim() === 'Use default location');
+      const button = [...document.querySelectorAll('#inline-settings-content button')].find((item) => item.textContent.trim() === 'Use default location');
       if (!button) return false;
       button.click();
-      document.querySelector('#settings-content form.runtime-settings-form button[type="submit"]').click();
+      document.querySelector('#inline-settings-content form.runtime-settings-form button[type="submit"]').click();
       return true;
     })()`,
   ).then((result) => assert.equal(result, true, 'The default data location should be restorable'));
@@ -2488,7 +2485,7 @@ async function updateDataDirectorySettings(protocol, directory) {
     const state = await evaluate(
       protocol,
       `(() => {
-        const form = document.querySelector('#settings-content form.runtime-settings-form');
+        const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
         const input = form?.querySelector('[aria-label="Xyst AI Assistant user data directory"]');
         return { directory: input?.value || '', saving: form?.querySelector('button[type="submit"]')?.disabled ?? true, dirty: input?.dataset.dirty === 'true' };
       })()`,

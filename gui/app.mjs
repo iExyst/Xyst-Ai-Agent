@@ -213,6 +213,7 @@ function selectPrimaryTab(tab) {
     elements.active_mode_label.textContent =
       mode === 'plan' ? 'Plan mode · read only' : mode === 'review' ? 'Review mode · read only' : 'Agent mode';
     elements.mode_workspace.setAttribute('aria-labelledby', `tab-${mode}`);
+    showSettingsCategory();
   } else {
     void renderSettingsOverview();
     if (document.querySelector('#inline-settings-content .runtime-settings-form')) showSettingsCategory();
@@ -554,10 +555,16 @@ function renderMainOverview(settings) {
 }
 
 function setHomeLayout(home) {
+  elements.welcome.hidden = !home;
   const composer = elements.prompt_form.closest('.composer-wrap');
   const slot = elements.welcome.querySelector('#home-task-slot');
+  const tools = elements.memory_button.closest('.settings-page-card');
+  const dock = document.getElementById('workspace-tools-dock');
+  dock.hidden = home;
+  if (home) elements.welcome.querySelector('#home-tools').append(tools);
+  else dock.append(tools);
   if (home && slot) slot.append(composer);
-  else elements.mode_workspace.append(composer);
+  else elements.mode_workspace.append(composer, dock);
   elements.mode_workspace.classList.toggle('home-layout', home);
 }
 

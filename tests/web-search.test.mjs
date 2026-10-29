@@ -514,6 +514,47 @@ test('keyless fallback recovers from rejected Brave credentials', async () => {
   assert.equal(fallbackRequests, 1);
 });
 
+test('keyless fallback recovers from provider outages and rate limits without ignoring cancellation', async () => {
+  for (const failure of [
+    new TypeError('fetch failed'),
+    Object.assign(new Error('busy'), { code: 'WEB_SEARCH_RATE_LIMITED' }),
+    Object.assign(new Error('HTTP 503'), { code: 'WEB_SEARCH_FAILED' }),
+  ]) {
+    let fallbackCalls = 0;
+    const controller = new AbortController();
+    const provider = new KeylessFallbackWebSearchProvider({
+      primary: {
+        search: async () => {
+          throw failure;
+        },
+      },
+      fallback: {
+        search: async () => {
+          fallbackCalls += 1;
+          return { results: [] };
+        },
+      },
+    });
+    assert.deepEqual(await provider.search('query'), { results: [] });
+    controller.abort(new Error('user cancelled'));
+    await assert.rejects(provider.search('query', { signal: controller.signal }), /user cancelled/);
+    await assert.rejects(provider.search(''), /query must contain/);
+    assert.equal(fallbackCalls, 1);
+  }
+});
+
+test('automatic search keeps distinct case-sensitive paths and query values', async () => {
+  const urls = ['https://example.com/Page', 'https://example.com/page', 'https://example.com/Page?key=A', 'https://example.com/Page?key=a'];
+  const provider = new AutomaticWebSearchProvider({
+    news: { search: async () => ({ provider: 'news', results: urls.map((url) => ({ title: url, url })) }) },
+    reference: { search: async () => ({ provider: 'reference', results: [{ title: 'Duplicate fragment', url: `${urls[0]}#section` }] }) },
+  });
+  assert.deepEqual(
+    (await provider.search('query')).results.map((entry) => entry.url),
+    urls,
+  );
+});
+
 test('Brave adapter checks cancellation after resolving a delayed vault credential', async () => {
   const controller = new AbortController();
   let requests = 0;

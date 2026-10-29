@@ -120,8 +120,9 @@ export class OpenMeteoWeatherProvider {
     if (!places.length) return { provider: 'open-meteo', found: false, location: query };
     if (
       places.length > 1 &&
-      places[0].name.toLowerCase() === places[1].name.toLowerCase() &&
-      places[0].country_code !== places[1].country_code
+      places
+        .slice(1)
+        .some((place) => place.name.toLowerCase() === places[0].name.toLowerCase() && placeLabel(place) !== placeLabel(places[0]))
     )
       return { provider: 'open-meteo', found: false, ambiguous: true, location: query, matches: places.map(placeLabel) };
     const place = places[0];

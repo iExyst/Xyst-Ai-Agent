@@ -128,6 +128,17 @@ test('weather rejects bad locations, asks for disambiguation, and bounds provide
   assert.equal(result.ambiguous, true);
   assert.equal(result.matches.length, 2);
 
+  const sameCountry = new OpenMeteoWeatherProvider({
+    fetchImpl: async () =>
+      Response.json({
+        results: [
+          { name: 'Portland', admin1: 'Oregon', country: 'United States', country_code: 'US', latitude: 45.52, longitude: -122.68 },
+          { name: 'Portland', admin1: 'Maine', country: 'United States', country_code: 'US', latitude: 43.66, longitude: -70.26 },
+        ],
+      }),
+  });
+  assert.equal((await sameCountry.getWeather('Portland')).ambiguous, true);
+
   const oversized = new OpenMeteoWeatherProvider({ fetchImpl: async () => new Response('x'.repeat(256 * 1024 + 1)) });
   await assert.rejects(oversized.getWeather('Boston'), /262144-byte limit/);
 });
