@@ -1078,14 +1078,22 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     const liveReply = await evaluate(
       protocol,
       `(async () => {
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const timeline = document.querySelector('#timeline');
-      const message = timeline.lastElementChild;
-      return {
-        text: message?.querySelector('.message-body')?.textContent,
-        running: !document.querySelector('#stop-run').hidden,
-        bottomGap: timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop,
-      };
+      const deadline = performance.now() + 2000;
+      let snapshot;
+      do {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const timeline = document.querySelector('#timeline');
+        const message = timeline.lastElementChild;
+        snapshot = {
+          text: message?.querySelector('.message-body')?.textContent,
+          running: !document.querySelector('#stop-run').hidden,
+          bottomGap: timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop,
+          scrollHeight: timeline.scrollHeight,
+          clientHeight: timeline.clientHeight,
+          scrollTop: timeline.scrollTop,
+        };
+      } while (snapshot.bottomGap > 4 && performance.now() < deadline);
+      return snapshot;
     })()`,
     );
     assert.equal(liveReply.text, 'Browser approval', 'partial text must be visible before the provider finishes');
