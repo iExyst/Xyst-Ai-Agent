@@ -1903,6 +1903,8 @@ export class LocalControlServer {
       ['/app/web-search-settings.mjs', [path.join(GUI_ROOT, 'web-search-settings.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/model-pricing.mjs', [path.join(GUI_ROOT, 'model-pricing.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/startup.mjs', [path.join(GUI_ROOT, 'startup.mjs'), 'text/javascript; charset=utf-8']],
+      ['/app/chat-scroll.mjs', [path.join(GUI_ROOT, 'chat-scroll.mjs'), 'text/javascript; charset=utf-8']],
+      ['/app/chat-view.mjs', [path.join(GUI_ROOT, 'chat-view.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/startup-watchdog.mjs', [path.join(GUI_ROOT, 'startup-watchdog.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/run-request.mjs', [path.join(GUI_ROOT, '..', 'src', 'api', 'run-request.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/run-events.mjs', [path.join(GUI_ROOT, '..', 'src', 'api', 'run-events.mjs'), 'text/javascript; charset=utf-8']],

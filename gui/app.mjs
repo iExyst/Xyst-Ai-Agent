@@ -30,6 +30,8 @@ import {
 import { resolveWebSearchProvider } from './web-search-settings.mjs';
 import { modelCapabilitiesDataStatus, modelCapabilitiesStatus, modelPricingDataStatus, modelPricingStatus } from './model-pricing.mjs';
 import { withStartupTimeout } from './startup.mjs';
+import { createChatScroller } from './chat-scroll.mjs';
+import { renderChatMessage } from './chat-view.mjs';
 import { DEFAULT_UI_SHORTCUTS, matchesUiShortcut } from '../src/core/keybindings.mjs';
 import { formatModelFallbackActivity } from '../src/core/model-fallback.mjs';
 
@@ -118,6 +120,7 @@ const elements = Object.fromEntries(
     'close-workspace',
   ].map((id) => [id.replaceAll('-', '_'), document.getElementById(id)]),
 );
+const chatScroller = createChatScroller(elements.timeline, document.getElementById('jump-to-latest'));
 
 const workspacePanel = mountWorkspacePanel({
   client,
@@ -559,6 +562,7 @@ function renderMainOverview(settings) {
 
 function setHomeLayout(home) {
   elements.welcome.hidden = !home;
+  chatScroller.setEnabled(!home);
   const composer = elements.prompt_form.closest('.composer-wrap');
   const slot = elements.welcome.querySelector('#home-task-slot');
   const tools = elements.memory_button.closest('.settings-page-card');
@@ -755,10 +759,21 @@ function addMessage(role, content = '') {
   const message = node('article', `message ${role}`);
   message.dataset.role = role;
   const meta = node('div', 'message-meta', role === 'user' ? 'YOU' : 'XYST');
+  if (role === 'assistant') {
+    const avatar = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    avatar.setAttribute('class', 'chat-avatar');
+    avatar.setAttribute('viewBox', '0 0 40 40');
+    avatar.setAttribute('aria-hidden', 'true');
+    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    mark.setAttribute('href', '#xyst-symbol');
+    avatar.append(mark);
+    meta.prepend(avatar);
+  }
   const body = node('div', 'message-body', content);
+  if (role === 'assistant' && content) renderChatMessage(body, content);
   message.append(meta, body);
   elements.timeline.append(message);
-  message.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  chatScroller.contentChanged();
   return body;
 }
 
@@ -766,7 +781,7 @@ function appendActivity(text, status = 'working') {
   const activity = node('div', 'tool-activity', text);
   activity.dataset.status = status;
   elements.timeline.append(activity);
-  activity.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  chatScroller.contentChanged();
   return activity;
 }
 
@@ -777,6 +792,7 @@ function appendToolDetail(tool, args, { status = 'proposed', result } = {}) {
   const body = node('pre', 'tool-detail-body', formatToolDetail(result === undefined ? args : result));
   detail.append(summary, body);
   elements.timeline.append(detail);
+  chatScroller.contentChanged();
   return detail;
 }
 
@@ -1118,6 +1134,8 @@ async function openSession(id) {
   clearError();
   try {
     const session = await client.getSession(id);
+    const preservePosition = activeSessionId === id && !chatScroller.isFollowing();
+    const previousTop = elements.timeline.scrollTop;
     activeSessionId = session.id;
     rememberSessionId(activeSessionId);
     void rememberDesktopSessionId(activeSessionId);
@@ -1161,7 +1179,8 @@ async function openSession(id) {
     renderSavedPlan(session.plan, session.id);
     renderSavedFindings(session.review_findings, session.worktree_path || null);
     renderSessions([...sessionsById.values()]);
-    elements.timeline.scrollTop = elements.timeline.scrollHeight;
+    if (preservePosition) chatScroller.restore(previousTop);
+    else chatScroller.jumpToLatest();
   } catch (error) {
     showError(error);
   }
@@ -1509,6 +1528,7 @@ async function submitPrompt(prompt) {
   resizeComposer();
   addMessage('user', `${prompt.trim()}${attachedImageFiles.length ? `\n[${attachedImageFiles.length} image(s) attached]` : ''}`);
   let responseBody = addMessage('assistant');
+  chatScroller.jumpToLatest();
   const activityRows = new Map();
   const modelLoadRows = new Map();
   let compactionActivity = null;
@@ -1570,7 +1590,10 @@ async function submitPrompt(prompt) {
           .catch(() => renderRunInspector());
         renderRunInspector();
       }
-      if (event.type === 'assistant_delta' && typeof data.text === 'string') responseBody.textContent += data.text;
+      if (event.type === 'assistant_delta' && typeof data.text === 'string') {
+        responseBody.textContent += data.text;
+        chatScroller.contentChanged();
+      }
       if (event.type === 'model_fallback') {
         activeRunModel = data.to_model;
         ensureModelPickerOption(activeRunModel);

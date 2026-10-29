@@ -35,6 +35,38 @@ function config() {
   };
 }
 
+test('long saved history does not force a larger model to load when the current request fits the default', async (t) => {
+  const root = await createTempDirectory('xyst-long-chat-default-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.models.local.context_length = 8192;
+  settings.models.large = { ...settings.models.local, model: 'unavailable-large-model', context_length: 32000 };
+  settings.tools = { autonomy: 'unrestricted' };
+  const store = new SessionStore(root);
+  const session = store.create({ model: 'local' });
+  for (let index = 0; index < 20; index += 1)
+    session.messages.push(
+      { role: 'user', content: `Earlier question ${index} ${'context '.repeat(250)}` },
+      { role: 'assistant', content: 'Saved earlier answer.' },
+    );
+  await store.save(session);
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: store,
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      assert.equal(request.model, 'model-x');
+      assert.match(JSON.stringify(request.messages), /Continue the conversation/);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'Continued with the default model.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+  const result = await runtime.run({ session, prompt: 'Continue the conversation.' });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.session.model, 'local');
+});
+
 test('agent scopes MCP tools to a persisted session selection and allows resetting to all servers', async (t) => {
   const root = await createTempDirectory('xyst-agent-mcp-selection-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

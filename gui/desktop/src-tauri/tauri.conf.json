@@ -35,6 +35,8 @@
       "../../../gui/workspace-panel.mjs": "xyst/gui/workspace-panel.mjs",
       "../../../gui/onboarding.mjs": "xyst/gui/onboarding.mjs",
       "../../../gui/startup.mjs": "xyst/gui/startup.mjs",
+      "../../../gui/chat-scroll.mjs": "xyst/gui/chat-scroll.mjs",
+      "../../../gui/chat-view.mjs": "xyst/gui/chat-view.mjs",
       "../../../gui/startup-watchdog.mjs": "xyst/gui/startup-watchdog.mjs",
       "../../../gui/index.html": "xyst/gui/index.html",
       "../../../gui/assets/brand-icon.png": "xyst/gui/assets/brand-icon.png",

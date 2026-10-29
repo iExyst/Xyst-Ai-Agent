@@ -427,7 +427,8 @@ export class AgentRuntime {
     modelChoice = selectModel(this.config, {
       requestedModel: activeModelPin,
       estimatedTokens: estimateTokens([
-        ...working.messages,
+        // Older turns can be compacted or trimmed after selecting the model.
+        // Do not force a larger model to load just because saved history grew.
         {
           role: 'user',
           content: prompt,

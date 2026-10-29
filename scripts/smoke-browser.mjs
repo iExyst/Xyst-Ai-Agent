@@ -273,6 +273,24 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       'The sidebar heading and session import action must remain separate and contained',
     );
 
+    const richReply = await evaluate(
+      protocol,
+      `(async () => {
+      const { renderChatMessage } = await import('/app/chat-view.mjs');
+      const host = document.createElement('div');
+      renderChatMessage(host, '# Clear answer\\n\\n**Important** and [Source](https://example.com).\\n\\n- First item\\n- Second item\\n\\n' + '\u0060\u0060\u0060js\\nconst value = "<tag>";\\n\u0060\u0060\u0060\\n\\n<img src=x onerror="window.__unsafeChat=true">');
+      return { heading: host.querySelector('h3')?.textContent, bold: host.querySelector('strong')?.textContent, links: host.querySelectorAll('a').length, items: host.querySelectorAll('li').length, code: host.querySelector('pre code')?.textContent, injectedElements: host.querySelectorAll('img,script').length };
+    })()`,
+    );
+    assert.deepEqual(richReply, {
+      heading: 'Clear answer',
+      bold: 'Important',
+      links: 1,
+      items: 2,
+      code: 'const value = "<tag>";',
+      injectedElements: 0,
+    });
+
     progress('checking responsive window resizing');
     const resizeLayouts = [];
     for (const viewport of [
@@ -721,7 +739,11 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     }))
       assert.equal(themeRendering.dark.surfaces[name], value, `Dark ${name} must use its Xyst semantic token`);
     assert.equal(themeRendering.dark.surfaces.suggestionRadius, '7px', 'Suggestion cards must use the rounded Xyst shape language');
-    assert.match(themeRendering.dark.surfaces.assistantBadge, /brand-icon\.png/, 'Assistant messages must carry the Xyst alien mark');
+    assert.equal(
+      themeRendering.dark.surfaces.assistantBadge,
+      'none',
+      'Assistant messages use the shared SVG mark instead of a raster badge',
+    );
     assert.equal(themeRendering.light.surface, '#ffffff', 'Light theme must preserve readable light surfaces');
     assert.match(themeRendering.light.sidebarBackground, /linear-gradient/, 'Light sidebar keeps its light surface treatment');
     assert.equal(themeRendering.light.colorScheme, 'light');
@@ -1053,6 +1075,10 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await waitForToast(protocol, 'Run switched to browser-approval-fast.');
     mockProvider.releaseSecondResponse();
     const runAnswer = await waitForApprovalRunAnswer(protocol);
+    assert.equal(
+      await evaluate(protocol, `document.querySelector('.message.assistant .chat-avatar use')?.getAttribute('href')`),
+      '#xyst-symbol',
+    );
     assert.equal(runAnswer, 'Browser approval workflow completed.');
     assert.equal(await fs.readFile(path.join(workspace, 'approval-smoke.txt'), 'utf8'), 'approved by browser smoke\n');
     assert.equal(mockProvider.chatRequests, 2, 'The mock provider should make one tool-call turn and one final-answer turn');
@@ -1271,6 +1297,12 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await protocol.call('Page.reload', { ignoreCache: true });
     await waitForAppReady(protocol, pageErrors, failedResponses);
     await waitForConnectionLabel(protocol, 'Connected to local runtime');
+    if (process.env.XYST_SMOKE_SCREENSHOT) {
+      await protocol.call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 960, deviceScaleFactor: 1, mobile: false });
+      await evaluate(protocol, `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      const screenshot = await protocol.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      await fs.writeFile(process.env.XYST_SMOKE_SCREENSHOT, Buffer.from(screenshot.data, 'base64'));
+    }
     progress('browser assertions complete');
     return {
       browser: path.basename(browser),
