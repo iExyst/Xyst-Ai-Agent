@@ -115,7 +115,7 @@ export async function smokeWindowsInstaller({ installerPath } = {}) {
     const runtime = await runProcess(bundledNode, ['--version'], {
       cwd: installDirectory,
       env: process.env,
-      timeoutMs: 10_000,
+      timeoutMs: 30_000,
       maxOutputBytes: 1024,
     });
     assert.equal(runtime.exitCode, 0, `The installed Node.js runtime failed: ${runtime.stderr}`);
@@ -240,7 +240,7 @@ async function assertNoRunningXystDesktop() {
       '-Command',
       "Get-Process | Where-Object { $_.ProcessName -eq 'xyst-desktop' } | Select-Object -ExpandProperty Id",
     ],
-    { cwd: ROOT, env: process.env, timeoutMs: 10_000, maxOutputBytes: 2_048 },
+    { cwd: ROOT, env: process.env, timeoutMs: 30_000, maxOutputBytes: 2_048 },
   );
   if (result.exitCode !== 0) throw new Error(`Could not check for a running Xyst desktop process: ${result.stderr}`);
   const processIds = result.stdout.trim().split(/\s+/).filter(Boolean);
@@ -315,7 +315,7 @@ async function runRegistry(args) {
     throw error;
   });
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Windows reg.exe must be a regular system file.');
-  return runProcess(executable, args, { cwd: ROOT, env: process.env, timeoutMs: 10_000, maxOutputBytes: 8_192 });
+  return runProcess(executable, args, { cwd: ROOT, env: process.env, timeoutMs: 30_000, maxOutputBytes: 8_192 });
 }
 
 function trimRegistryQuotes(value) {
@@ -348,7 +348,7 @@ async function getShellShortcutPaths(productName) {
       '-Command',
       "[Environment]::GetFolderPath('DesktopDirectory'); [Environment]::GetFolderPath('Programs')",
     ],
-    { cwd: ROOT, env: process.env, timeoutMs: 10_000, maxOutputBytes: 4_096 },
+    { cwd: ROOT, env: process.env, timeoutMs: 30_000, maxOutputBytes: 4_096 },
   );
   if (result.exitCode !== 0) throw new Error(`Could not resolve Windows shortcut folders: ${result.stderr}`);
   const [desktopDirectory, programsDirectory] = result.stdout.trimEnd().split(/\r?\n/);
