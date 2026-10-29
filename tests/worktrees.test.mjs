@@ -79,6 +79,27 @@ test('worktree operations reject invalid branch names and IDs before invoking Gi
   await assert.rejects(removeWorktree(process.cwd(), '../outside'), /Invalid worktree ID/);
 });
 
+test('sandboxable worktrees live outside .agent and remain discoverable and removable', async (t) => {
+  const root = await createTempDirectory('xyst-sandboxable-worktree-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  try {
+    await git(root, 'init', '-q');
+  } catch (error) {
+    if (/not found|ENOENT/i.test(error.message)) return t.skip('Git executable is unavailable');
+    throw error;
+  }
+  await git(root, 'config', 'user.name', 'Xyst AI Assistant Tests');
+  await git(root, 'config', 'user.email', 'xyst-test@example.invalid');
+  await fs.writeFile(path.join(root, 'README.md'), 'initial\n');
+  await git(root, 'add', 'README.md');
+  await git(root, 'commit', '-q', '-m', 'initial');
+
+  const created = await createWorktree(root, 'agent/sandboxable', { sandboxable: true, destinationRoot: root });
+  assert.equal(created.path, await fs.realpath(path.join(root, '.xyst-worktrees', created.id)));
+  assert.ok((await listWorktrees(root)).some((entry) => entry.id === created.id));
+  assert.equal((await removeWorktree(root, created.id)).removed, true);
+});
+
 test('unborn repositories give child worktrees a private snapshot without staging parent files or copying agent state', async (t) => {
   const root = await createTempDirectory('xyst-worktree-unborn-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

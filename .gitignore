@@ -7,6 +7,7 @@ coverage/
 .test-tmp/
 .toolchains/
 .agent/
+.xyst-worktrees/
 *.runtime.json
 *.runtime.json.lock
 .env

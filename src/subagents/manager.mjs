@@ -10,6 +10,7 @@ import { AGENT_RUN_STATUSES } from '../core/statuses.mjs';
 export class SubagentManager {
   constructor({ workspaceRoot, stateRoot = workspaceRoot, config, executeTask, taskStore, onEvent = () => {} } = {}) {
     this.workspaceRoot = workspaceRoot;
+    this.stateRoot = stateRoot;
     this.config = config;
     this.executeTask = executeTask;
     this.onEvent = onEvent;
@@ -59,8 +60,12 @@ export class SubagentManager {
       });
       releaseSlot = await this.store.acquireSlot(record.id, { signal: childSignal });
       const branch = `xyst/task-${record.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
-      worktree = await createWorktree(this.workspaceRoot, branch, { signal: childSignal });
-      releaseWorktree = await acquireWorktreeLease(this.workspaceRoot, worktree.id);
+      worktree = await createWorktree(this.workspaceRoot, branch, {
+        signal: childSignal,
+        sandboxable: true,
+        destinationRoot: this.stateRoot,
+      });
+      releaseWorktree = await acquireWorktreeLease(this.stateRoot, worktree.id);
       await this.store.update(record.id, {
         status: 'running',
         started_at: new Date().toISOString(),
@@ -151,7 +156,7 @@ export class SubagentManager {
     } catch (error) {
       const status = timeoutController.signal.aborted ? 'timed_out' : childSignal.aborted ? 'cancelled' : 'failed';
       if (worktree && !releaseWorktree) {
-        releaseWorktree = await acquireWorktreeLease(this.workspaceRoot, worktree.id).catch(() => null);
+        releaseWorktree = await acquireWorktreeLease(this.stateRoot, worktree.id).catch(() => null);
       }
       const updated = await this.store
         .update(record.id, {

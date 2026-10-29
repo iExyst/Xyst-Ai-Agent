@@ -10,18 +10,25 @@ const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const MAX_SNAPSHOT_PATHS_BYTES = 32 * 1024 * 1024;
 
 /** Create a checked-out Git worktree under the workspace's protected .agent directory. */
-export async function createWorktree(workspaceRoot, branch, { signal } = {}) {
+export async function createWorktree(workspaceRoot, branch, { signal, sandboxable = false, destinationRoot } = {}) {
   validateBranch(branch);
   const workspace = await fs.realpath(workspaceRoot);
   const repository = await getRepositoryRoot(workspace, signal);
   const checkedBranch = await git(repository, ['check-ref-format', '--branch', branch], { signal });
   if (checkedBranch.exitCode !== 0) throw new TypeError('Branch must be a valid Git branch name');
-  const baseCommit = await resolveWorktreeBase(repository, workspace, signal);
+  const baseCommit = await resolveWorktreeBase(repository, signal);
   const id = randomUUID();
-  const destination = await resolveWorkspacePath(workspace, path.join('.agent', 'worktrees', id));
+  const worktreeRoot = sandboxable ? '.xyst-worktrees' : path.join('.agent', 'worktrees');
+  const destinationBase = destinationRoot ? await fs.realpath(destinationRoot) : workspace;
+  if (!isPathInside(repository, destinationBase)) throw new Error('Worktree destination must be inside the Git repository');
+  const managedRoot = await resolveWorkspacePath(destinationBase, worktreeRoot);
+  await fs.mkdir(managedRoot, { recursive: true, mode: 0o700 });
+  const managedRootInfo = await fs.lstat(managedRoot);
+  if (managedRootInfo.isSymbolicLink() || !managedRootInfo.isDirectory())
+    throw new Error('Managed worktree directory must be a real directory');
+  const destination = await resolveWorkspacePath(managedRoot, id);
   const hooksPath = await createEmptyHooksDirectory();
   try {
-    await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.mkdir(destination);
     try {
       const disabledFilters = await getGitFilterOverrides(repository, signal);
@@ -41,19 +48,19 @@ export async function createWorktree(workspaceRoot, branch, { signal } = {}) {
   }
 }
 
-/** List only worktrees whose canonical paths are beneath .agent/worktrees. */
+/** List worktrees whose canonical paths are beneath a managed worktree directory. */
 export async function listWorktrees(workspaceRoot, { signal } = {}) {
   const workspace = await fs.realpath(workspaceRoot);
   const repository = await getRepositoryRoot(workspace, signal);
-  const root = path.join(workspace, '.agent', 'worktrees');
+  const roots = [path.join(repository, '.agent', 'worktrees'), path.join(repository, '.xyst-worktrees')];
   const result = await git(repository, ['worktree', 'list', '--porcelain', '-z'], { signal });
   if (result.exitCode !== 0) throw gitFailure('list worktrees', result);
   const entries = parseWorktreePorcelain(result.stdout);
   const managed = [];
   for (const entry of entries) {
-    if (!isPathInside(root, entry.path)) continue;
+    if (!roots.some((root) => isPathInside(root, entry.path))) continue;
     const resolved = await fs.realpath(entry.path).catch((error) => (error.code === 'ENOENT' ? null : Promise.reject(error)));
-    if (!resolved || !isPathInside(root, resolved)) continue;
+    if (!resolved || !roots.some((root) => isPathInside(root, resolved))) continue;
     managed.push({ id: path.basename(resolved), branch: entry.branch, path: resolved, head: entry.head });
   }
   return managed.sort((a, b) => (a.branch || '').localeCompare(b.branch || '') || a.id.localeCompare(b.id));
@@ -66,12 +73,11 @@ export async function removeWorktree(workspaceRoot, id, { signal } = {}) {
   const release = await acquireWorktreeLease(workspace, id);
   try {
     const repository = await getRepositoryRoot(workspace, signal);
-    const worktreePath = await resolveWorkspacePath(workspace, path.join('.agent', 'worktrees', id), { mustExist: true });
-    if (path.basename(worktreePath) !== id || !isPathInside(path.join(workspace, '.agent', 'worktrees'), worktreePath))
-      throw new Error('Worktree path is outside the managed worktree directory');
     const known = await listWorktrees(workspace, { signal });
-    if (!known.some((entry) => entry.id === id && entry.path === worktreePath))
-      throw Object.assign(new Error('Worktree is not registered with this repository'), { code: 'NOT_FOUND' });
+    const entry = known.find((item) => item.id === id);
+    if (!entry) throw Object.assign(new Error('Worktree is not registered with this repository'), { code: 'NOT_FOUND' });
+    const worktreePath = entry.path;
+    if (path.basename(worktreePath) !== id) throw new Error('Worktree path is outside the managed worktree directory');
     const disabledFilters = await getGitFilterOverrides(repository, signal);
     const status = await git(worktreePath, ['status', '--porcelain', '--untracked-files=all', '--ignored=matching'], {
       signal,
@@ -94,7 +100,8 @@ export async function removeWorktree(workspaceRoot, id, { signal } = {}) {
 export async function acquireWorktreeLease(workspaceRoot, id) {
   if (typeof id !== 'string' || !ID_PATTERN.test(id)) throw new TypeError('Invalid worktree ID');
   const workspace = await fs.realpath(workspaceRoot);
-  const lockPath = await resolveWorkspacePath(workspace, path.join('.agent', 'worktree-locks', `${id}.lock`));
+  const repository = await getStateRoot(workspace);
+  const lockPath = await resolveWorkspacePath(repository, path.join('.agent', 'worktree-locks', `${id}.lock`));
   const lockDirectory = path.dirname(lockPath);
   await fs.mkdir(lockDirectory, { recursive: true, mode: 0o700 });
   let handle;
@@ -160,7 +167,8 @@ export async function acquireWorktreeLease(workspaceRoot, id) {
 /** Inspect stale worktree leases without changing them. Unknown and remote owners require manual investigation. */
 export async function inspectWorktreeLocks(workspaceRoot, { verifyIdentity = verifyProcessIdentity } = {}) {
   const workspace = await fs.realpath(workspaceRoot);
-  const directory = await resolveWorkspacePath(workspace, path.join('.agent', 'worktree-locks'));
+  const repository = await getStateRoot(workspace);
+  const directory = await resolveWorkspacePath(repository, path.join('.agent', 'worktree-locks'));
   let names;
   try {
     names = await fs.readdir(directory);
@@ -229,7 +237,8 @@ export async function inspectWorktreeLocks(workspaceRoot, { verifyIdentity = ver
 export async function recoverWorktreeLock(workspaceRoot, id, { verifyIdentity = verifyProcessIdentity } = {}) {
   if (typeof id !== 'string' || !ID_PATTERN.test(id)) throw new TypeError('Invalid worktree ID');
   const workspace = await fs.realpath(workspaceRoot);
-  const lockPath = await resolveWorkspacePath(workspace, path.join('.agent', 'worktree-locks', `${id}.lock`), { mustExist: true });
+  const repository = await getStateRoot(workspace);
+  const lockPath = await resolveWorkspacePath(repository, path.join('.agent', 'worktree-locks', `${id}.lock`), { mustExist: true });
   const info = await fs.lstat(lockPath);
   if (info.isSymbolicLink() || !info.isFile() || info.size > 4_096)
     throw Object.assign(new Error('Worktree lock is not a safe regular file'), { code: 'WORKTREE_LOCK_UNSAFE' });
@@ -290,7 +299,21 @@ async function getRepositoryRoot(workspace, signal) {
   return fs.realpath(result.stdout.trim());
 }
 
-async function resolveWorktreeBase(repository, workspace, signal) {
+async function getStateRoot(workspace) {
+  const gitEntry = await fs.lstat(path.join(workspace, '.git')).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!gitEntry) return workspace;
+  try {
+    return await getRepositoryRoot(workspace);
+  } catch (error) {
+    if (error.code !== 'WORKTREE_UNAVAILABLE') throw error;
+    return workspace;
+  }
+}
+
+async function resolveWorktreeBase(repository, signal) {
   const head = await git(repository, ['rev-parse', '--verify', 'HEAD'], { signal });
   if (head.exitCode === 0) return head.stdout.trim();
   if (signal?.aborted) throw signal.reason || new Error('Worktree creation was cancelled');
@@ -299,11 +322,11 @@ async function resolveWorktreeBase(repository, workspace, signal) {
   if (symbolicHead.exitCode !== 0)
     throw Object.assign(gitFailure('resolve a worktree base commit', head), { code: 'WORKTREE_UNAVAILABLE' });
 
-  return createUnbornRepositorySnapshot(repository, workspace, signal);
+  return createUnbornRepositorySnapshot(repository, signal);
 }
 
-async function createUnbornRepositorySnapshot(repository, workspace, signal) {
-  const snapshotDirectory = await resolveWorkspacePath(workspace, path.join('.agent', 'worktree-snapshots'));
+async function createUnbornRepositorySnapshot(repository, signal) {
+  const snapshotDirectory = await resolveWorkspacePath(repository, path.join('.agent', 'worktree-snapshots'));
   await fs.mkdir(snapshotDirectory, { recursive: true, mode: 0o700 });
   const temporaryDirectory = await fs.mkdtemp(path.join(snapshotDirectory, 'snapshot-'));
   const indexPath = path.join(temporaryDirectory, 'index');
@@ -313,7 +336,7 @@ async function createUnbornRepositorySnapshot(repository, workspace, signal) {
   try {
     const disabledFilters = await getGitFilterOverrides(repository, signal);
     await runGit(repository, ['read-tree', '--empty'], { signal, hooksPath, extraConfig: disabledFilters, environment: indexEnvironment });
-    const agentStatePath = path.relative(repository, path.join(workspace, '.agent')).split(path.sep).join('/');
+    const agentStatePath = '.agent';
     if (!agentStatePath || agentStatePath === '..' || agentStatePath.startsWith('../') || path.posix.isAbsolute(agentStatePath))
       throw Object.assign(new Error('Workspace state directory is outside the Git repository'), { code: 'WORKTREE_UNAVAILABLE' });
     const files = await runGit(repository, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
@@ -327,7 +350,7 @@ async function createUnbornRepositorySnapshot(repository, workspace, signal) {
       throw new Error('Could not create isolated workspace snapshot: repository contains too many paths to enumerate safely');
     const paths = [];
     for (const relativePath of new Set(files.stdout.split('\0').filter(Boolean))) {
-      if (isWorkspaceStatePath(relativePath, agentStatePath)) continue;
+      if (isWorkspaceStatePath(relativePath, agentStatePath) || isSandboxWorktreePath(relativePath)) continue;
       const absolutePath = path.resolve(repository, relativePath);
       if (!isPathInside(repository, absolutePath))
         throw new Error('Could not create isolated workspace snapshot: Git returned a path outside the repository');
@@ -392,6 +415,11 @@ function isWorkspaceStatePath(relativePath, agentStatePath) {
   const normalizedCandidate = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
   const normalizedState = process.platform === 'win32' ? state.toLowerCase() : state;
   return normalizedCandidate === normalizedState || normalizedCandidate.startsWith(`${normalizedState}/`);
+}
+
+function isSandboxWorktreePath(relativePath) {
+  const candidate = relativePath.replaceAll('\\', '/').replace(/\/$/, '');
+  return candidate === '.xyst-worktrees' || candidate.startsWith('.xyst-worktrees/');
 }
 
 async function runGit(cwd, args, { signal, hooksPath, extraConfig = [], environment, maxOutputBytes } = {}) {

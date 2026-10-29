@@ -439,7 +439,7 @@ test('subagent manager runs with an isolated managed worktree and leaves changes
   assert.equal(persistedTask.result, childSummary);
   assert.equal(persistedTask.changed_paths.length, 102);
   assert.deepEqual(persistedTask.usage, result.usage);
-  assert.ok(childDirectory.startsWith(path.join(root, '.agent', 'worktrees')));
+  assert.ok(childDirectory.startsWith(path.join(root, '.xyst-worktrees')));
   await assert.rejects(fs.access(path.join(root, 'child-change.txt')), { code: 'ENOENT' });
   assert.equal(await fs.readFile(path.join(childDirectory, 'child-change.txt'), 'utf8'), 'isolated result\n');
   assert.ok(events.some((event) => event.type === 'subagent_task_started'));
@@ -469,7 +469,7 @@ test('subagent manager starts from an unborn project snapshot without changing t
   );
   await git(root, 'config', 'filter.xyst-subagent-clean.clean', `"${process.execPath}" "${filterPath}"`);
   await git(root, 'config', 'filter.xyst-subagent-clean.required', 'true');
-  await fs.appendFile(path.join(root, '.git', 'info', 'exclude'), '\n.agent/\n');
+  await fs.appendFile(path.join(root, '.git', 'info', 'exclude'), '\n.agent/\n.xyst-worktrees/\n');
   const parentStatus = await gitStatusWithoutFilters(root);
 
   const childSessionId = randomUUID();
@@ -501,7 +501,7 @@ test('subagent manager starts from an unborn project snapshot without changing t
   assert.equal((await runProcess('git', ['diff', '--cached', '--quiet'], { cwd: root })).exitCode, 0);
   await assert.rejects(fs.access(filterMarker), { code: 'ENOENT' }, 'Git filters must stay disabled for snapshot and diff inspection');
   assert.equal(await gitStatusWithoutFilters(root), parentStatus);
-  assert.ok(childPath.startsWith(path.join(root, '.agent', 'worktrees')));
+  assert.ok(childPath.startsWith(path.join(root, '.xyst-worktrees')));
 });
 
 test('subagent result preserves the invalid-review-output child status', async (t) => {

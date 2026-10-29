@@ -15,6 +15,38 @@ import {
 import { BackgroundProcessManager } from '../src/platform/background-processes.mjs';
 import { runProcess } from '../src/platform/process.mjs';
 import { createTempDirectory } from './helpers.mjs';
+import { createWorktree } from '../src/platform/worktrees.mjs';
+
+test('sandboxed processes can run from managed subagent worktrees outside .agent', async (t) => {
+  const root = await createTempDirectory('xyst-sandboxable-subagent-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const git = async (...args) => {
+    const result = await runProcess('git', args, { cwd: root, timeoutMs: 15_000 });
+    if (result.exitCode !== 0) throw new Error(result.stderr || `git ${args.join(' ')} exited ${result.exitCode}`);
+    return result;
+  };
+  await git('init', '-q');
+  await git('config', 'user.name', 'Xyst AI Assistant Tests');
+  await git('config', 'user.email', 'xyst-test@example.invalid');
+  await fs.writeFile(path.join(root, 'README.md'), 'initial\n');
+  await git('add', 'README.md');
+  await git('commit', '-q', '-m', 'initial');
+
+  const worktree = await createWorktree(root, 'agent/sandbox-integration', { sandboxable: true, destinationRoot: root });
+  assert.ok(worktree.path.includes(`${path.sep}.xyst-worktrees${path.sep}`));
+  const child = await runIsolatedProcess(
+    process.platform === 'linux' ? '/usr/bin/touch' : process.execPath,
+    process.platform === 'linux' ? ['sandbox-child.txt'] : ['-e', "require('node:fs').writeFileSync('sandbox-child.txt', 'ok')"],
+    {
+      workspaceRoot: worktree.path,
+      timeoutMs: 20_000,
+    },
+  );
+  assert.equal(child.sandboxed, true, child.stderr);
+  assert.equal(child.exitCode, 0, child.stderr);
+  if (process.platform !== 'linux') assert.equal(await fs.readFile(path.join(worktree.path, 'sandbox-child.txt'), 'utf8'), 'ok');
+  else await fs.access(path.join(worktree.path, 'sandbox-child.txt'));
+});
 
 test('Bubblewrap isolates host files and networking while allowing workspace writes', async (t) => {
   if (process.platform !== 'linux') return t.skip('Bubblewrap integration requires Linux');
