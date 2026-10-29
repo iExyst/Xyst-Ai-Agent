@@ -78,3 +78,9 @@ The existing reconnect path ignored all assistant deltas and waited for run comp
 Auto-scroll no longer treats a content-growth scroll event as the reader scrolling away. It follows incoming content, pauses on upward scrolling, resumes at the bottom or via Latest messages, and reacts to viewport/composer resizing.
 
 Validation: three scroll regressions passed, including the growth-event/pending-frame race. Browser integration passed with a gated provider stream proving that a partial reply is visible at the bottom before completion, then reloading mid-stream and verifying that the partial reply is restored exactly once before finishing. Existing responsive/theme, approval, model-switch, budget, conversation, and connection checks passed. The updated layout was inspected in a browser screenshot. Lint and diff checks passed.
+
+## Follow-up: unified Xyst brand mark
+
+Replaced the robot imagery with an original folded X monogram, using mint and teal on a dark rounded tile. The sidebar/home control, conversation avatars, and workspace badge share the matching inline vector mark. The control-room navigation action remains on the logo button. The favicon and desktop/launcher icon assets are generated from the new SVG source; the icon build script now renders that source and refreshes the GUI PNG as part of the same operation.
+
+Validation: inspected the generated PNG, ran the existing icon generator successfully, and passed lint/diff checks. A Windows release rebuild embeds the updated native icon before packaging. No new behavioral tests were added for this visual asset replacement.
