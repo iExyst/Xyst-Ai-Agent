@@ -16,7 +16,7 @@
       <aside class="sidebar" aria-label="Workspace and sessions">
         <div class="brand-row">
           <img class="brand-mark" src="/app/brand-icon.png" alt="Xyst AI Assistant">
-          <div class="brand-copy"><strong>Xyst AI Assistant</strong><span>LOCAL CODING PARTNER</span></div>
+          <div class="brand-copy"><strong>XYST</strong><span>CONTROL ROOM</span></div>
           <span id="connection-indicator" class="connection-dot" title="Connecting" aria-label="Connecting"></span>
         </div>
         <button id="new-session" class="new-session-button" type="button"><span aria-hidden="true">＋</span> New conversation <kbd>⌘ K</kbd></button>
@@ -31,6 +31,17 @@
         <div class="section-heading"><span>RECENT</span><div class="session-list-actions"><button id="import-session" type="button" title="Import a session export">Import</button><button id="refresh-sessions" type="button" title="Refresh sessions" aria-label="Refresh sessions">↻</button></div></div>
         <nav id="session-list" class="session-list" aria-label="Recent conversations"></nav>
         <div id="sidebar-search-results" class="sidebar-search-results" hidden></div>
+        <nav id="control-room-nav" class="control-room-nav" aria-label="System settings">
+          <span class="section-heading">SYSTEM</span>
+          <button type="button" data-settings-category="models">◈ <span>Models</span></button>
+          <button type="button" data-settings-category="routing">⌁ <span>Routing</span></button>
+          <button type="button" data-settings-category="agents">✳ <span>Agent setup</span></button>
+          <button type="button" data-settings-category="safety">⬡ <span>Safety</span></button>
+          <button type="button" data-settings-category="appearance">◐ <span>Appearance</span></button>
+          <button type="button" data-settings-category="data">⌕ <span>Data & search</span></button>
+          <button type="button" data-settings-category="updates">↻ <span>Updates</span></button>
+          <button type="button" data-settings-category="usage">▤ <span>Usage & limits</span></button>
+        </nav>
         <footer class="sidebar-footer">
           <div class="workspace-avatar" aria-hidden="true"><img src="/app/brand-icon.png" alt=""></div>
           <div class="workspace-copy"><strong>Current workspace</strong><span id="workspace-status">Local · connecting</span></div>

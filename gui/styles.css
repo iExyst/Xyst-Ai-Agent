@@ -1124,6 +1124,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .brand-mark { width: 34px; height: 34px; border-radius: 7px; box-shadow: none; }
 .brand-copy strong { font-size: 16px; letter-spacing: .05em; }
 .brand-copy span { color: var(--text-subtle); font-family: 'DM Mono', Consolas, monospace; }
+.control-room-nav { flex: none; display: grid; gap: 2px; padding: 9px 14px; border-top: 1px solid var(--line-soft); }
+.control-room-nav .section-heading { margin: 3px 0 6px; padding: 0 9px; font-size: 9px; letter-spacing: .12em; }
+.control-room-nav button { display: flex; align-items: center; gap: 12px; min-height: 30px; padding: 5px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-subtle); text-align: left; font-size: 12px; cursor: pointer; }
+.control-room-nav button:hover { border-color: var(--line); background: var(--surface-active); color: var(--brand-cyan); }
+.sidebar { overflow-y: auto; }
+.welcome-state > img, .welcome-state .welcome-mark { width: 42px; height: 42px; border-radius: 7px; box-shadow: none; }
+@media (max-width: 760px) { .control-room-nav { padding: 8px 5px; } .control-room-nav button { justify-content: center; padding: 5px; } .control-room-nav button span, .control-room-nav .section-heading { display: none; } }
 .topbar, .primary-tabs { background: var(--panel); border-color: var(--line-soft); backdrop-filter: none; }
 .new-session-button, .send-button { background: #396b55; color: #eef7f1; border: 1px solid #527d64; border-radius: 5px; box-shadow: none; }
 .new-session-button:hover, .send-button:hover:not(:disabled) { background: #487d62; }

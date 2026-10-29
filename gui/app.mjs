@@ -5192,6 +5192,12 @@ elements.primary_tabs.addEventListener('keydown', (event) => {
 });
 elements.discover_models_button.addEventListener('click', () => void refreshLocalModels());
 elements.settings_discover_models.addEventListener('click', () => void refreshLocalModels());
+document.getElementById('control-room-nav').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-settings-category]');
+  if (!button) return;
+  selectedSettingsCategory = button.dataset.settingsCategory;
+  selectPrimaryTab('settings');
+});
 elements.toggle_sidebar.addEventListener('click', () => void toggleSidebar());
 elements.memory_button.addEventListener('click', () => void openMemory());
 elements.goals_button.addEventListener('click', () => void openGoals());
