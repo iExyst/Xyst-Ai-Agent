@@ -33,6 +33,9 @@ test('Bubblewrap isolates host files and networking while allowing workspace wri
   const approvalState = path.join(workspace, '.agent', 'approvals', 'rules.json');
   await fs.mkdir(path.dirname(approvalState), { recursive: true });
   await fs.writeFile(approvalState, '{"rules":["host-approval-canary"]}');
+  const subagentTaskState = path.join(workspace, '.agent', 'subagents', 'tasks.json');
+  await fs.mkdir(path.dirname(subagentTaskState), { recursive: true });
+  await fs.writeFile(subagentTaskState, '{"tasks":["host-task-canary"]}');
   await fs.writeFile(path.join(outside, 'secret.txt'), 'host-only-secret');
   await fs.symlink(outside, path.join(workspace, 'outside-link'), 'dir');
 
@@ -76,7 +79,7 @@ test('Bubblewrap isolates host files and networking while allowing workspace wri
     '/bin/sh',
     [
       '-c',
-      'test ! -e /workspace/.agent/approvals/rules.json && mkdir -p /workspace/.agent/approvals && printf forged > /workspace/.agent/approvals/rules.json && cat /workspace/.agent/approvals/rules.json',
+      'test ! -e /workspace/.agent/approvals/rules.json && test ! -e /workspace/.agent/subagents/tasks.json && mkdir -p /workspace/.agent/approvals /workspace/.agent/subagents && printf forged > /workspace/.agent/approvals/rules.json && printf private-task-state > /workspace/.agent/subagents/tasks.json && cat /workspace/.agent/approvals/rules.json /workspace/.agent/subagents/tasks.json',
     ],
     {
       workspaceRoot: workspace,
@@ -85,11 +88,16 @@ test('Bubblewrap isolates host files and networking while allowing workspace wri
   );
   assert.equal(stateProbe.sandboxed, true);
   assert.equal(stateProbe.exitCode, 0, stateProbe.stderr);
-  assert.equal(stateProbe.stdout, 'forged', 'the process should see only its private temporary state view');
+  assert.equal(stateProbe.stdout, 'forgedprivate-task-state', 'the process should see only its private temporary state view');
   assert.equal(
     await fs.readFile(approvalState, 'utf8'),
     '{"rules":["host-approval-canary"]}',
     'sandbox writes must not alter host approval policy',
+  );
+  assert.equal(
+    await fs.readFile(subagentTaskState, 'utf8'),
+    '{"tasks":["host-task-canary"]}',
+    'sandbox writes must not alter host subagent task records',
   );
 
   const readOnlyTarget = path.join(workspace, 'sandbox-read-only-probe');
@@ -211,6 +219,9 @@ test('Windows AppContainer helper reaches the shared Node process path and fails
   const approvalState = path.join(workspace, '.agent', 'approvals', 'rules.json');
   await fs.mkdir(path.dirname(approvalState), { recursive: true });
   await fs.writeFile(approvalState, '{"rules":["host-approval-canary"]}');
+  const subagentTaskState = path.join(workspace, '.agent', 'subagents', 'tasks.json');
+  await fs.mkdir(path.dirname(subagentTaskState), { recursive: true });
+  await fs.writeFile(subagentTaskState, '{"tasks":["host-task-canary"]}');
 
   const streams = await runIsolatedProcess('cmd.exe', ['/d', '/c', 'echo stdout-marker & echo stderr-marker 1>&2'], {
     workspaceRoot: workspace,
@@ -247,6 +258,9 @@ test('Windows AppContainer helper reaches the shared Node process path and fails
     "$p = Join-Path $PWD '.agent\\approvals\\rules.json'",
     'try { Get-Content -LiteralPath $p -ErrorAction Stop; exit 21 } catch {}',
     "try { Set-Content -LiteralPath $p -Value 'forged' -ErrorAction Stop; exit 22 } catch {}",
+    "$p = Join-Path $PWD '.agent\\subagents\\tasks.json'",
+    'try { Get-Content -LiteralPath $p -ErrorAction Stop; exit 23 } catch {}',
+    "try { Set-Content -LiteralPath $p -Value 'forged-task-state' -ErrorAction Stop; exit 24 } catch {}",
     "Write-Output 'approval-state-protected'",
   ].join('; ');
   const stateProbe = await runIsolatedProcess('powershell.exe', ['-NoLogo', '-NoProfile', '-Command', stateProbeScript], {
@@ -261,6 +275,11 @@ test('Windows AppContainer helper reaches the shared Node process path and fails
     await fs.readFile(approvalState, 'utf8'),
     '{"rules":["host-approval-canary"]}',
     'AppContainer must not read or mutate saved approval policy',
+  );
+  assert.equal(
+    await fs.readFile(subagentTaskState, 'utf8'),
+    '{"tasks":["host-task-canary"]}',
+    'AppContainer must not read or mutate saved subagent task records',
   );
 
   const readOnlyFile = path.join(workspace, 'read-only-write.txt');
