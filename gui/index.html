@@ -122,7 +122,7 @@
         <section id="settings-view" class="settings-view" role="tabpanel" aria-labelledby="settings-button" hidden>
           <div class="settings-page-heading">
             <div><p class="eyebrow">PERSONALIZE YOUR ASSISTANT</p><h1>Settings</h1><p>Choose a model, connect a local server, and tune how Xyst works.</p></div>
-            <button id="advanced-settings-button" class="secondary-button" type="button">All runtime settings <span aria-hidden="true">↗</span></button>
+            <button id="advanced-settings-button" class="secondary-button" type="button">Advanced settings <span aria-hidden="true">↗</span></button>
           </div>
           <section class="settings-page-card model-connection-card" aria-labelledby="model-connection-title">
             <div class="settings-card-heading"><div><span class="settings-card-icon" aria-hidden="true">◉</span><div><h2 id="model-connection-title">Local model server</h2><p>Connect LM Studio, Ollama, or another OpenAI-compatible server running on this computer.</p></div></div><button id="settings-discover-models" class="secondary-button" type="button">Find local models</button></div>
@@ -141,8 +141,8 @@
       </main>
     </div>
 
-    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading"><div><p class="eyebrow">CONNECTION</p><h2 id="settings-title">Runtime settings</h2></div><button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button></div>
+    <dialog id="settings-dialog" class="settings-dialog runtime-settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading"><div><p class="eyebrow">PERSONALIZE XYST</p><h2 id="settings-title">Settings</h2><p class="dialog-description">Shape your models, agent behavior, privacy, and workspace.</p></div><button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button></div>
       <div id="settings-content" class="settings-content"><p class="muted-copy">Loading current settings…</p></div>
     </dialog>
     <dialog id="recap-dialog" class="settings-dialog recap-dialog" aria-labelledby="recap-title">

@@ -147,6 +147,8 @@ let toastTimer = null;
 let sessionsById = new Map();
 let modelProfiles = {};
 let localModelChoices = [];
+let localModelResultsExpanded = false;
+let localModelSearchTerm = '';
 let localDiscoveryServers = [];
 let selectedPrimaryTab = 'agent';
 let localDiscoveryCompleted = false;
@@ -268,6 +270,27 @@ function renderLocalModelDiscovery(result) {
       ),
     );
   } else {
+    const disclosure = node('details', 'local-model-disclosure');
+    disclosure.open = localModelResultsExpanded;
+    disclosure.addEventListener('toggle', () => {
+      localModelResultsExpanded = disclosure.open;
+    });
+    const summary = node('summary', 'local-model-summary');
+    summary.append(
+      node('strong', '', `${localModelChoices.length} model${localModelChoices.length === 1 ? '' : 's'} found`),
+      node('span', '', 'Search or browse local servers'),
+    );
+    const controls = node('div', 'local-model-browser-controls');
+    const search = node('input', 'local-model-search');
+    search.type = 'search';
+    search.autocomplete = 'off';
+    search.placeholder = 'Filter by model or server';
+    search.value = localModelSearchTerm;
+    search.setAttribute('aria-label', 'Filter discovered local models');
+    const matchCount = node('span', 'local-model-match-count', `${localModelChoices.length} shown`);
+    controls.append(search, matchCount);
+    const rows = node('div', 'local-model-list');
+    const searchableRows = [];
     for (const [index, choice] of localModelChoices.entries()) {
       const row = node('div', 'local-model-row');
       const details = node('div', 'local-model-info');
@@ -314,8 +337,20 @@ function renderLocalModelDiscovery(result) {
               : connectDiscoveredModel(index)),
       );
       row.append(details, button);
-      list.append(row);
+      rows.append(row);
+      searchableRows.push({ row, text: `${choice.model} ${choice.server.name} ${choice.server.base_url}`.toLowerCase() });
     }
+    search.addEventListener('input', () => {
+      localModelSearchTerm = search.value.trim().toLowerCase();
+      let visible = 0;
+      for (const item of searchableRows) {
+        item.row.hidden = localModelSearchTerm !== '' && !item.text.includes(localModelSearchTerm);
+        if (!item.row.hidden) visible += 1;
+      }
+      matchCount.textContent = `${visible} shown`;
+    });
+    disclosure.append(summary, controls, rows);
+    list.append(disclosure);
   }
   appendLocalModelPickerOptions();
 }
@@ -1941,7 +1976,47 @@ function settingRow(label, value) {
   return row;
 }
 
-function createSettingsEditor(settings) {
+function createSettingsOverview(settings) {
+  const overview = node('section', 'settings-overview');
+  overview.append(
+    node('h3', '', 'Your setup at a glance'),
+    node('p', 'muted-copy', 'A quick view of the settings that shape each Xyst run.'),
+  );
+  const cards = node('div', 'settings-overview-grid');
+  const configuredModels = Object.keys(settings.models || {}).length;
+  const webSearch = settings.web_search?.enabled
+    ? settings.web_search.provider === 'brave'
+      ? settings.web_search.credential_configured
+        ? 'Brave search connected'
+        : 'Automatic search fallback'
+      : settings.web_search.provider === 'automatic'
+        ? 'Automatic keyless search'
+        : 'Wikipedia references'
+    : 'Off';
+  const autonomy = settings.tools?.autonomy === 'unrestricted' ? 'Unrestricted' : 'Assisted';
+  const sandbox = settings.sandbox?.mode || 'None';
+  const entries = [
+    ['Default model', settings.default_model || 'Automatic', '◈'],
+    ['Model profiles', `${configuredModels} configured`, '⌕'],
+    ['Automation', autonomy, '✳'],
+    ['Sandbox', sandbox, '⬡'],
+    ['Web search', webSearch, '⌁'],
+    ['Child agents', settings.subagents?.enabled ? `${settings.subagents.max_concurrent || 2} concurrent max` : 'Off', '◎'],
+  ];
+  for (const [label, value, icon] of entries) {
+    const card = node('article', 'settings-overview-card');
+    card.append(
+      node('span', 'settings-overview-icon', icon),
+      node('span', 'settings-overview-label', label),
+      node('strong', 'settings-overview-value', value),
+    );
+    cards.append(card);
+  }
+  overview.append(cards);
+  return overview;
+}
+
+function createSettingsEditor(settings, usage) {
   const form = node('form', 'runtime-settings-form');
   const modelLabel = node('label', '', 'Default model profile');
   const model = node('select', 'data-input');
@@ -1959,6 +2034,7 @@ function createSettingsEditor(settings) {
   modelLabel.append(model);
 
   const roleModels = {};
+  const roleModelLabels = [];
   for (const [key, labelText] of [
     ['review_model', 'Review model profile'],
     ['plan_model', 'Plan model profile'],
@@ -1981,7 +2057,7 @@ function createSettingsEditor(settings) {
     });
     label.append(select);
     roleModels[key] = select;
-    form.append(label);
+    roleModelLabels.push(label);
   }
 
   const routingEnabledLabel = node('label', 'settings-checkbox');
@@ -3165,27 +3241,100 @@ function createSettingsEditor(settings) {
     'muted-copy',
     'Changes apply to new runs and are saved in a separate user settings file. Clearing a field removes its override. Credential values are not editable here.',
   );
-  form.append(
-    modelLabel,
-    routingEnabledLabel,
-    routingLabel,
-    localLabel,
-    orchestrationSection,
-    providersSection,
-    connectionsSection,
-    approvalsSection,
-    sandboxSection,
-    autonomySection,
-    layoutSection,
-    themeSection,
-    dataDirectorySection,
-    memorySection,
-    webSearchSection,
-    appUpdatesSection,
-    budgetSection,
-    save,
-    note,
-  );
+  const nav = node('nav', 'runtime-settings-nav');
+  nav.setAttribute('aria-label', 'Runtime settings categories');
+  const panels = node('div', 'runtime-settings-panels');
+  const categoryDefinitions = [
+    {
+      id: 'overview',
+      title: 'Overview',
+      description: 'The current setup at a glance.',
+      icon: '◌',
+      content: [createSettingsOverview(settings)],
+    },
+    {
+      id: 'models',
+      title: 'Models',
+      description: 'Choose a model, manage provider profiles, and tune routing.',
+      icon: '◈',
+      content: [modelLabel, ...roleModelLabels, routingEnabledLabel, routingLabel, localLabel, providersSection, connectionsSection],
+    },
+    {
+      id: 'agents',
+      title: 'Agent',
+      description: 'Set how Xyst plans work and runs independent tasks.',
+      icon: '✳',
+      content: [orchestrationSection, autonomySection],
+    },
+    {
+      id: 'safety',
+      title: 'Safety',
+      description: 'Control approvals and process isolation.',
+      icon: '⬡',
+      content: [approvalsSection, sandboxSection],
+    },
+    {
+      id: 'appearance',
+      title: 'Appearance',
+      description: 'Set your workspace layout, theme, and shortcuts.',
+      icon: '◐',
+      content: [layoutSection, themeSection],
+    },
+    {
+      id: 'data',
+      title: 'Data & search',
+      description: 'Manage memory, search, and where app data is stored.',
+      icon: '⌁',
+      content: [dataDirectorySection, memorySection, webSearchSection],
+    },
+    {
+      id: 'updates',
+      title: 'Updates',
+      description: 'Configure trusted application update checks.',
+      icon: '↻',
+      content: [appUpdatesSection],
+    },
+    {
+      id: 'usage',
+      title: 'Usage & limits',
+      description: 'Review usage details and configure Assisted-mode caps.',
+      icon: '▤',
+      content: [budgetSection, createUsageBreakdown(usage)],
+    },
+  ];
+  const navItems = [];
+  const categoryPanels = [];
+  for (const [index, category] of categoryDefinitions.entries()) {
+    const panelId = `settings-panel-${category.id}`;
+    const button = node('button', 'settings-nav-item');
+    button.type = 'button';
+    button.id = `settings-nav-${category.id}`;
+    button.setAttribute('aria-controls', panelId);
+    button.setAttribute('aria-current', index === 0 ? 'page' : 'false');
+    button.append(node('span', 'settings-nav-icon', category.icon), node('span', 'settings-nav-label', category.title));
+    const panel = node('section', 'settings-category-panel');
+    panel.id = panelId;
+    panel.dataset.settingsPanel = category.id;
+    panel.setAttribute('aria-labelledby', button.id);
+    panel.hidden = index !== 0;
+    const heading = node('header', 'settings-category-heading');
+    heading.append(node('p', 'eyebrow', 'RUNTIME SETTINGS'), node('h3', '', category.title), node('p', 'muted-copy', category.description));
+    const content = node('div', 'settings-category-content');
+    content.append(...category.content);
+    panel.append(heading, content);
+    button.addEventListener('click', () => {
+      for (const item of navItems) item.setAttribute('aria-current', item === button ? 'page' : 'false');
+      for (const currentPanel of categoryPanels) currentPanel.hidden = currentPanel === panel ? false : true;
+      panels.scrollTop = 0;
+    });
+    navItems.push(button);
+    categoryPanels.push(panel);
+    nav.append(button);
+    panels.append(panel);
+  }
+  const footer = node('div', 'runtime-settings-footer');
+  footer.append(note, save);
+  form.append(nav, panels, footer);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     save.disabled = true;
@@ -3443,7 +3592,7 @@ function createUsageBreakdown(usage) {
 }
 
 async function openSettings() {
-  elements.settings_title.textContent = 'Runtime settings';
+  elements.settings_title.textContent = 'Settings';
   if (!elements.settings_dialog.open) elements.settings_dialog.showModal();
   elements.settings_content.replaceChildren(node('p', 'muted-copy', 'Loading current settings…'));
   try {
@@ -3456,123 +3605,15 @@ async function openSettings() {
     runtimeSettings = settings;
     applyUiPreferences(settings.ui);
     usageSnapshot = usage;
-    const defaultModel = settings.default_model || 'Automatic';
-    const sandbox = settings.sandbox?.mode || 'none';
-    const usageValue = (period, metric) =>
-      usage
-        ? metric === 'cost_usd'
-          ? `$${(usage[period]?.[metric] || 0).toFixed(4)}`
-          : (usage[period]?.[metric] || 0).toLocaleString()
-        : 'Unavailable';
-    elements.settings_content.replaceChildren(
-      settingRow('Default model', defaultModel),
-      settingRow('Fallback strategy', settings.routing?.selection || 'balanced'),
-      settingRow('Prefer local models', settings.routing?.prefer_local === false ? 'No' : 'Yes'),
-      settingRow('Sandbox policy', sandbox),
-      settingRow(
-        'Automation mode',
-        settings.tools?.autonomy === 'unrestricted' ? 'Unrestricted · no app-level tool approvals' : 'Assisted',
-      ),
-      settingRow(
-        'Filesystem access',
-        settings.tools?.autonomy === 'unrestricted' || settings.tools?.filesystem_scope === 'machine'
-          ? 'Machine-wide absolute paths'
-          : 'Selected workspace only',
-      ),
-      settingRow(
-        'Shell execution',
-        settings.tools?.autonomy === 'unrestricted' || settings.tools?.shell_enabled
-          ? settings.tools?.autonomy === 'unrestricted'
-            ? 'Enabled · no app approval'
-            : 'Enabled · approval required'
-          : 'Disabled',
-      ),
-      settingRow(
-        'Web search',
-        settings.web_search?.enabled
-          ? `${settings.web_search.provider === 'brave' ? (settings.web_search.credential_configured ? 'Brave · live results, automatic keyless fallback' : 'Automatic keyless live results') : settings.web_search.provider === 'automatic' ? 'Automatic · live news + references' : 'Wikipedia · live references'}${settings.tools?.autonomy === 'unrestricted' ? '' : ' · approval required'}`
-          : 'Disabled',
-      ),
-      settingRow(
-        'Semantic retrieval',
-        settings.retrieval?.semantic?.enabled
-          ? `${settings.retrieval.semantic.model || 'embedding model'} · ${settings.retrieval.semantic.allow_remote ? `remote HTTPS${settings.retrieval.semantic.credential_configured ? '' : ' · credential missing'}` : 'local endpoint'} · approval required`
-          : 'Disabled',
-      ),
-      settingRow(
-        'Automatic retrieval context',
-        settings.retrieval?.auto_context ? `Enabled · up to ${settings.retrieval.auto_context_max_results || 4} results` : 'Disabled',
-      ),
-      settingRow(
-        'Subagents',
-        settings.subagents?.enabled ? `${settings.subagents.max_concurrent || 2} concurrent · isolated worktrees` : 'Disabled',
-      ),
-      settingRow(
-        'Input budget',
-        settings.budgets?.max_input_tokens ? `${settings.budgets.max_input_tokens.toLocaleString()} tokens` : 'Default',
-      ),
-      settingRow(
-        'Output budget',
-        settings.budgets?.max_output_tokens ? `${settings.budgets.max_output_tokens.toLocaleString()} tokens` : 'Default',
-      ),
-      settingRow(
-        'Session input ceiling',
-        settings.budgets?.max_session_input_tokens
-          ? `${settings.budgets.max_session_input_tokens.toLocaleString()} tokens`
-          : 'No cumulative cap',
-      ),
-      settingRow(
-        'Session output ceiling',
-        settings.budgets?.max_session_output_tokens
-          ? `${settings.budgets.max_session_output_tokens.toLocaleString()} tokens`
-          : 'No cumulative cap',
-      ),
-      settingRow(
-        'Session cost ceiling',
-        settings.budgets?.max_session_cost !== undefined
-          ? `$${settings.budgets.max_session_cost.toFixed(4)} estimated`
-          : 'No cumulative cap',
-      ),
-      settingRow(
-        'Automatic compaction',
-        settings.compaction?.enabled
-          ? `Enabled · ${(settings.compaction.trigger_ratio ?? 0.8) * 100}% context · ${(settings.compaction.budget_trigger_ratio ?? 0.8) * 100}% budget · keeps ${settings.compaction.keep_recent_turns ?? 2} recent turns`
-          : 'Disabled',
-      ),
-      settingRow(
-        'Today · input',
-        `${usageValue('daily', 'input_tokens')} / ${settings.budgets?.max_daily_input_tokens?.toLocaleString() || 'no cap'} tokens`,
-      ),
-      settingRow(
-        'Today · output',
-        `${usageValue('daily', 'output_tokens')} / ${settings.budgets?.max_daily_output_tokens?.toLocaleString() || 'no cap'} tokens`,
-      ),
-      settingRow(
-        'Today · estimated cost',
-        `${usageValue('daily', 'cost_usd')} / ${settings.budgets?.max_daily_cost !== undefined ? `$${settings.budgets.max_daily_cost.toFixed(4)}` : 'no cap'}`,
-      ),
-      settingRow(
-        'This month · input',
-        `${usageValue('monthly', 'input_tokens')} / ${settings.budgets?.max_monthly_input_tokens?.toLocaleString() || 'no cap'} tokens`,
-      ),
-      settingRow(
-        'This month · output',
-        `${usageValue('monthly', 'output_tokens')} / ${settings.budgets?.max_monthly_output_tokens?.toLocaleString() || 'no cap'} tokens`,
-      ),
-      settingRow(
-        'This month · estimated cost',
-        `${usageValue('monthly', 'cost_usd')} / ${settings.budgets?.max_monthly_cost !== undefined ? `$${settings.budgets.max_monthly_cost.toFixed(4)}` : 'no cap'}`,
-      ),
-      createUsageBreakdown(usage),
-      createSettingsEditor(settings),
-    );
-    if (settings.retrieval?.semantic?.enabled) await renderRetrievalControls();
+    const editor = createSettingsEditor(settings, usage);
+    elements.settings_content.replaceChildren(editor);
+    if (settings.retrieval?.semantic?.enabled) await renderRetrievalControls(editor.querySelector('[data-settings-panel="data"]'));
   } catch (error) {
     elements.settings_content.replaceChildren(node('p', 'muted-copy', error.message));
   }
 }
 
-async function renderRetrievalControls() {
+async function renderRetrievalControls(targetPanel) {
   const [index, exclusions] = await Promise.all([client.getSemanticIndex(), client.getRetrievalExclusions()]);
   const section = node('section', 'settings-section');
   section.append(
@@ -3613,23 +3654,29 @@ async function renderRetrievalControls() {
     }
   });
   section.append(reindex, clear, node('h4', '', 'Excluded paths'));
-  const form = node('form', 'retrieval-exclusion-form');
+  const form = node('div', 'retrieval-exclusion-form');
   const input = node('input', 'text-input');
   input.type = 'text';
   input.maxLength = 256;
   input.placeholder = 'src/generated/**';
   input.setAttribute('aria-label', 'Workspace-relative exclusion glob');
   const add = node('button', 'secondary-button', 'Exclude path');
-  add.type = 'submit';
+  add.type = 'button';
   form.append(input, add);
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
+  const addExclusion = async () => {
     try {
       await client.changeRetrievalExclusion('add', input.value);
       showToast('Exclusion added.');
       await openSettings();
     } catch (error) {
       showToast(error.message);
+    }
+  };
+  add.addEventListener('click', addExclusion);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      addExclusion();
     }
   });
   section.append(form);
@@ -3654,7 +3701,7 @@ async function renderRetrievalControls() {
     }
     section.append(list);
   } else section.append(node('p', 'muted-copy', 'No user exclusions configured.'));
-  elements.settings_content.append(section);
+  (targetPanel?.querySelector('.settings-category-content') || elements.settings_content).append(section);
 }
 
 function processCanStop(status) {
