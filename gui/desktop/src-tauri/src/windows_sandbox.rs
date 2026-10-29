@@ -998,6 +998,7 @@ struct WorkspaceAclGrant {
     handle: OwnedHandle,
     _agent_state_handle: Option<OwnedHandle>,
     agent_state_path: PathBuf,
+    agent_state_identity: WorkspaceIdentity,
     original_agent_state_dacl: Vec<u8>,
     sid: windows_sys::Win32::Security::PSID,
     identity: WorkspaceIdentity,
@@ -1119,6 +1120,7 @@ impl WorkspaceAclGrant {
             handle,
             _agent_state_handle: None,
             agent_state_path: agent_state_path.clone(),
+            agent_state_identity,
             original_agent_state_dacl,
             sid,
             identity,
@@ -1160,7 +1162,11 @@ impl WorkspaceAclGrant {
             return Err("Workspace identity changed before AppContainer permission cleanup".into());
         }
         restore_workspace_acl_on_handle(self.handle.0, self.sid)?;
-        restore_agent_state_acl(&self.agent_state_path, &self.original_agent_state_dacl)
+        restore_agent_state_acl(
+            &self.agent_state_path,
+            &self.original_agent_state_dacl,
+            Some(self.agent_state_identity),
+        )
     }
 }
 
@@ -1251,27 +1257,7 @@ fn restore_workspace_acl(
     restore_workspace_acl_on_handle(handle.0, sid)?;
     if let Some(agent_state_dacl) = agent_state_dacl {
         let state_path = canonical.join(".agent");
-        match std::fs::symlink_metadata(&state_path) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => {
-                return Err(format!(
-                    "Could not inspect Xyst state directory before sandbox recovery: {error}"
-                ))
-            }
-            Ok(metadata)
-                if !metadata.is_dir()
-                    || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 =>
-            {
-                return Err("Xyst state path changed type before sandbox recovery".into())
-            }
-            Ok(_) => {}
-        }
-        if let Some(expected_identity) = agent_state_identity {
-            if capture_workspace_identity(&state_path)? != expected_identity {
-                return Err("Xyst state directory identity changed before sandbox recovery".into());
-            }
-        }
-        restore_agent_state_acl(&state_path, agent_state_dacl)?;
+        restore_agent_state_acl(&state_path, agent_state_dacl, agent_state_identity)?;
     }
     Ok(())
 }
@@ -1437,7 +1423,11 @@ fn set_agent_state_deny(
     Ok(handle)
 }
 
-fn restore_agent_state_acl(path: &Path, original_dacl: &[u8]) -> Result<(), String> {
+fn restore_agent_state_acl(
+    path: &Path,
+    original_dacl: &[u8],
+    expected_identity: Option<WorkspaceIdentity>,
+) -> Result<(), String> {
     if !is_valid_saved_agent_state_dacl(original_dacl) {
         return Err("Saved Xyst state permissions exceed the recovery limit".into());
     }
@@ -1473,6 +1463,15 @@ fn restore_agent_state_acl(path: &Path, original_dacl: &[u8]) -> Result<(), Stri
         return Err(win32_error("Could not open protected state during cleanup"));
     }
     let handle = OwnedHandle(handle);
+    if let Some(expected_identity) = expected_identity {
+        if workspace_identity(handle.0)? != expected_identity {
+            return Err(
+                "Xyst state directory identity changed before sandbox ACL restoration".into(),
+            );
+        }
+    } else {
+        workspace_identity(handle.0)?;
+    }
     let mut aligned_dacl = vec![0u64; original_dacl.len().div_ceil(size_of::<u64>())];
     if !original_dacl.is_empty() {
         unsafe {
@@ -1985,11 +1984,11 @@ mod tests {
     use super::{
         build_command_line, build_environment_block, capture_agent_state_dacl,
         capture_workspace_identity, ensure_real_child_directory, quote_windows_argument,
-        restore_workspace_acl, run_appcontainer_command, run_appcontainer_command_with_input,
-        run_appcontainer_command_with_mode, sid_to_string, validate_recovery_record,
-        validate_workspace_tree, AppContainerCommand, AppContainerProfile, OwnedHandle,
-        RecoveryRecord, SandboxRecovery, WorkspaceAclGrant, MAX_CAPTURED_STREAM_BYTES,
-        MAX_ENVIRONMENT_UNITS,
+        restore_agent_state_acl, restore_workspace_acl, run_appcontainer_command,
+        run_appcontainer_command_with_input, run_appcontainer_command_with_mode, sid_to_string,
+        validate_recovery_record, validate_workspace_tree, AppContainerCommand,
+        AppContainerProfile, OwnedHandle, RecoveryRecord, SandboxRecovery, WorkspaceAclGrant,
+        MAX_CAPTURED_STREAM_BYTES, MAX_ENVIRONMENT_UNITS,
     };
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -3166,6 +3165,28 @@ mod tests {
         loop {
             std::thread::sleep(Duration::from_secs(60));
         }
+    }
+
+    #[test]
+    fn recovery_acl_restore_checks_directory_identity_on_the_handle_it_updates() {
+        let root = test_local_app_data("recovery-state-identity");
+        let state =
+            ensure_real_child_directory(&root, ".agent").expect("create state directory fixture");
+        let original_dacl = capture_agent_state_dacl(&state).expect("capture state ACL");
+        let original_acl = dacl_bytes(&state, true);
+        let mut wrong_identity = capture_workspace_identity(&state).expect("capture identity");
+        wrong_identity.file_index = wrong_identity.file_index.wrapping_add(1);
+
+        let error = restore_agent_state_acl(&state, &original_dacl, Some(wrong_identity))
+            .expect_err("replacement identity must be rejected");
+        assert!(
+            error.contains("identity changed"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(dacl_bytes(&state, true), original_acl);
+        restore_agent_state_acl(&root.join("missing-agent-state"), &original_dacl, None)
+            .expect("absent state directory needs no ACL restoration");
+        std::fs::remove_dir_all(root).expect("remove state identity fixture");
     }
 
     #[test]

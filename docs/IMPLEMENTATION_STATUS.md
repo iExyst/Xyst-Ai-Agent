@@ -3,7 +3,7 @@
 ## Persistent approval-state isolation — 2026-10-29
 
 - Workspace-write process sandboxes no longer expose persistent `.agent` approval rules to child processes: Linux Bubblewrap overlays `/workspace/.agent` with a private tmpfs, and Windows AppContainer denies access to the protected directory while holding its verified directory handle without delete sharing. Windows recovery journals the original ACL and directory identity, restores only the matching directory, and preserves recovery state if the path was replaced.
-- Focused checks pass locally: Node sandbox unit tests 25/25, the Windows AppContainer helper integration 1/1, Windows native AppContainer test 1/1, and Windows recovery tests 12/12. Independent patch review found no live replacement bypass after handle pinning. Exact-source hosted Linux/Windows CI and a fresh security review of this patch are pending; this fix is not yet release-qualified.
+- Focused checks pass locally: Node sandbox unit tests 25/25, the Windows AppContainer helper integration 1/1, Windows native AppContainer test 1/1, and Windows recovery tests 13/13. Independent patch review found no live-grant replacement bypass; recovery now verifies identity on the same handle used to restore the ACL. Exact-source hosted Linux/Windows CI and a fresh security review of this patch are pending; this fix is not yet release-qualified.
 
 ## Release-readiness security review — 2026-10-28
 
