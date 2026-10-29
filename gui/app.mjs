@@ -104,7 +104,6 @@ const elements = Object.fromEntries(
     'settings-discover-models',
     'local-model-results',
     'configured-models-list',
-    'advanced-settings-button',
     'settings-dialog',
     'settings-content',
     'close-settings',
@@ -151,6 +150,7 @@ let localModelResultsExpanded = false;
 let localModelSearchTerm = '';
 let localDiscoveryServers = [];
 let selectedPrimaryTab = 'agent';
+let selectedSettingsCategory = 'overview';
 let localDiscoveryCompleted = false;
 let attachedImageFiles = [];
 let mcpServerCatalog = [];
@@ -214,6 +214,7 @@ function selectPrimaryTab(tab) {
     elements.mode_workspace.setAttribute('aria-labelledby', `tab-${mode}`);
   } else {
     void renderSettingsOverview();
+    void openSettings();
   }
 }
 
@@ -3331,27 +3332,28 @@ function createSettingsEditor(settings, usage) {
   ];
   const navItems = [];
   const categoryPanels = [];
-  for (const [index, category] of categoryDefinitions.entries()) {
+  for (const category of categoryDefinitions) {
     const panelId = `settings-panel-${category.id}`;
     const button = node('button', 'settings-nav-item');
     button.type = 'button';
     button.id = `settings-nav-${category.id}`;
     button.setAttribute('aria-controls', panelId);
-    button.setAttribute('aria-current', index === 0 ? 'page' : 'false');
+    button.setAttribute('aria-current', category.id === selectedSettingsCategory ? 'page' : 'false');
     button.append(node('span', 'settings-nav-icon', category.icon), node('span', 'settings-nav-label', category.title));
     const panel = node('section', 'settings-category-panel');
     panel.id = panelId;
     panel.dataset.settingsPanel = category.id;
     panel.setAttribute('aria-labelledby', button.id);
-    panel.hidden = index !== 0;
+    panel.hidden = category.id !== selectedSettingsCategory;
     const heading = node('header', 'settings-category-heading');
     heading.append(node('p', 'eyebrow', 'RUNTIME SETTINGS'), node('h3', '', category.title), node('p', 'muted-copy', category.description));
     const content = node('div', 'settings-category-content');
     content.append(...category.content);
     panel.append(heading, content);
     button.addEventListener('click', () => {
+      selectedSettingsCategory = category.id;
       for (const item of navItems) item.setAttribute('aria-current', item === button ? 'page' : 'false');
-      for (const currentPanel of categoryPanels) currentPanel.hidden = currentPanel === panel ? false : true;
+      for (const currentPanel of categoryPanels) currentPanel.hidden = currentPanel !== panel;
       panels.scrollTop = 0;
     });
     navItems.push(button);
@@ -3619,9 +3621,10 @@ function createUsageBreakdown(usage) {
 }
 
 async function openSettings() {
-  elements.settings_title.textContent = 'Settings';
-  if (!elements.settings_dialog.open) elements.settings_dialog.showModal();
-  elements.settings_content.replaceChildren(node('p', 'muted-copy', 'Loading current settings…'));
+  const host = document.getElementById('inline-settings-content');
+  const discoveryCard = elements.local_model_results.closest('.settings-page-card');
+  const toolsCard = elements.memory_button.closest('.settings-page-card');
+  host.setAttribute('aria-busy', 'true');
   try {
     const [settings, usage, sandboxCapability] = await Promise.all([
       client.getSettings(),
@@ -3633,10 +3636,14 @@ async function openSettings() {
     applyUiPreferences(settings.ui);
     usageSnapshot = usage;
     const editor = createSettingsEditor(settings, usage);
-    elements.settings_content.replaceChildren(editor);
+    editor.querySelector('[data-settings-panel="models"] .settings-category-content').prepend(discoveryCard);
+    editor.querySelector('[data-settings-panel="overview"] .settings-category-content').append(toolsCard);
+    host.replaceChildren(editor);
     if (settings.retrieval?.semantic?.enabled) await renderRetrievalControls(editor.querySelector('[data-settings-panel="data"]'));
   } catch (error) {
-    elements.settings_content.replaceChildren(node('p', 'muted-copy', error.message));
+    host.replaceChildren(node('p', 'muted-copy', error.message));
+  } finally {
+    host.removeAttribute('aria-busy');
   }
 }
 
@@ -5185,7 +5192,6 @@ elements.primary_tabs.addEventListener('keydown', (event) => {
 });
 elements.discover_models_button.addEventListener('click', () => void refreshLocalModels());
 elements.settings_discover_models.addEventListener('click', () => void refreshLocalModels());
-elements.advanced_settings_button.addEventListener('click', () => void openSettings());
 elements.toggle_sidebar.addEventListener('click', () => void toggleSidebar());
 elements.memory_button.addEventListener('click', () => void openMemory());
 elements.goals_button.addEventListener('click', () => void openGoals());
