@@ -1,5 +1,10 @@
 # Xyst development build status — 2026-10-29
 
+## Persistent approval-state isolation — 2026-10-29
+
+- Workspace-write process sandboxes no longer expose persistent `.agent` approval rules to child processes: Linux Bubblewrap overlays `/workspace/.agent` with a private tmpfs, and Windows AppContainer denies access to the protected directory while holding its verified directory handle without delete sharing. Windows recovery journals the original ACL and directory identity, restores only the matching directory, and preserves recovery state if the path was replaced.
+- Focused checks pass locally: Node sandbox unit tests 25/25, the Windows AppContainer helper integration 1/1, Windows native AppContainer test 1/1, and Windows recovery tests 12/12. Independent patch review found no live replacement bypass after handle pinning. Exact-source hosted Linux/Windows CI and a fresh security review of this patch are pending; this fix is not yet release-qualified.
+
 ## Release-readiness security review — 2026-10-28
 
 - The active Codex Security Standard review targets release-branch revision `b4439e3706eeef92c2d1dc99af1f43b8d0d095ba`. Focused static reviews cover 44 of 506 tracked files. A targeted provider-boundary review found one high-impact issue on that baseline: project `.xyst.toml` could redirect providers, credentials, local discovery, or semantic data disclosure. The fix is committed in `56cf7e2` and included in current source `b56fb04`; focused configuration tests pass 29/29. Full-repository coverage remains partial, no full-repository conclusion is available, and this in-repository review does not replace the independent third-party audit required by the release plan.

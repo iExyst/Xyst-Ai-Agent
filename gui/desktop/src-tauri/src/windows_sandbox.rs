@@ -24,20 +24,19 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::Authorization::{
     BuildTrusteeWithSidW, ConvertSidToStringSidW, ConvertStringSidToSidW, GetSecurityInfo,
-    SetEntriesInAclW, SetSecurityInfo, EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS,
+    SetEntriesInAclW, SetSecurityInfo, DENY_ACCESS, EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS,
     SE_FILE_OBJECT,
 };
 use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeleteAppContainerProfile,
     DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
-use windows_sys::Win32::Security::{
-    EqualSid, FreeSid, GetSecurityDescriptorControl, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
-    SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SE_DACL_PROTECTED,
-};
 #[cfg(test)]
+use windows_sys::Win32::Security::PROTECTED_DACL_SECURITY_INFORMATION;
 use windows_sys::Win32::Security::{
-    PROTECTED_DACL_SECURITY_INFORMATION, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    EqualSid, FreeSid, GetSecurityDescriptorControl, DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE,
+    OBJECT_INHERIT_ACE, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SE_DACL_PROTECTED,
+    UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, MoveFileExW, BY_HANDLE_FILE_INFORMATION,
@@ -68,13 +67,14 @@ const MAX_COMMAND_LINE_UNITS: usize = 32_767;
 const MAX_ENVIRONMENT_UNITS: usize = 32 * 1024 * 1024 / size_of::<u16>();
 const PROFILE_PREFIX: &str = "XystAISandbox_";
 const MAX_RECOVERY_RECORD_BYTES: u64 = 16 * 1024;
+const MAX_AGENT_STATE_DACL_BYTES: usize = 2 * 1024;
 const MAX_CAPTURED_STREAM_BYTES: usize = 1024 * 1024;
+const FILE_DELETE_CHILD: u32 = 0x0000_0040;
 const WORKSPACE_ACCESS: u32 = FILE_GENERIC_READ
     | FILE_GENERIC_WRITE
     | FILE_GENERIC_EXECUTE
     | FILE_WRITE_ATTRIBUTES
-    | 0x0001_0000 // DELETE
-    | 0x0000_0040; // FILE_DELETE_CHILD
+    | 0x0001_0000; // DELETE
 const WORKSPACE_READ_ONLY_ACCESS: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
 
 /// Launch an absolute executable with explicit arguments and environment in a
@@ -163,6 +163,11 @@ pub fn run_appcontainer_command_with_input(
     let current_directory = std::fs::canonicalize(current_directory)
         .map_err(|error| format!("Could not resolve AppContainer working directory: {error}"))?;
     let current_directory = strip_extended_prefix(&current_directory);
+    if contains_agent_state_segment(&workspace_root)
+        || contains_agent_state_segment(&current_directory)
+    {
+        return Err("Xyst state directories cannot be used as an AppContainer workspace or working directory".into());
+    }
     if !is_within_workspace(&workspace_root, &current_directory) {
         return Err("AppContainer working directory must be inside the selected workspace".into());
     }
@@ -184,19 +189,25 @@ pub fn run_appcontainer_command_with_input(
     let identity = format!("{PROFILE_PREFIX}{}", hex(&random));
     let mut profile = AppContainerProfile::create(&identity)?;
     let workspace_identity = capture_workspace_identity(&workspace_root)?;
+    let agent_state_path = ensure_real_child_directory(&workspace_root, ".agent")?;
+    validate_workspace_tree(&workspace_root)?;
+    let agent_state_dacl = capture_agent_state_dacl(&agent_state_path)?;
     let sid = sid_to_string(profile.sid)?;
     let journal = recovery.write(RecoveryRecord {
-        version: 1,
+        version: 3,
         profile_identity: identity.clone(),
         sid,
         workspace_path: workspace_root.to_string_lossy().into_owned(),
         workspace_identity,
+        agent_state_dacl: Some(agent_state_dacl.clone()),
+        agent_state_identity: Some(capture_workspace_identity(&agent_state_path)?),
     })?;
     let workspace_grant = WorkspaceAclGrant::apply(
         &workspace_root,
         profile.sid,
         workspace_identity,
         workspace_read_only,
+        agent_state_dacl,
     )?;
     let command_line = build_command_line(executable, args)?;
     let mut command_line: Vec<u16> = command_line
@@ -608,6 +619,10 @@ struct RecoveryRecord {
     sid: String,
     workspace_path: String,
     workspace_identity: WorkspaceIdentity,
+    #[serde(default)]
+    agent_state_dacl: Option<Vec<u8>>,
+    #[serde(default)]
+    agent_state_identity: Option<WorkspaceIdentity>,
 }
 
 struct SandboxRecovery {
@@ -838,7 +853,13 @@ impl SandboxRecovery {
                 unsafe { LocalFree(sid.cast()) };
                 return Err("Sandbox recovery SID does not match its AppContainer profile".into());
             }
-            let result = restore_workspace_acl(&workspace, sid, current_identity);
+            let result = restore_workspace_acl(
+                &workspace,
+                sid,
+                current_identity,
+                record.agent_state_dacl.as_deref(),
+                record.agent_state_identity,
+            );
             unsafe { LocalFree(sid.cast()) };
             result?;
             let status = unsafe { DeleteAppContainerProfile(profile_identity.as_ptr()) };
@@ -907,7 +928,15 @@ fn ensure_real_child_directory(parent: &Path, name: &str) -> Result<PathBuf, Str
 
 fn validate_recovery_record(record: &RecoveryRecord) -> Result<(), String> {
     let suffix = record.profile_identity.strip_prefix(PROFILE_PREFIX);
-    if record.version != 1
+    if !matches!(record.version, 1 | 2 | 3)
+        || (record.version == 1 && record.agent_state_dacl.is_some())
+        || (record.version < 3 && record.agent_state_identity.is_some())
+        || (matches!(record.version, 2 | 3)
+            && record
+                .agent_state_dacl
+                .as_ref()
+                .is_none_or(|dacl| !is_valid_saved_agent_state_dacl(dacl)))
+        || (record.version == 3 && record.agent_state_identity.is_none())
         || !suffix.is_some_and(|value| {
             value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
         })
@@ -918,6 +947,16 @@ fn validate_recovery_record(record: &RecoveryRecord) -> Result<(), String> {
         return Err("Sandbox recovery record fields are invalid; refusing to launch".into());
     }
     Ok(())
+}
+
+fn is_valid_saved_agent_state_dacl(dacl: &[u8]) -> bool {
+    if dacl.is_empty() {
+        return true;
+    }
+    dacl.len() <= MAX_AGENT_STATE_DACL_BYTES
+        && dacl.len() >= 8
+        && matches!(dacl[0], 2 | 4)
+        && usize::from(u16::from_le_bytes([dacl[2], dacl[3]])) == dacl.len()
 }
 
 fn sid_to_string(sid: windows_sys::Win32::Security::PSID) -> Result<String, String> {
@@ -946,8 +985,20 @@ fn windows_paths_equal(left: &Path, right: &Path) -> bool {
         .eq_ignore_ascii_case(&strip_extended_prefix(right).to_string_lossy())
 }
 
+fn contains_agent_state_segment(path: &Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(".agent")
+    })
+}
+
 struct WorkspaceAclGrant {
     handle: OwnedHandle,
+    _agent_state_handle: Option<OwnedHandle>,
+    agent_state_path: PathBuf,
+    original_agent_state_dacl: Vec<u8>,
     sid: windows_sys::Win32::Security::PSID,
     identity: WorkspaceIdentity,
     active: bool,
@@ -959,9 +1010,21 @@ impl WorkspaceAclGrant {
         sid: windows_sys::Win32::Security::PSID,
         expected_identity: WorkspaceIdentity,
         read_only: bool,
+        original_agent_state_dacl: Vec<u8>,
     ) -> Result<Self, String> {
         let canonical = canonical_workspace(path)?;
+        if contains_agent_state_segment(&canonical) {
+            return Err(
+                "Xyst state directories cannot be used as an AppContainer workspace".into(),
+            );
+        }
         validate_workspace_tree(&canonical)?;
+        let agent_state_path = ensure_real_child_directory(&canonical, ".agent")?;
+        validate_workspace_tree(&canonical)?;
+        if capture_agent_state_dacl(&agent_state_path)? != original_agent_state_dacl {
+            return Err("Xyst state permissions changed before AppContainer isolation".into());
+        }
+        let agent_state_identity = capture_workspace_identity(&agent_state_path)?;
         let wide_path = canonical
             .as_os_str()
             .encode_wide()
@@ -1019,6 +1082,31 @@ impl WorkspaceAclGrant {
         unsafe { BuildTrusteeWithSidW(&mut access.Trustee, sid) };
         let mut updated_dacl = null_mut();
         let status = unsafe { SetEntriesInAclW(1, &access, dacl, &mut updated_dacl) };
+        if status == 0 && !read_only {
+            let mut child_delete = EXPLICIT_ACCESS_W {
+                grfAccessPermissions: FILE_DELETE_CHILD,
+                grfAccessMode: GRANT_ACCESS,
+                grfInheritance: OBJECT_INHERIT_ACE
+                    | windows_sys::Win32::Security::CONTAINER_INHERIT_ACE
+                    | INHERIT_ONLY_ACE,
+                ..Default::default()
+            };
+            unsafe { BuildTrusteeWithSidW(&mut child_delete.Trustee, sid) };
+            let mut with_child_delete = null_mut();
+            let child_status =
+                unsafe { SetEntriesInAclW(1, &child_delete, updated_dacl, &mut with_child_delete) };
+            unsafe { LocalFree(updated_dacl.cast()) };
+            if child_status == 0 {
+                updated_dacl = with_child_delete;
+            } else {
+                if !descriptor.is_null() {
+                    unsafe { LocalFree(descriptor.cast()) };
+                }
+                return Err(format!(
+                    "Could not prepare workspace deletion permissions (Windows error {child_status})"
+                ));
+            }
+        }
         if !descriptor.is_null() {
             unsafe { LocalFree(descriptor.cast()) };
         }
@@ -1027,8 +1115,11 @@ impl WorkspaceAclGrant {
                 "Could not prepare workspace permissions (Windows error {status})"
             ));
         }
-        let grant = Self {
+        let mut grant = Self {
             handle,
+            _agent_state_handle: None,
+            agent_state_path: agent_state_path.clone(),
+            original_agent_state_dacl,
             sid,
             identity,
             active: true,
@@ -1050,6 +1141,11 @@ impl WorkspaceAclGrant {
                 "Could not grant AppContainer workspace access (Windows error {status})"
             ));
         }
+        grant._agent_state_handle = Some(set_agent_state_deny(
+            &agent_state_path,
+            sid,
+            agent_state_identity,
+        )?);
         Ok(grant)
     }
 
@@ -1063,7 +1159,8 @@ impl WorkspaceAclGrant {
         if workspace_identity(self.handle.0)? != self.identity {
             return Err("Workspace identity changed before AppContainer permission cleanup".into());
         }
-        restore_workspace_acl_on_handle(self.handle.0, self.sid)
+        restore_workspace_acl_on_handle(self.handle.0, self.sid)?;
+        restore_agent_state_acl(&self.agent_state_path, &self.original_agent_state_dacl)
     }
 }
 
@@ -1122,6 +1219,8 @@ fn restore_workspace_acl(
     path: &Path,
     sid: windows_sys::Win32::Security::PSID,
     identity: WorkspaceIdentity,
+    agent_state_dacl: Option<&[u8]>,
+    agent_state_identity: Option<WorkspaceIdentity>,
 ) -> Result<(), String> {
     let canonical = canonical_workspace(path)?;
     let wide_path = canonical
@@ -1149,7 +1248,248 @@ fn restore_workspace_acl(
     if workspace_identity(handle.0)? != identity {
         return Err("Workspace identity changed before sandbox permission recovery".into());
     }
-    restore_workspace_acl_on_handle(handle.0, sid)
+    restore_workspace_acl_on_handle(handle.0, sid)?;
+    if let Some(agent_state_dacl) = agent_state_dacl {
+        let state_path = canonical.join(".agent");
+        if let Some(expected_identity) = agent_state_identity {
+            if capture_workspace_identity(&state_path)? != expected_identity {
+                return Err("Xyst state directory identity changed before sandbox recovery".into());
+            }
+        }
+        restore_agent_state_acl(&state_path, agent_state_dacl)?;
+    }
+    Ok(())
+}
+
+fn capture_agent_state_dacl(path: &Path) -> Result<Vec<u8>, String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("Could not inspect the Xyst state directory: {error}"))?;
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Xyst state path must be a real directory".into());
+    }
+    let wide_path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let handle = unsafe {
+        CreateFileW(
+            wide_path.as_ptr(),
+            READ_CONTROL | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(win32_error("Could not open the Xyst state directory"));
+    }
+    let handle = OwnedHandle(handle);
+    let mut dacl = null_mut();
+    let mut descriptor = null_mut();
+    let status = unsafe {
+        GetSecurityInfo(
+            handle.0,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            &mut dacl,
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != 0 {
+        return Err(format!(
+            "Could not read Xyst state permissions (Windows error {status})"
+        ));
+    }
+    let bytes = if dacl.is_null() {
+        Vec::new()
+    } else {
+        let size = unsafe { (*dacl.cast::<windows_sys::Win32::Security::ACL>()).AclSize as usize };
+        if size > MAX_AGENT_STATE_DACL_BYTES {
+            if !descriptor.is_null() {
+                unsafe { LocalFree(descriptor.cast()) };
+            }
+            return Err("Xyst state permissions exceed the recovery record limit".into());
+        }
+        unsafe { std::slice::from_raw_parts(dacl.cast::<u8>(), size) }.to_vec()
+    };
+    if !descriptor.is_null() {
+        unsafe { LocalFree(descriptor.cast()) };
+    }
+    if !is_valid_saved_agent_state_dacl(&bytes) {
+        return Err("Xyst state permissions have an invalid ACL encoding".into());
+    }
+    Ok(bytes)
+}
+
+fn set_agent_state_deny(
+    path: &Path,
+    sid: windows_sys::Win32::Security::PSID,
+    expected_identity: WorkspaceIdentity,
+) -> Result<OwnedHandle, String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        format!("Could not inspect the AppContainer-protected state directory: {error}")
+    })?;
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("AppContainer-protected state path must be a real directory".into());
+    }
+    let wide_path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let handle = unsafe {
+        CreateFileW(
+            wide_path.as_ptr(),
+            READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
+            // Keep delete sharing disabled for the lifetime of the grant. This
+            // pins the protected directory so it cannot be renamed and replaced
+            // with a fresh directory that inherits the workspace allow ACE.
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(win32_error(
+            "Could not open the AppContainer-protected state directory",
+        ));
+    }
+    let handle = OwnedHandle(handle);
+    if workspace_identity(handle.0)? != expected_identity {
+        return Err("Xyst state directory changed before AppContainer protection".into());
+    }
+    let mut dacl = null_mut();
+    let mut descriptor = null_mut();
+    let status = unsafe {
+        GetSecurityInfo(
+            handle.0,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            &mut dacl,
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != 0 {
+        return Err(format!(
+            "Could not read protected state permissions (Windows error {status})"
+        ));
+    }
+    let mut deny = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: WORKSPACE_ACCESS | FILE_DELETE_CHILD,
+        grfAccessMode: DENY_ACCESS,
+        grfInheritance: OBJECT_INHERIT_ACE | windows_sys::Win32::Security::CONTAINER_INHERIT_ACE,
+        ..Default::default()
+    };
+    unsafe { BuildTrusteeWithSidW(&mut deny.Trustee, sid) };
+    let mut updated_dacl = null_mut();
+    let status = unsafe { SetEntriesInAclW(1, &deny, dacl, &mut updated_dacl) };
+    if !descriptor.is_null() {
+        unsafe { LocalFree(descriptor.cast()) };
+    }
+    if status != 0 || updated_dacl.is_null() {
+        return Err(format!(
+            "Could not prepare protected state permissions (Windows error {status})"
+        ));
+    }
+    let status = unsafe {
+        SetSecurityInfo(
+            handle.0,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            updated_dacl,
+            null_mut(),
+        )
+    };
+    unsafe { LocalFree(updated_dacl.cast()) };
+    if status != 0 {
+        return Err(format!(
+            "Could not protect Xyst state from AppContainer access (Windows error {status})"
+        ));
+    }
+    Ok(handle)
+}
+
+fn restore_agent_state_acl(path: &Path, original_dacl: &[u8]) -> Result<(), String> {
+    if !is_valid_saved_agent_state_dacl(original_dacl) {
+        return Err("Saved Xyst state permissions exceed the recovery limit".into());
+    }
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect protected state during cleanup: {error}"
+            ))
+        }
+    };
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Refusing to restore permissions through a replaced Xyst state path".into());
+    }
+    let wide_path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let handle = unsafe {
+        CreateFileW(
+            wide_path.as_ptr(),
+            READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(win32_error("Could not open protected state during cleanup"));
+    }
+    let handle = OwnedHandle(handle);
+    let mut aligned_dacl = vec![0u64; original_dacl.len().div_ceil(size_of::<u64>())];
+    if !original_dacl.is_empty() {
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                original_dacl.as_ptr(),
+                aligned_dacl.as_mut_ptr().cast::<u8>(),
+                original_dacl.len(),
+            );
+        }
+    }
+    let dacl = if aligned_dacl.is_empty() {
+        null_mut()
+    } else {
+        aligned_dacl.as_mut_ptr().cast()
+    };
+    let status = unsafe {
+        SetSecurityInfo(
+            handle.0,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            dacl,
+            null_mut(),
+        )
+    };
+    if status != 0 {
+        return Err(format!(
+            "Could not restore original Xyst state permissions (Windows error {status})"
+        ));
+    }
+    Ok(())
 }
 
 fn restore_workspace_acl_on_handle(
@@ -1628,12 +1968,13 @@ impl Drop for PrivateTempDirectory {
 #[cfg(all(test, not(feature = "sandbox-helper")))]
 mod tests {
     use super::{
-        build_command_line, build_environment_block, capture_workspace_identity,
-        quote_windows_argument, restore_workspace_acl, run_appcontainer_command,
-        run_appcontainer_command_with_input, run_appcontainer_command_with_mode, sid_to_string,
-        validate_recovery_record, validate_workspace_tree, AppContainerCommand,
-        AppContainerProfile, OwnedHandle, RecoveryRecord, SandboxRecovery, WorkspaceAclGrant,
-        MAX_CAPTURED_STREAM_BYTES, MAX_ENVIRONMENT_UNITS,
+        build_command_line, build_environment_block, capture_agent_state_dacl,
+        capture_workspace_identity, ensure_real_child_directory, quote_windows_argument,
+        restore_workspace_acl, run_appcontainer_command, run_appcontainer_command_with_input,
+        run_appcontainer_command_with_mode, sid_to_string, validate_recovery_record,
+        validate_workspace_tree, AppContainerCommand, AppContainerProfile, OwnedHandle,
+        RecoveryRecord, SandboxRecovery, WorkspaceAclGrant, MAX_CAPTURED_STREAM_BYTES,
+        MAX_ENVIRONMENT_UNITS,
     };
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -2053,7 +2394,14 @@ mod tests {
             .expect("create existing nested workspace directory");
         std::fs::write(&existing_file, "workspace-readable")
             .expect("create existing workspace file");
+        let agent_state = workspace.join(".agent");
+        let approval_file = agent_state.join("approvals").join("rules.json");
+        std::fs::create_dir_all(approval_file.parent().unwrap())
+            .expect("create approval state fixture");
+        std::fs::write(&approval_file, "host-approval-canary")
+            .expect("write approval state fixture");
         let original_root_acl = dacl_bytes(&workspace, true);
+        let original_state_acl = dacl_bytes(&agent_state, true);
         let original_file_acl = dacl_bytes(&existing_file, false);
         let workspace_probe = "echo sandbox-out && echo sandbox-err 1>&2 && (echo workspace-write>new.txt || exit /b 12) && if exist new.txt (exit /b 23) else (exit /b 13)";
         let code = run_appcontainer_command(
@@ -2088,6 +2436,39 @@ mod tests {
                 .unwrap()
                 .trim(),
             "workspace-write"
+        );
+        let powershell = Path::new(&system_root)
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        let state_probe = "$p = Join-Path $PWD '.agent\\approvals\\rules.json'; try { Get-Content -LiteralPath $p -ErrorAction Stop; exit 31 } catch {}; try { Set-Content -LiteralPath $p -Value 'forged' -ErrorAction Stop; exit 32 } catch {}; Write-Output 'approval-state-protected'";
+        let state_outcome = run_appcontainer_command(
+            &powershell,
+            &[
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                state_probe.into(),
+            ],
+            &workspace,
+            &workspace,
+            &environment,
+            Duration::from_secs(10),
+            None,
+        )
+        .expect("AppContainer should not read or write persisted Xyst approval state");
+        assert_eq!(
+            state_outcome.exit_code,
+            0,
+            "stdout={:?}, stderr={:?}",
+            String::from_utf8_lossy(&state_outcome.stdout),
+            String::from_utf8_lossy(&state_outcome.stderr)
+        );
+        assert!(String::from_utf8_lossy(&state_outcome.stdout).contains("approval-state-protected"));
+        assert_eq!(
+            std::fs::read_to_string(&approval_file).unwrap(),
+            "host-approval-canary"
         );
         let read_only_args = [
             "/d".into(),
@@ -2127,6 +2508,7 @@ mod tests {
             "stdin-forwarded"
         );
         assert_eq!(dacl_bytes(&workspace, true), original_root_acl);
+        assert_eq!(dacl_bytes(&agent_state, true), original_state_acl);
         assert_eq!(dacl_bytes(&existing_file, false), original_file_acl);
         std::fs::remove_dir_all(fixture_root).expect("clean sandbox workspace fixture");
         std::fs::remove_dir_all(local_app_data).expect("clean isolated test LOCALAPPDATA");
@@ -2327,6 +2709,10 @@ mod tests {
         std::fs::create_dir_all(&workspace).expect("create recovery workspace");
         std::fs::write(workspace.join("existing.txt"), "before crash")
             .expect("create recovery workspace file");
+        let agent_state = ensure_real_child_directory(&workspace, ".agent")
+            .expect("create protected state fixture");
+        let agent_state_dacl = capture_agent_state_dacl(&agent_state)
+            .expect("capture original protected state permissions");
         let original_root_acl = dacl_bytes(&workspace, true);
         let original_file_acl = dacl_bytes(&workspace.join("existing.txt"), false);
         let recovery = SandboxRecovery::open(&local_app_data).expect("open recovery manager");
@@ -2340,7 +2726,7 @@ mod tests {
             AppContainerProfile::create(&profile_identity).expect("create test profile");
         let journal = recovery
             .write(RecoveryRecord {
-                version: 1,
+                version: 3,
                 profile_identity,
                 sid: sid_to_string(profile.sid).expect("format AppContainer SID"),
                 workspace_path: std::fs::canonicalize(&workspace)
@@ -2348,15 +2734,24 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 workspace_identity: identity,
+                agent_state_dacl: Some(agent_state_dacl.clone()),
+                agent_state_identity: Some(capture_workspace_identity(&agent_state).unwrap()),
             })
             .expect("write recovery intent before ACL modification");
-        let grant = WorkspaceAclGrant::apply(&workspace, profile.sid, identity, false)
-            .expect("grant workspace permissions");
+        let grant = WorkspaceAclGrant::apply(
+            &workspace,
+            profile.sid,
+            identity,
+            false,
+            agent_state_dacl.clone(),
+        )
+        .expect("grant workspace permissions");
         std::mem::forget(grant);
         assert_ne!(dacl_bytes(&workspace, true), original_root_acl);
 
         recovery.recover().expect("recover interrupted ACL grant");
         assert_eq!(dacl_bytes(&workspace, true), original_root_acl);
+        assert_eq!(dacl_bytes(&agent_state, true), agent_state_dacl);
         assert_eq!(
             dacl_bytes(&workspace.join("existing.txt"), false),
             original_file_acl
@@ -2476,6 +2871,10 @@ mod tests {
         std::fs::create_dir_all(&workspace).expect("create recovery workspace");
         std::fs::write(workspace.join("existing.txt"), "recovery fixture")
             .expect("create recovery workspace file");
+        let agent_state = ensure_real_child_directory(&workspace, ".agent")
+            .expect("create protected state fixture");
+        let agent_state_dacl = capture_agent_state_dacl(&agent_state)
+            .expect("capture original protected state permissions");
         let original_root_acl = dacl_bytes(&workspace, true);
         let original_file_acl = dacl_bytes(&workspace.join("existing.txt"), false);
         let recovery = SandboxRecovery::open(&local_app_data).expect("open recovery manager");
@@ -2489,7 +2888,7 @@ mod tests {
             AppContainerProfile::create(&profile_identity).expect("create test profile");
         let journal = recovery
             .write(RecoveryRecord {
-                version: 1,
+                version: 3,
                 profile_identity,
                 sid: sid_to_string(profile.sid).expect("format test profile SID"),
                 workspace_path: std::fs::canonicalize(&workspace)
@@ -2497,15 +2896,30 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 workspace_identity: identity,
+                agent_state_dacl: Some(agent_state_dacl.clone()),
+                agent_state_identity: Some(capture_workspace_identity(&agent_state).unwrap()),
             })
             .expect("write recovery intent before ACL modification");
-        let grant = WorkspaceAclGrant::apply(&workspace, profile.sid, identity, false)
-            .expect("grant workspace permissions");
+        let grant = WorkspaceAclGrant::apply(
+            &workspace,
+            profile.sid,
+            identity,
+            false,
+            agent_state_dacl.clone(),
+        )
+        .expect("grant workspace permissions");
         std::mem::forget(grant);
 
-        restore_workspace_acl(&workspace, profile.sid, identity)
-            .expect("restore ACL before simulating interrupted cleanup");
+        restore_workspace_acl(
+            &workspace,
+            profile.sid,
+            identity,
+            Some(&agent_state_dacl),
+            Some(capture_workspace_identity(&agent_state).unwrap()),
+        )
+        .expect("restore ACL before simulating interrupted cleanup");
         assert_eq!(dacl_bytes(&workspace, true), original_root_acl);
+        assert_eq!(dacl_bytes(&agent_state, true), agent_state_dacl);
         assert_eq!(
             dacl_bytes(&workspace.join("existing.txt"), false),
             original_file_acl
@@ -2545,6 +2959,10 @@ mod tests {
         std::fs::create_dir_all(&workspace).expect("create recovery workspace");
         std::fs::write(workspace.join("existing.txt"), "profile deletion fixture")
             .expect("create recovery workspace file");
+        let agent_state = ensure_real_child_directory(&workspace, ".agent")
+            .expect("create protected state fixture");
+        let agent_state_dacl = capture_agent_state_dacl(&agent_state)
+            .expect("capture original protected state permissions");
         let original_root_acl = dacl_bytes(&workspace, true);
         let original_file_acl = dacl_bytes(&workspace.join("existing.txt"), false);
         let recovery = SandboxRecovery::open(&local_app_data).expect("open recovery manager");
@@ -2558,7 +2976,7 @@ mod tests {
             AppContainerProfile::create(&profile_identity).expect("create test profile");
         let journal = recovery
             .write(RecoveryRecord {
-                version: 1,
+                version: 3,
                 profile_identity,
                 sid: sid_to_string(profile.sid).expect("format test profile SID"),
                 workspace_path: std::fs::canonicalize(&workspace)
@@ -2566,14 +2984,29 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 workspace_identity: identity,
+                agent_state_dacl: Some(agent_state_dacl.clone()),
+                agent_state_identity: Some(capture_workspace_identity(&agent_state).unwrap()),
             })
             .expect("write recovery intent before ACL modification");
-        let grant = WorkspaceAclGrant::apply(&workspace, profile.sid, identity, false)
-            .expect("grant workspace permissions");
+        let grant = WorkspaceAclGrant::apply(
+            &workspace,
+            profile.sid,
+            identity,
+            false,
+            agent_state_dacl.clone(),
+        )
+        .expect("grant workspace permissions");
         std::mem::forget(grant);
-        restore_workspace_acl(&workspace, profile.sid, identity)
-            .expect("restore ACL before profile cleanup");
+        restore_workspace_acl(
+            &workspace,
+            profile.sid,
+            identity,
+            Some(&agent_state_dacl),
+            Some(capture_workspace_identity(&agent_state).unwrap()),
+        )
+        .expect("restore ACL before profile cleanup");
         assert_eq!(dacl_bytes(&workspace, true), original_root_acl);
+        assert_eq!(dacl_bytes(&agent_state, true), agent_state_dacl);
         assert_eq!(
             dacl_bytes(&workspace.join("existing.txt"), false),
             original_file_acl
@@ -2610,6 +3043,10 @@ mod tests {
         std::fs::create_dir_all(&workspace).expect("create interrupted workspace");
         std::fs::write(workspace.join("existing.txt"), "before process termination")
             .expect("create interrupted workspace file");
+        let agent_state = ensure_real_child_directory(&workspace, ".agent")
+            .expect("create protected state before interrupted grant");
+        let original_agent_state_dacl = capture_agent_state_dacl(&agent_state)
+            .expect("capture original protected state permissions");
         let original_root_acl = dacl_bytes(&workspace, true);
         let original_file_acl = dacl_bytes(&workspace.join("existing.txt"), false);
 
@@ -2654,6 +3091,7 @@ mod tests {
             .recover()
             .expect("restore ACL after host process termination");
         assert_eq!(dacl_bytes(&workspace, true), original_root_acl);
+        assert_eq!(dacl_bytes(&agent_state, true), original_agent_state_dacl);
         assert_eq!(
             dacl_bytes(&workspace.join("existing.txt"), false),
             original_file_acl
@@ -2679,6 +3117,10 @@ mod tests {
             return;
         };
         let workspace = PathBuf::from(workspace);
+        let agent_state = ensure_real_child_directory(&workspace, ".agent")
+            .expect("create protected state directory before grant");
+        let agent_state_dacl = capture_agent_state_dacl(&agent_state)
+            .expect("capture original protected state permissions");
         let recovery =
             SandboxRecovery::open(Path::new(&local_app_data)).expect("open child recovery manager");
         recovery.recover().expect("start with clean recovery state");
@@ -2688,7 +3130,7 @@ mod tests {
         let profile = AppContainerProfile::create(&profile_identity).expect("create child profile");
         recovery
             .write(RecoveryRecord {
-                version: 1,
+                version: 3,
                 profile_identity,
                 sid: sid_to_string(profile.sid).expect("format child profile SID"),
                 workspace_path: std::fs::canonicalize(&workspace)
@@ -2696,10 +3138,13 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 workspace_identity: identity,
+                agent_state_dacl: Some(agent_state_dacl.clone()),
+                agent_state_identity: Some(capture_workspace_identity(&agent_state).unwrap()),
             })
             .expect("persist recovery intent before granting ACL");
-        let grant = WorkspaceAclGrant::apply(&workspace, profile.sid, identity, false)
-            .expect("grant child workspace ACL");
+        let grant =
+            WorkspaceAclGrant::apply(&workspace, profile.sid, identity, false, agent_state_dacl)
+                .expect("grant child workspace ACL");
         std::mem::forget(grant);
         drop(profile);
         std::fs::write(marker, b"acl-granted").expect("signal ACL grant to parent");
@@ -2719,10 +3164,16 @@ mod tests {
                 volume_serial: 1,
                 file_index: 2,
             },
+            agent_state_dacl: None,
+            agent_state_identity: None,
         };
         assert!(validate_recovery_record(&record).is_ok());
         let mut invalid = record;
         invalid.version = 2;
+        assert!(validate_recovery_record(&invalid).is_err());
+        invalid.agent_state_dacl = Some(vec![2, 0, 8, 0, 0, 0, 0, 0]);
+        assert!(validate_recovery_record(&invalid).is_ok());
+        invalid.agent_state_dacl = Some(vec![2, 0, 9, 0, 0, 0, 0, 0]);
         assert!(validate_recovery_record(&invalid).is_err());
     }
 
@@ -2796,6 +3247,8 @@ mod tests {
                 volume_serial: 1,
                 file_index: 2,
             },
+            agent_state_dacl: None,
+            agent_state_identity: None,
         };
 
         let collision_id = "0123456789abcdef0123456789abcdef";
@@ -2868,6 +3321,8 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 workspace_identity: identity,
+                agent_state_dacl: None,
+                agent_state_identity: None,
             })
             .expect("write mismatched recovery record");
 

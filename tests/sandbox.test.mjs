@@ -84,6 +84,28 @@ test('Bubblewrap workspace validation rejects a canonical filesystem root', asyn
   }
 });
 
+test('Bubblewrap cannot mount Xyst state as the selected workspace', async (t) => {
+  const workspace = await createTempDirectory('xyst-bwrap-state-root-');
+  t.after(() => fs.rm(workspace, { recursive: true, force: true }));
+  const stateDirectory = path.join(workspace, '.agent');
+  await fs.mkdir(stateDirectory);
+  await assert.rejects(
+    validateBubblewrapWorkspace(stateDirectory, { platform: 'linux', mountInfo: '' }),
+    (error) => error.code === 'SANDBOX_WORKSPACE_UNSAFE' && /state directory/.test(error.message),
+  );
+  assert.throws(
+    () =>
+      buildBubblewrapArgs({
+        workspaceRoot: stateDirectory,
+        command: 'id',
+        workspaceIdentity: '1:2',
+        workspaceIdentityFailureToken: '00000000-0000-0000-0000-000000000000',
+        platform: 'linux',
+      }),
+    (error) => error.code === 'SANDBOX_WORKSPACE_UNSAFE' && /state directory/.test(error.message),
+  );
+});
+
 test('Bubblewrap workspace validation rejects a bind-mounted filesystem root alias', async (t) => {
   const workspace = await createTempDirectory('xyst-bwrap-root-mount-');
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -205,6 +227,7 @@ test('Bubblewrap command is fail-closed and isolates mounts, network, processes,
   assert.ok(joined.includes('--ro-bind\0/usr\0/usr'));
   assert.ok(joined.includes('--bind\0/home/user/project\0/workspace'));
   assert.ok(joined.includes('--tmpfs\0/tmp'));
+  assert.ok(joined.includes('--tmpfs\0/workspace/.agent'));
   assert.ok(joined.includes('/usr/bin/stat -c "%d:%i" /workspace'));
   assert.ok(joined.includes('exec "$@"'));
   assert.ok(joined.includes('2049:91022'));
@@ -227,6 +250,7 @@ test('Bubblewrap mounts the workspace read-only when the workspace-read mode is 
   assert.ok(joined.includes('--ro-bind\0/home/user/project\0/workspace'));
   assert.equal(joined.includes('--bind\0/home/user/project\0/workspace'), false);
   assert.ok(joined.includes('--tmpfs\0/tmp'), 'the isolated process keeps its private writable temporary directory');
+  assert.ok(joined.includes('--tmpfs\0/workspace/.agent'), 'Xyst state remains hidden in read-only process sandboxes');
 });
 
 test('Bubblewrap supports bounded read-only extension mounts and an in-sandbox working directory', () => {
