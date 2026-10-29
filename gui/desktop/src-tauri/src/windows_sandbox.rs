@@ -1251,6 +1251,21 @@ fn restore_workspace_acl(
     restore_workspace_acl_on_handle(handle.0, sid)?;
     if let Some(agent_state_dacl) = agent_state_dacl {
         let state_path = canonical.join(".agent");
+        match std::fs::symlink_metadata(&state_path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(format!(
+                    "Could not inspect Xyst state directory before sandbox recovery: {error}"
+                ))
+            }
+            Ok(metadata)
+                if !metadata.is_dir()
+                    || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 =>
+            {
+                return Err("Xyst state path changed type before sandbox recovery".into())
+            }
+            Ok(_) => {}
+        }
         if let Some(expected_identity) = agent_state_identity {
             if capture_workspace_identity(&state_path)? != expected_identity {
                 return Err("Xyst state directory identity changed before sandbox recovery".into());
