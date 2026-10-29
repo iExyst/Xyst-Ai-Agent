@@ -319,25 +319,25 @@ async function verifyDesktopAutomation(env, timeoutMs) {
     const modeTab = nodes.find((node) => node.name === name && node.role.toLowerCase().includes('tab'));
     assert.ok(modeTab, `Linux AT-SPI inspection did not find the ${name} mode tab`);
   }
-  const settingsTab = nodes.find((node) => node.name === 'Settings' && node.role.toLowerCase().includes('tab'));
+  const settingsButton = nodes.find((node) => node.name === 'Settings' && node.role.toLowerCase().includes('push button'));
   assert.ok(
-    settingsTab,
-    `Linux AT-SPI inspection did not find the Settings tab. Observed controls: ${nodes
+    settingsButton,
+    `Linux AT-SPI inspection did not find the Settings button. Observed controls: ${nodes
       .filter((node) => node.name)
       .map((node) => `${node.name} (${node.role})`)
       .slice(0, 50)
       .join(' · ')}`,
   );
-  const settingsBounds = settingsTab.bounds;
+  const settingsBounds = settingsButton.bounds;
   assert.ok(
     settingsBounds &&
       Number.isFinite(settingsBounds.x) &&
       Number.isFinite(settingsBounds.y) &&
       settingsBounds.width > 0 &&
       settingsBounds.height > 0,
-    'Linux AT-SPI did not provide usable bounds for the Settings tab',
+    'Linux AT-SPI did not provide usable bounds for the Settings button',
   );
-  assert.equal(find(nodes, 'Close settings'), undefined, 'The advanced settings dialog should start closed in the isolated profile');
+  assert.equal(find(nodes, 'Close settings'), undefined, 'The settings dialog should start closed in the isolated profile');
   const settingsPageClick = await controlDesktop(
     {
       action: 'click_at',
@@ -349,28 +349,36 @@ async function verifyDesktopAutomation(env, timeoutMs) {
   assert.equal(settingsPageClick.status, 'completed');
 
   try {
-    nodes = await waitFor((items) => find(items, 'All runtime settings'), 'the Settings page');
+    nodes = await waitFor(
+      (items) => items.some((node) => node.name === 'Models' && node.role.toLowerCase().includes('heading')),
+      'the Models settings page',
+    );
   } catch (error) {
     const wrapped = new Error(
-      `${error.message}\nSettings tab bounds: ${JSON.stringify(settingsBounds)}; click: ${JSON.stringify(settingsPageClick)}`,
+      `${error.message}\nSettings button bounds: ${JSON.stringify(settingsBounds)}; click: ${JSON.stringify(settingsPageClick)}`,
       { cause: error },
     );
     wrapped.statusMessages = error.statusMessages;
     throw wrapped;
   }
-  const advancedSettingsButton = find(nodes, 'All runtime settings');
-  const advancedSettingsClick = await controlDesktop(
-    { action: 'click', element_path: advancedSettingsButton.path, expected_name: 'All runtime settings' },
+  const safetyButton = nodes.find((node) => node.name.includes('Safety') && node.role.toLowerCase().includes('push button'));
+  assert.ok(safetyButton, 'Linux AT-SPI did not find the Safety settings category');
+  const accessibilityClick = await controlDesktop(
+    { action: 'click', element_path: safetyButton.path, expected_name: safetyButton.name },
     options,
   );
-  assert.equal(advancedSettingsClick.status, 'completed');
+  assert.equal(accessibilityClick.status, 'completed');
+  nodes = await waitFor(
+    (items) => items.some((node) => node.name === 'Safety' && node.role.toLowerCase().includes('heading')),
+    'the Safety settings category',
+  );
 
-  nodes = await waitFor((items) => find(items, 'Close settings'), 'the advanced Runtime settings dialog');
-  const closeButton = find(nodes, 'Close settings');
-  const bounds = closeButton.bounds;
+  const updatesButton = nodes.find((node) => node.name.includes('Updates') && node.role.toLowerCase().includes('push button'));
+  assert.ok(updatesButton, 'Linux AT-SPI did not find the Updates settings category');
+  const bounds = updatesButton.bounds;
   assert.ok(
     bounds && Number.isFinite(bounds.x) && Number.isFinite(bounds.y) && bounds.width > 0 && bounds.height > 0,
-    'Linux AT-SPI did not provide usable bounds for the settings close button',
+    'Linux AT-SPI did not provide usable bounds for the Updates settings category',
   );
   const coordinateClick = await controlDesktop(
     {
@@ -381,7 +389,10 @@ async function verifyDesktopAutomation(env, timeoutMs) {
     options,
   );
   assert.equal(coordinateClick.status, 'completed');
-  await waitFor((items) => !find(items, 'Close settings'), 'the closed advanced Runtime settings dialog');
+  await waitFor(
+    (items) => items.some((node) => node.name === 'Updates' && node.role.toLowerCase().includes('heading')),
+    'the Updates settings category',
+  );
 
   return { inspect: true, settingsPage: 'completed', accessibilityClick: 'completed', coordinateClick: 'completed' };
 }
