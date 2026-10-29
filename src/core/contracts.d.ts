@@ -298,6 +298,13 @@ export type AgentEvent =
   | (SessionEventBase & { type: 'model_load_finished'; model: string; already_loaded: boolean; context_length?: number })
   | (SessionEventBase & { type: 'model_load_failed'; model: string; code: string })
   | (SessionEventBase & { type: 'model_load_skipped'; model: string; reason: 'management_api_unavailable' })
+  | (SessionEventBase & {
+      type: 'context_capacity_selected';
+      model: string;
+      context_length: number;
+      source: 'manual' | 'configured-fallback' | 'lm-studio-loaded' | 'ollama-loaded' | 'llama-cpp-loaded' | 'provider-reported';
+      automatic: boolean;
+    })
   | (SessionEventBase & { type: 'retrieval_context_ready'; matches: number; included: boolean; truncated: boolean; duration_ms: number })
   | (SessionEventBase & { type: 'retrieval_context_started' })
   | (SessionEventBase & { type: 'retrieval_context_failed'; error_code: string; duration_ms: number })

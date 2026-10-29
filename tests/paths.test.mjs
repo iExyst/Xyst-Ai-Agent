@@ -61,6 +61,11 @@ test('workspace file tools map the sandbox /workspace alias back into the select
     await resolveToolPath(root, '/workspace/src/a.txt', { mustExist: true }),
     await fs.realpath(path.join(root, 'src', 'a.txt')),
   );
+  assert.equal(
+    await resolveToolPath(root, '/workspace/src/a.txt', { mustExist: true, machineScope: true }),
+    await fs.realpath(path.join(root, 'src', 'a.txt')),
+    'the virtual workspace path stays anchored to the selected workspace with machine-wide access enabled',
+  );
   assert.equal(await resolveToolPath(root, '/workspace'), await fs.realpath(root));
   await assert.rejects(resolveToolPath(root, '/workspace/../outside.txt'), /escapes workspace/);
   await assert.rejects(resolveToolPath(root, '/workspace-other/src/a.txt'), /escapes workspace/);

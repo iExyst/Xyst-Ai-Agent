@@ -1265,7 +1265,7 @@ export class AgentRuntime {
       } catch (error) {
         if (!(error instanceof ContextOverflowError)) throw error;
         try {
-          preparedContext = createPreparedContext(Math.floor(contextLimit * 0.75), true);
+          preparedContext = createPreparedContext(contextLimit, true);
           if (preparedContext.prepared.droppedToolCalls === 0 && preparedContext.prepared.compactedToolResults === 0) throw error;
           contextRecoveryAttempted = true;
         } catch {

@@ -72,6 +72,7 @@ test('loaded skill output preserves explicit untrusted skill provenance in the m
         local: true,
         supports_tools: true,
         context_length: 16000,
+        context_mode: 'manual',
       },
     },
     budgets: { max_turns: 4, max_input_tokens: 30000, max_output_tokens: 2000 },

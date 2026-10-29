@@ -2,6 +2,37 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mountWorkspacePanel } from '../gui/workspace-panel.mjs';
 
+test('workspace panel renders the selected directory and Git state from the API response', async () => {
+  const dialog = fakeElement('dialog');
+  const content = fakeElement('div');
+  const panel = mountWorkspacePanel({
+    client: {
+      listWorktrees: async () => [],
+      inspectWorkspace: async () => ({
+        path: 'src',
+        parent: '',
+        entries: [{ name: 'agent.mjs', type: 'file' }],
+        truncated: false,
+        git: { available: true, branch: 'main', entries: [] },
+      }),
+      readWorkspaceFile: async () => ({ path: 'src/agent.mjs', bytes: 0, text: '' }),
+    },
+    dialog,
+    content,
+    refreshButton: fakeElement('button'),
+    closeButton: fakeElement('button'),
+  });
+
+  await panel.refresh();
+
+  const heading = content.children.find((child) => child.className === 'workspace-path-heading');
+  const git = content.children.find((child) => child.className === 'workspace-git');
+  const files = content.children.find((child) => child.className === 'workspace-tree');
+  assert.match(heading.children[0].textContent, /Workspace \/ src/);
+  assert.equal(git.children[0].textContent, 'Git · main');
+  assert.equal(files.children[1].children[0].children[0].textContent, '· agent.mjs');
+});
+
 test('workspace panel opens a review finding in its bound worktree with a centered line excerpt', async () => {
   const dialog = fakeElement('dialog');
   const content = fakeElement('div');

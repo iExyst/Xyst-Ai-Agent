@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { resolveToolPath } from '../platform/paths.mjs';
-import { safeProcessEnvironment, terminateProcessTree } from '../platform/process.mjs';
+import { safeProcessEnvironment, terminateProcessTree, withNodeRuntimePath } from '../platform/process.mjs';
 import {
   deepFreeze,
   MCP_SCHEMA_DYNAMIC_REF,
@@ -393,7 +393,7 @@ class McpStdioSession {
             machineScope: config.tools?.autonomy === 'unrestricted' || config.tools?.filesystem_scope === 'machine',
           })
         : workspaceRoot;
-    const env = config.tools?.autonomy === 'unrestricted' ? { ...process.env } : safeProcessEnvironment(process.env);
+    const env = withNodeRuntimePath(config.tools?.autonomy === 'unrestricted' ? { ...process.env } : safeProcessEnvironment(process.env));
     for (const [target, reference] of Object.entries(settings.env || {})) {
       if (reference.startsWith('env:')) {
         const key = reference.slice(4);

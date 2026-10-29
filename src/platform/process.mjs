@@ -43,6 +43,18 @@ const RESTRICTED_PROCESS_ENVIRONMENT_KEYS = new Set([
   'CLOUDSDK_CONFIG',
 ]);
 
+/** Make the same trusted Node runtime hosting Xyst available to its child tools,
+ * including desktop installs on machines without a system-wide Node install. */
+export function withNodeRuntimePath(source = process.env) {
+  const environment = { ...source };
+  const key = Object.keys(environment).find((name) => name.toUpperCase() === 'PATH') || 'PATH';
+  const directory = path.dirname(process.execPath);
+  const entries = (environment[key] || '').split(path.delimiter).filter(Boolean);
+  const same = (entry) => (process.platform === 'win32' ? entry.toLowerCase() === directory.toLowerCase() : entry === directory);
+  environment[key] = [directory, ...entries.filter((entry) => !same(entry))].join(path.delimiter);
+  return environment;
+}
+
 export function runProcess(command, args = [], options = {}) {
   const {
     cwd,
@@ -71,12 +83,16 @@ export function runProcess(command, args = [], options = {}) {
   if (input !== undefined && (typeof input !== 'string' || Buffer.byteLength(input) > maxInputBytes))
     throw new TypeError(`input must be a string of at most ${maxInputBytes} bytes`);
 
+  // Child tools can invoke `node` even when the desktop bundle is the only
+  // Node installation available on the host.
+  const childEnvironment = withNodeRuntimePath(env);
+
   return new Promise((resolve, reject) => {
     const startedAt = performance.now();
     const stdinMode = input === undefined ? 'ignore' : 'pipe';
     const child = spawn(command, args, {
       cwd,
-      env,
+      env: childEnvironment,
       shell: false,
       windowsHide: true,
       detached: process.platform !== 'win32',

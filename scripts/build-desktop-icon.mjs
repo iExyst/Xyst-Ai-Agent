@@ -18,3 +18,4 @@ const result = spawnSync(process.execPath, [tauriCli, 'icon', sourceIcon, '--out
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);
 copyFileSync(path.join(iconDirectory, 'icon.png'), path.join(root, 'gui', 'assets', 'brand-icon.png'));
+copyFileSync(path.join(iconDirectory, 'icon.png'), path.join(root, 'gui', 'desktop', 'ui', 'brand-icon.png'));

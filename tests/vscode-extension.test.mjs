@@ -40,6 +40,7 @@ test('VS Code session lifecycle controls use the authenticated shared session st
         local: true,
         supports_tools: true,
         context_length: 16000,
+        context_mode: 'manual',
       },
     },
     budgets: { max_turns: 3, max_input_tokens: 10000, max_output_tokens: 1000, max_tool_output_bytes: 2000 },
@@ -305,6 +306,7 @@ test('a VS Code session resumes in the CLI and returns to the same VS Code trans
       `base_url = "http://127.0.0.1:${provider.address().port}/v1"`,
       'model = "cross-surface-test"',
       'context_length = 16000',
+      'context_mode = "manual"',
       '[tools]',
       'autonomy = "assisted"',
       '',
@@ -939,6 +941,7 @@ test('VS Code workspace switching reconnects the shared service to the selected 
         local: true,
         supports_tools: true,
         context_length: 16000,
+        context_mode: 'manual',
       },
     },
   };

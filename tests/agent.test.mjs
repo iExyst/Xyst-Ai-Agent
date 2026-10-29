@@ -207,6 +207,52 @@ test('automatic failover refits conversation context before contacting a smaller
   assert.equal(result.session.routing_decision.factors.context_capacity.context_length, 8192);
 });
 
+test('a small coding model trims old tool exchanges without unnecessarily shrinking its usable context', async (t) => {
+  const root = await createTempDirectory('xyst-small-coding-context-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'source.txt'), 'Verified coding observation. '.repeat(120));
+  const settings = config();
+  settings.models.local.context_length = 8192;
+  settings.tools = { autonomy: 'unrestricted' };
+  const events = [];
+  let calls = 0;
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: new SessionStore(root),
+    onEvent: (event) => events.push(event),
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      calls += 1;
+      if (calls <= 8)
+        return Response.json({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: `read-${calls}`,
+                    type: 'function',
+                    function: { name: 'read_file', arguments: '{"path":"source.txt"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      assert.match(JSON.stringify(request.messages), /Verified coding observation/);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'Verified.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+  const result = await runtime.run({ prompt: 'Inspect the coding source and verify the observation.' });
+  assert.equal(result.status, 'complete');
+  assert.equal(calls, 9);
+  assert.ok(events.some((event) => event.type === 'context_trimmed' && event.dropped_tool_calls > 0));
+  assert.equal(result.session.messages.filter((message) => message.role === 'tool').length, 8, 'saved observations remain intact');
+});
+
 test('agent scopes MCP tools to a persisted session selection and allows resetting to all servers', async (t) => {
   const root = await createTempDirectory('xyst-agent-mcp-selection-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -14,11 +14,12 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
     const current = ++generation;
     content.replaceChildren(element('p', 'muted-copy', 'Loading workspace…'));
     try {
-      const [worktreesResult, view] = await Promise.allSettled([
+      const [worktreesResult, viewResult] = await Promise.allSettled([
         client.listWorktrees(),
         client.inspectWorkspace({ path: relativePath, ...(worktreeId ? { worktreeId } : {}) }),
       ]);
-      if (view.status === 'rejected') throw view.reason;
+      if (viewResult.status === 'rejected') throw viewResult.reason;
+      const view = viewResult.value;
       const worktrees = worktreesResult.status === 'fulfilled' ? worktreesResult.value : [];
       if (current !== generation) return;
       const toolbar = element('div', 'workspace-toolbar');

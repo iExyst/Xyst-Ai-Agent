@@ -7,7 +7,19 @@ import {
   runProcess,
   safeProcessEnvironment,
   terminateProcessTree,
+  withNodeRuntimePath,
 } from '../src/platform/process.mjs';
+
+test('desktop tool environment can run its bundled Node without a system Node on PATH', async () => {
+  const original = { ...safeProcessEnvironment(process.env) };
+  for (const key of Object.keys(original)) if (key.toUpperCase() === 'PATH') delete original[key];
+  original[process.platform === 'win32' ? 'Path' : 'PATH'] = '';
+  const environment = withNodeRuntimePath(original);
+  const result = await runProcess('node', ['-p', 'process.execPath'], { env: environment });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(result.stdout.trim().toLowerCase(), process.execPath.toLowerCase());
+  assert.equal(original[process.platform === 'win32' ? 'Path' : 'PATH'], '', 'the source environment is unchanged');
+});
 
 test('process adapter uses argv and captures bounded stdout and stderr', async () => {
   const result = await runProcess(process.execPath, ['-e', "process.stdout.write('out');process.stderr.write('err')"], {

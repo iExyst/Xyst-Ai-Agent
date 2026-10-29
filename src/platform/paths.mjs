@@ -54,7 +54,7 @@ export async function resolveWorkspacePath(workspaceRoot, requestedPath, { mustE
  * remain anchored to the selected workspace.
  */
 export async function resolveToolPath(workspaceRoot, requestedPath, { mustExist = false, machineScope = false } = {}) {
-  if (!machineScope && (requestedPath === '/workspace' || requestedPath.startsWith('/workspace/'))) {
+  if (requestedPath === '/workspace' || requestedPath.startsWith('/workspace/')) {
     const workspaceRelativePath = requestedPath.slice('/workspace'.length).replace(/^\/+/, '') || '.';
     return resolveWorkspacePath(workspaceRoot, workspaceRelativePath, { mustExist });
   }

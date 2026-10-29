@@ -4,7 +4,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { atomicWriteFile } from './files.mjs';
-import { safeProcessEnvironment, terminateProcessTree } from './process.mjs';
+import { safeProcessEnvironment, terminateProcessTree, withNodeRuntimePath } from './process.mjs';
 import { findBubblewrap, buildBubblewrapArgs, validateBubblewrapWorkspace } from './sandbox.mjs';
 import { waitForBubblewrapStart } from './bubblewrap-status.mjs';
 import { redactSecrets } from './redaction.mjs';
@@ -178,7 +178,7 @@ export class BackgroundProcessManager {
       }
       const child = spawn(executable, executableArgs, {
         cwd: sandboxRequired ? '/' : canonicalCwd,
-        env: sandboxRequired ? {} : unrestricted ? process.env : safeProcessEnvironment(process.env),
+        env: sandboxRequired ? {} : withNodeRuntimePath(unrestricted ? process.env : safeProcessEnvironment(process.env)),
         shell: false,
         windowsHide: true,
         detached: true,
