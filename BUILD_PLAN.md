@@ -6,6 +6,10 @@ Updated: 2026-10-29
 
 Move Xyst from a feature-complete development build to a supportable, security-reviewed release. Priorities are ordered by user impact and by what must be true before the next phase can safely begin. The existing `BUILD_ROADMAP.md` remains the detailed feature inventory; this file is the execution plan and source of phase exit criteria.
 
+### Current local-use scope
+
+The user has clarified that the immediate target is local Windows/Linux use with internet access for provider connections, and has waived the need for an independent security reviewer. Local builds and manual installation do not require public signing credentials, update hosting, or revocation services. The example configuration leaves application update checks disabled and extension update/revocation feeds unconfigured by default. Those controls remain relevant only if Xyst is distributed to other users with signed installers/packages, automatic updates, or remotely managed extensions; do not describe a local install as a publicly supported production release.
+
 ## Priority order
 
 ### Execution timing
