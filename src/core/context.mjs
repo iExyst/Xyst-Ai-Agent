@@ -47,9 +47,11 @@ export function prepareContext({
     const activeTurnStart = retained.findLastIndex((message) => message?.role === 'user');
     for (let index = activeTurnStart + 1; index < retained.length; index += 1) {
       if (retained[index]?.role !== 'tool') continue;
+      const webExcerpt = compactWebObservation(retained[index].content, 1600);
       retained[index] = {
         ...retained[index],
         content:
+          webExcerpt ||
           '[Tool result omitted after provider context overflow. Reread only the needed lines or regions with bounded tool arguments.]',
       };
       compactedToolResults += 1;
@@ -71,7 +73,28 @@ export function prepareContext({
     } else if (retrievalMessage.length) retrievalMessage = [];
     else if (trimActiveToolHistory) {
       const exchange = oldestRemovableToolExchange(retained);
-      if (!exchange) throw new ContextOverflowError(maxTokens, tokenEstimate);
+      if (!exchange) {
+        // A single page (or parallel fetch batch) may exceed the whole window.
+        // Keep source metadata and a bounded excerpt instead of losing all evidence.
+        let candidate = -1;
+        let excerpt;
+        for (let index = 0; index < retained.length; index += 1) {
+          const message = retained[index];
+          if (message.role !== 'tool' || typeof message.content !== 'string') continue;
+          if (candidate >= 0 && message.content.length <= retained[candidate].content.length) continue;
+          const compacted = compactWebObservation(message.content, Math.max(256, Math.floor(message.content.length / 4)));
+          if (compacted && compacted.length < message.content.length) {
+            candidate = index;
+            excerpt = compacted;
+          }
+        }
+        if (candidate < 0) throw new ContextOverflowError(maxTokens, tokenEstimate);
+        retained[candidate] = { ...retained[candidate], content: excerpt };
+        compactedToolResults += 1;
+        messages = [...fixed, ...retrievalMessage, ...retained];
+        tokenEstimate = estimateTokens(messages);
+        continue;
+      }
       retained.splice(exchange.start, exchange.length);
       if (!omittedToolHistoryNoteAdded) fixed[0].content = `${fixed[0].content}\n\n${OMITTED_TOOL_HISTORY_NOTE}`;
       omittedToolHistoryNoteAdded = true;
@@ -87,6 +110,35 @@ export function prepareContext({
     compactedToolResults,
     estimatedTokens: tokenEstimate,
   };
+}
+
+function compactWebObservation(content, textLimit) {
+  try {
+    const observation = JSON.parse(content);
+    if (observation.type !== 'untrusted_observation' || !['web_fetch', 'web_search'].includes(observation.source?.name)) return null;
+    if (typeof observation.content?.error === 'string') return content;
+    const result = JSON.parse(observation.content.result);
+    if (typeof result.content === 'string') {
+      if (result.content.length <= textLimit) return content;
+      result.content = result.content.slice(0, textLimit);
+      result.truncated = true;
+    } else if (Array.isArray(result.results)) {
+      const limit = Math.max(128, Math.floor(textLimit / Math.max(1, result.results.length)));
+      let changed = false;
+      result.results = result.results.map((item) => {
+        if (typeof item.snippet !== 'string' || item.snippet.length <= limit) return item;
+        changed = true;
+        return { ...item, snippet: item.snippet.slice(0, limit) };
+      });
+      if (!changed) return content;
+    } else return null;
+    observation.content.result = JSON.stringify(result);
+    observation.content.context_note =
+      'Excerpt shortened to fit the model context. Use only facts visible here; fetch a relevant source again if details are missing. Full results remain in the saved transcript.';
+    return JSON.stringify(observation);
+  } catch {
+    return null;
+  }
 }
 
 function oldestRemovableToolExchange(history) {

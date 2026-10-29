@@ -24,6 +24,37 @@ test('context trimming reports overflow when the active request alone exceeds li
   );
 });
 
+test('overflow recovery fits a large parallel page fetch while preserving source evidence and saved results', () => {
+  const observation = (url, content) =>
+    JSON.stringify({
+      type: 'untrusted_observation',
+      source: { name: 'web_fetch' },
+      trust: 'untrusted',
+      content: { result: JSON.stringify({ url, title: 'Official documentation', fetched_at: '2026-10-29', content }) },
+    });
+  const history = [
+    { role: 'user', content: 'Find the documented API.' },
+    { role: 'assistant', tool_calls: [{ id: 'page' }, { id: 'blocked' }] },
+    { role: 'tool', tool_call_id: 'page', content: observation('https://example.com/docs', 'API evidence. '.repeat(1000)) },
+    { role: 'tool', tool_call_id: 'blocked', content: '{"error":"HTTP 403"}' },
+  ];
+  const original = structuredClone(history);
+  const result = prepareContext({ policy: 'policy', history, maxTokens: 900, trimActiveToolHistory: true });
+  assert.ok(result.compactedToolResults > 0);
+  assert.ok(result.estimatedTokens <= 900);
+  const excerpt = JSON.parse(result.messages.at(-2).content);
+  const page = JSON.parse(excerpt.content.result);
+  assert.equal(excerpt.trust, 'untrusted');
+  assert.equal(page.url, 'https://example.com/docs');
+  assert.equal(page.title, 'Official documentation');
+  assert.match(page.content, /API evidence/);
+  assert.equal(page.truncated, true);
+  assert.deepEqual(result.messages.at(-1), history.at(-1));
+  assert.deepEqual(history, original);
+  const providerRecovery = prepareContext({ policy: 'policy', history, maxTokens: 900, dropActiveToolHistory: true });
+  assert.match(providerRecovery.messages.at(-2).content, /API evidence/);
+});
+
 test('context trimming drops automatic retrieval before the active request when space is insufficient', () => {
   const result = prepareContext({
     policy: 'policy',
@@ -152,4 +183,26 @@ test('provider overflow recovery compacts every result in one multi-tool exchang
     ['first', 'second'],
   );
   assert.ok(result.messages.slice(-2).every((message) => /Tool result omitted/.test(message.content)));
+});
+
+test('provider recovery retains short web evidence and page errors rather than replacing them with empty placeholders', () => {
+  const wrap = (content) =>
+    JSON.stringify({
+      type: 'untrusted_observation',
+      source: { name: 'web_fetch' },
+      trust: 'untrusted',
+      content,
+    });
+  const history = [
+    { role: 'user', content: 'Verify the documented behavior.' },
+    { role: 'assistant', tool_calls: [{ id: 'good' }, { id: 'blocked' }] },
+    {
+      role: 'tool',
+      tool_call_id: 'good',
+      content: wrap({ result: JSON.stringify({ url: 'https://example.com', content: 'Verified fact.' }) }),
+    },
+    { role: 'tool', tool_call_id: 'blocked', content: wrap({ error: 'HTTP 403' }) },
+  ];
+  const result = prepareContext({ policy: 'policy', history, maxTokens: 1000, dropActiveToolHistory: true });
+  assert.deepEqual(result.messages.slice(-2), history.slice(-2));
 });

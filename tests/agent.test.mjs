@@ -67,6 +67,63 @@ test('long saved history does not force a larger model to load when the current 
   assert.equal(result.session.model, 'local');
 });
 
+test('agent completes a web lookup when a parallel page fetch exceeds the local context window', async (t) => {
+  const root = await createTempDirectory('xyst-large-page-context-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.models.local.context_length = 8192;
+  settings.tools = { autonomy: 'unrestricted' };
+  settings.web_search = { enabled: true, provider: 'wikipedia' };
+  const events = [];
+  let modelCalls = 0;
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: new SessionStore(root),
+    onEvent: (event) => events.push(event),
+    fetchImpl: async (url, options) => {
+      if (['https://example.com/docs', 'https://example.com/examples'].includes(String(url)))
+        return new Response('Verified API documentation. '.repeat(1000), { headers: { 'content-type': 'text/plain' } });
+      if (String(url) === 'https://example.com/blocked') return new Response('Forbidden', { status: 403 });
+      const request = JSON.parse(options.body);
+      modelCalls += 1;
+      if (modelCalls === 1)
+        return Response.json({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                tool_calls: ['docs', 'examples', 'blocked'].map((page) => ({
+                  id: page,
+                  type: 'function',
+                  function: {
+                    name: 'web_fetch',
+                    arguments: JSON.stringify({ url: `https://example.com/${page}` }),
+                  },
+                })),
+              },
+            },
+          ],
+        });
+      assert.match(JSON.stringify(request.messages), /Verified API documentation/);
+      assert.match(JSON.stringify(request.messages), /https:\/\/example.com\/docs/);
+      assert.match(JSON.stringify(request.messages), /403/);
+      return Response.json({
+        choices: [{ message: { role: 'assistant', content: 'The documentation was retrieved; the other page was blocked.' } }],
+      });
+    },
+  });
+  t.after(() => runtime.close());
+  const result = await runtime.run({
+    prompt: 'Read https://example.com/docs and https://example.com/blocked and summarize the documentation.',
+  });
+  assert.equal(result.status, 'complete');
+  assert.equal(modelCalls, 2);
+  assert.ok(events.some((event) => event.type === 'context_trimmed' && event.compacted_tool_results > 0));
+  const savedPage = result.session.messages.find((message) => message.tool_call_id === 'docs');
+  assert.ok(JSON.parse(JSON.parse(savedPage.content).content.result).content.length > 10000);
+});
+
 test('agent scopes MCP tools to a persisted session selection and allows resetting to all servers', async (t) => {
   const root = await createTempDirectory('xyst-agent-mcp-selection-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
