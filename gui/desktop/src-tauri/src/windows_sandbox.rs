@@ -928,7 +928,7 @@ fn ensure_real_child_directory(parent: &Path, name: &str) -> Result<PathBuf, Str
 
 fn validate_recovery_record(record: &RecoveryRecord) -> Result<(), String> {
     let suffix = record.profile_identity.strip_prefix(PROFILE_PREFIX);
-    if !matches!(record.version, 1 | 2 | 3)
+    if !matches!(record.version, 1..=3)
         || (record.version == 1 && record.agent_state_dacl.is_some())
         || (record.version < 3 && record.agent_state_identity.is_some())
         || (matches!(record.version, 2 | 3)
