@@ -4,6 +4,59 @@ const GEOCODING_ENDPOINT = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_ENDPOINT = 'https://api.open-meteo.com/v1/forecast';
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_LOCATION_LENGTH = 120;
+const US_STATES = {
+  AL: 'Alabama',
+  AK: 'Alaska',
+  AZ: 'Arizona',
+  AR: 'Arkansas',
+  CA: 'California',
+  CO: 'Colorado',
+  CT: 'Connecticut',
+  DE: 'Delaware',
+  DC: 'District of Columbia',
+  FL: 'Florida',
+  GA: 'Georgia',
+  HI: 'Hawaii',
+  ID: 'Idaho',
+  IL: 'Illinois',
+  IN: 'Indiana',
+  IA: 'Iowa',
+  KS: 'Kansas',
+  KY: 'Kentucky',
+  LA: 'Louisiana',
+  ME: 'Maine',
+  MD: 'Maryland',
+  MA: 'Massachusetts',
+  MI: 'Michigan',
+  MN: 'Minnesota',
+  MS: 'Mississippi',
+  MO: 'Missouri',
+  MT: 'Montana',
+  NE: 'Nebraska',
+  NV: 'Nevada',
+  NH: 'New Hampshire',
+  NJ: 'New Jersey',
+  NM: 'New Mexico',
+  NY: 'New York',
+  NC: 'North Carolina',
+  ND: 'North Dakota',
+  OH: 'Ohio',
+  OK: 'Oklahoma',
+  OR: 'Oregon',
+  PA: 'Pennsylvania',
+  RI: 'Rhode Island',
+  SC: 'South Carolina',
+  SD: 'South Dakota',
+  TN: 'Tennessee',
+  TX: 'Texas',
+  UT: 'Utah',
+  VT: 'Vermont',
+  VA: 'Virginia',
+  WA: 'Washington',
+  WV: 'West Virginia',
+  WI: 'Wisconsin',
+  WY: 'Wyoming',
+};
 
 const CONDITIONS = {
   0: 'Clear sky',
@@ -51,13 +104,19 @@ export class OpenMeteoWeatherProvider {
     if (signal?.aborted) throw signal.reason || new Error('Weather lookup was cancelled');
     this.#enforceRateLimit();
     const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)].filter(Boolean));
+    const qualified = splitUsLocation(query);
     const geocodeUrl = new URL(GEOCODING_ENDPOINT);
-    geocodeUrl.searchParams.set('name', query);
-    geocodeUrl.searchParams.set('count', '5');
+    geocodeUrl.searchParams.set('name', qualified?.city || query);
+    geocodeUrl.searchParams.set('count', qualified ? '100' : '5');
+    if (qualified) geocodeUrl.searchParams.set('countryCode', 'US');
     geocodeUrl.searchParams.set('language', 'en');
     geocodeUrl.searchParams.set('format', 'json');
     const geocoding = await this.#getJson(geocodeUrl, requestSignal);
-    const places = Array.isArray(geocoding?.results) ? geocoding.results.filter(validPlace).slice(0, 5) : [];
+    const places = Array.isArray(geocoding?.results)
+      ? geocoding.results
+          .filter((place) => validPlace(place) && (!qualified || (place.country_code === 'US' && place.admin1 === qualified.state)))
+          .slice(0, 5)
+      : [];
     if (!places.length) return { provider: 'open-meteo', found: false, location: query };
     if (
       places.length > 1 &&
@@ -113,6 +172,17 @@ export class OpenMeteoWeatherProvider {
     if (this.requestTimes.length >= 10) throw new Error('Weather lookup is limited to 10 requests per minute');
     this.requestTimes.push(now);
   }
+}
+
+function splitUsLocation(query) {
+  for (const [code, state] of Object.entries(US_STATES)) {
+    for (const suffix of [code, state]) {
+      if (!query.toLowerCase().endsWith(` ${suffix.toLowerCase()}`)) continue;
+      const city = query.slice(0, -suffix.length).trim().replace(/,$/, '').trim();
+      if (city) return { city, state };
+    }
+  }
+  return null;
 }
 
 function validPlace(place) {

@@ -1718,6 +1718,55 @@ test('agent fits optional tool schemas to a small model context and restores the
   assert.ok(nextRunTools.includes('start_background_process'));
 });
 
+test('agent retains lookup tools when a short follow-up supplies the missing location or topic', async (t) => {
+  const root = await createTempDirectory('xyst-agent-follow-up-tools-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.models.local.context_length = 8192;
+  settings.budgets.max_input_tokens = 16_000;
+  settings.tools = { autonomy: 'unrestricted' };
+  settings.web_search = { enabled: true, provider: 'automatic' };
+  const store = new SessionStore(root);
+  const requests = [];
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: store,
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      requests.push(body);
+      assert.ok(body.tools.some((tool) => tool.function.name === 'get_weather'));
+      assert.ok(body.tools.some((tool) => tool.function.name === 'web_search'));
+      if (requests.length === 1)
+        return Response.json({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                tool_calls: [
+                  { id: 'follow-up-weather', type: 'function', function: { name: 'get_weather', arguments: '{"location":"Laconia NH"}' } },
+                ],
+              },
+            },
+          ],
+        });
+      assert.match(body.messages.find((message) => message.role === 'tool').content, /Laconia/);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'Laconia is currently 12°C.' } }] });
+    },
+  });
+  t.after(() => runtime.close());
+  runtime.weatherProvider.getWeather = async (location) => {
+    assert.equal(location, 'Laconia NH');
+    return { found: true, place: 'Laconia, New Hampshire', temperature: 12 };
+  };
+  const session = store.create();
+  session.messages.push({ role: 'user', content: 'Look up the weather today.' }, { role: 'assistant', content: 'Which city or location?' });
+  await store.save(session);
+  const result = await runtime.run({ prompt: 'laconia nh', session });
+  assert.equal(result.status, 'complete');
+  assert.equal(requests.length, 2);
+});
+
 test('agent restores optional tool schemas when a new run direction requires them', async (t) => {
   const root = await createTempDirectory('xyst-agent-context-tool-direction-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

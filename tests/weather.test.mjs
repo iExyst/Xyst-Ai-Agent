@@ -63,6 +63,45 @@ test('weather provider geocodes the requested city and returns live current and 
   assert.ok(requests.every(({ options }) => !options.headers?.authorization && !options.headers?.['x-api-key']));
 });
 
+test('weather resolves city and state qualifiers without choosing a same-name city in another state', async () => {
+  for (const location of ['Laconia NH', 'Laconia, NH', 'Laconia, New Hampshire']) {
+    const requests = [];
+    const provider = new OpenMeteoWeatherProvider({
+      fetchImpl: async (url) => {
+        const target = new URL(url);
+        requests.push(target);
+        if (requests.length === 1) {
+          assert.equal(target.searchParams.get('name'), 'Laconia');
+          assert.equal(target.searchParams.get('countryCode'), 'US');
+          return Response.json({
+            results: [
+              { name: 'Laconia', admin1: 'Indiana', country: 'United States', country_code: 'US', latitude: 38, longitude: -86 },
+              {
+                name: 'Laconia',
+                admin1: 'New Hampshire',
+                country: 'United States',
+                country_code: 'US',
+                latitude: 43.53,
+                longitude: -71.47,
+              },
+            ],
+          });
+        }
+        assert.equal(target.searchParams.get('latitude'), '43.53');
+        return Response.json({ current: { temperature_2m: 12 } });
+      },
+    });
+    const result = await provider.getWeather(location);
+    assert.equal(result.found, true);
+    assert.equal(result.place, 'Laconia, New Hampshire, United States');
+  }
+  const missing = new OpenMeteoWeatherProvider({
+    fetchImpl: async () =>
+      Response.json({ results: [{ name: 'Laconia', admin1: 'Indiana', country_code: 'US', latitude: 38, longitude: -86 }] }),
+  });
+  assert.equal((await missing.getWeather('Laconia NH')).found, false);
+});
+
 test('weather rejects bad locations, asks for disambiguation, and bounds provider responses', async () => {
   let calls = 0;
   const provider = new OpenMeteoWeatherProvider({

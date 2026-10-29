@@ -677,7 +677,10 @@ export class AgentRuntime {
         : {}),
     };
     const activeUserMessageContent = activeUserMessage.content;
-    let toolSelectionPrompt = activeUserMessageContent;
+    // Short replies (for example a city after a weather question) still need
+    // the tools required by the recent user request.
+    const toolSelectionContext = buildRoutingPrompt(working.messages, activeUserMessageContent);
+    let toolSelectionPrompt = toolSelectionContext;
     const exactFinalToken = requestedExactFinalToken(activeUserMessageContent);
     working.messages.push(activeUserMessage);
     await this.#saveSession(working);
@@ -1143,7 +1146,7 @@ export class AgentRuntime {
       if (appendedDirections.length) {
         await this.#saveSession(working);
         this.#emitDirections(working, appendedDirections);
-        toolSelectionPrompt = [activeUserMessageContent, ...appendedDirections].join('\n');
+        toolSelectionPrompt = [toolSelectionContext, ...appendedDirections].join('\n');
         refreshTools();
       }
       await applyPendingBudgetChange();
