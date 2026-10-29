@@ -20,6 +20,11 @@ import { createWorktree } from '../src/platform/worktrees.mjs';
 test('sandboxed processes can run from managed subagent worktrees outside .agent', async (t) => {
   const root = await createTempDirectory('xyst-sandboxable-subagent-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
+  if (process.platform === 'win32' && !(await findWindowsSandboxHelper({ workspaceRoot: root }))) {
+    if (process.env.XYST_REQUIRE_WINDOWS_SANDBOX_TEST === 'true')
+      throw new Error('Windows desktop CI requires the packaged AppContainer helper');
+    return t.skip('Packaged Windows AppContainer helper is unavailable');
+  }
   const git = async (...args) => {
     const result = await runProcess('git', args, { cwd: root, timeoutMs: 15_000 });
     if (result.exitCode !== 0) throw new Error(result.stderr || `git ${args.join(' ')} exited ${result.exitCode}`);
