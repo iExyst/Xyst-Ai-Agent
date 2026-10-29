@@ -1,5 +1,12 @@
 # Xyst development build status — 2026-10-29
 
+## Latest Windows/Linux release-readiness checkpoint — 2026-10-29
+
+- Branch `codex/xyst-ai-assistant-v0.1.2` is at source `0221b396dac4d421be4064f28261b93372054a4d`; GitHub Actions run [40834694756](https://github.com/iExyst/Xyst-Ai-Agent/actions/runs/40834694756) passed all seven Windows/Linux CI jobs, including security/dependency checks, Node 22/24 lanes, desktop build/package lifecycle, and native-host checks. The exact-source unsigned artifact ZIP digests and links are recorded in `BUILD_PLAN.md`.
+- The approval-state isolation fix and task-store static symlink rejection are covered by this green hosted run. A focused diff security scan of the task-store commit (scan `9e00e60c-49d9-4126-9103-52e8ce349b2c`) reported a medium-confidence pathname TOCTOU concern if a concurrent process can replace `.agent/subagents` between validation and persistence. Reachability under the configured sandboxes is unconfirmed, and a deterministic race regression has not been run; this is a security follow-up, not a verified exploit.
+- A current Ubuntu 24.04 WSLg environment exposes Wayland, and the current AppImage was downloaded with its ZIP digest verified. The attempted launch did not produce a confirmed visible or sustained application session, so this does not close native Linux acceptance. Hosted AppImage/Xvfb smoke and Linux package lifecycle jobs did pass.
+- Release readiness is still incomplete: resolve the task-store race concern, obtain an independent security review, perform native Ubuntu Desktop/Wayland acceptance, and assign production signing, update-feed, revocation, and release ownership. No signed release candidate exists and no production release was published.
+
 ## Persistent approval-state isolation — 2026-10-29
 
 - Workspace-write process sandboxes no longer expose persistent `.agent` approval rules to child processes: Linux Bubblewrap overlays `/workspace/.agent` with a private tmpfs, and Windows AppContainer denies access to the protected directory while holding its verified directory handle without delete sharing. Windows recovery journals the original ACL and directory identity, restores only the matching directory, and preserves recovery state if the path was replaced.
