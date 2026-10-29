@@ -1199,11 +1199,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .timeline::-webkit-scrollbar-button { display: none; }
 .message.assistant .message-meta::before { content: none; background-image: none; }
 .chat-avatar { width: 24px; height: 24px; flex: none; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-input); fill: none; stroke: var(--brand-mint); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.mode-workspace:not(.home-layout) .timeline { gap: 24px; padding-top: 28px; padding-bottom: 48px; }
+.mode-workspace:not(.home-layout) .timeline { gap: 22px; padding-top: 28px; padding-bottom: 22px; }
+.mode-workspace:not(.home-layout) .timeline::before { content: ''; margin-top: auto; }
+.mode-workspace:not(.home-layout) .timeline > * { flex-shrink: 0; }
+.mode-workspace:not(.home-layout) > .composer-wrap { flex: none; }
 .message { flex: none; gap: 10px; }
 .message.user { width: min(82%, 650px); }
 .message.user .message-body { padding: 13px 17px; border-radius: 14px 14px 4px 14px; background: var(--surface-raised); border-color: var(--line); color: var(--text-strong); }
-.message.assistant { padding: 18px 20px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); }
+.message.assistant { padding: 4px 0 12px; border: 0; border-radius: 0; background: transparent; }
+.message.assistant[data-pending="true"] .message-body:empty::before { content: 'Working…'; color: var(--text-subtle); }
 .message-body { font-size: 14px; line-height: 1.8; color: var(--text); }
 .message-body p { margin: 0 0 12px; }
 .message-body p:last-child { margin-bottom: 0; }

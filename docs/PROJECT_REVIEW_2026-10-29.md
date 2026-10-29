@@ -68,3 +68,13 @@ This feature follows the capacity allocated by the model host; it does not reloa
 Validation: 167 agent/config/runtime-settings/context-capacity tests passed. Focused capacity cases passed again after tightening malformed-metadata fallback. Browser integration passed, including the new default Automatic control and persisted Manual selection. Lint and diff checks passed. Remote server/higher-capacity cases use controlled metadata fixtures; no physical remote server was resized or stress tested.
 
 Automatic failover also rebuilds the transient conversation against the newly selected host's capacity before sending it. A focused regression verifies that history accepted by the larger primary is omitted before the smaller 8,192-token backup receives its first request. Five focused runtime/failover checks passed after this final adjustment.
+
+## Follow-up: live, bottom-following chat
+
+Chat now uses a simpler Codex-style conversation layout: plain assistant replies, compact tool details, bottom-aligned short threads, and a fixed composer. Empty assistant placeholders remain below activity updates; each model turn renders its reply after the preceding tools. Streaming appends text nodes immediately and formats the reply when that model turn finishes. Fetching usage no longer delays opening the event stream.
+
+The existing reconnect path ignored all assistant deltas and waited for run completion to refresh the conversation. It now shares the live-reply renderer and replays the unfinished response from retained run events before following new chunks. Completed saved turns are not replayed as new replies. The normal event-history retention bound still applies to reconnect recovery.
+
+Auto-scroll no longer treats a content-growth scroll event as the reader scrolling away. It follows incoming content, pauses on upward scrolling, resumes at the bottom or via Latest messages, and reacts to viewport/composer resizing.
+
+Validation: three scroll regressions passed, including the growth-event/pending-frame race. Browser integration passed with a gated provider stream proving that a partial reply is visible at the bottom before completion, then reloading mid-stream and verifying that the partial reply is restored exactly once before finishing. Existing responsive/theme, approval, model-switch, budget, conversation, and connection checks passed. The updated layout was inspected in a browser screenshot. Lint and diff checks passed.

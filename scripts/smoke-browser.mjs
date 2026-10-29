@@ -1074,6 +1074,37 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await waitForRunBudgetApplied(protocol);
     await waitForToast(protocol, 'Run switched to browser-approval-fast.');
     mockProvider.releaseSecondResponse();
+    await waitForTimelineText(protocol, 'Browser approval');
+    const liveReply = await evaluate(
+      protocol,
+      `(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const timeline = document.querySelector('#timeline');
+      const message = timeline.lastElementChild;
+      return {
+        text: message?.querySelector('.message-body')?.textContent,
+        running: !document.querySelector('#stop-run').hidden,
+        bottomGap: timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop,
+      };
+    })()`,
+    );
+    assert.equal(liveReply.text, 'Browser approval', 'partial text must be visible before the provider finishes');
+    assert.equal(liveReply.running, true);
+    assert.ok(liveReply.bottomGap <= 4, 'streaming reply must follow the bottom of the timeline');
+    await protocol.call('Page.reload', { ignoreCache: true });
+    await waitForTimelineText(protocol, 'Browser approval');
+    assert.equal(
+      await evaluate(
+        protocol,
+        `
+      [...document.querySelectorAll('.message.assistant .message-body')]
+        .filter((body) => body.textContent === 'Browser approval').length
+    `,
+      ),
+      1,
+      'reconnecting mid-stream must restore the unfinished reply exactly once',
+    );
+    mockProvider.releaseStreamEnd();
     const runAnswer = await waitForApprovalRunAnswer(protocol);
     assert.equal(
       await evaluate(protocol, `document.querySelector('.message.assistant .chat-avatar use')?.getAttribute('href')`),
@@ -1500,6 +1531,10 @@ async function startMockProvider() {
   const secondResponseGate = new Promise((resolve) => {
     releaseSecondResponse = resolve;
   });
+  let releaseStreamEnd;
+  const streamEndGate = new Promise((resolve) => {
+    releaseStreamEnd = resolve;
+  });
   const server = http.createServer((request, response) => {
     const requestPath = new URL(request.url, 'http://127.0.0.1').pathname;
     if (request.method === 'GET' && (requestPath === '/v1/models' || requestPath === '/v1/secondary/models')) {
@@ -1542,7 +1577,7 @@ async function startMockProvider() {
       }
       chatRequests += 1;
       requests.push(requestBody);
-      const sendResponse = () => {
+      const sendResponse = async () => {
         response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
         const frames =
           chatRequests === 1
@@ -1569,13 +1604,17 @@ async function startMockProvider() {
               ]
             : chatRequests === 2
               ? [
-                  { choices: [{ delta: { content: 'Browser approval workflow completed.' } }] },
+                  { choices: [{ delta: { content: 'Browser approval' } }] },
+                  { choices: [{ delta: { content: ' workflow completed.' } }] },
                   { choices: [{ delta: {}, finish_reason: 'stop' }] },
                 ]
               : chatRequests === 3
                 ? [{ choices: [{ delta: { content: 'CLI continuation answer.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]
                 : [];
-        for (const frame of frames) response.write(`data: ${JSON.stringify(frame)}\n\n`);
+        for (const [index, frame] of frames.entries()) {
+          response.write(`data: ${JSON.stringify(frame)}\n\n`);
+          if (chatRequests === 2 && index === 0) await streamEndGate;
+        }
         response.end('data: [DONE]\n\n');
       };
       if (chatRequests === 1) {
@@ -1618,9 +1657,13 @@ async function startMockProvider() {
     releaseSecondResponse() {
       releaseSecondResponse();
     },
+    releaseStreamEnd() {
+      releaseStreamEnd();
+    },
     close: () => {
       releaseFirstResponse();
       releaseSecondResponse();
+      releaseStreamEnd();
       return new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     },
   };

@@ -758,6 +758,7 @@ function addMessage(role, content = '') {
   elements.welcome.hidden = true;
   const message = node('article', `message ${role}`);
   message.dataset.role = role;
+  if (role === 'assistant' && !content) message.dataset.pending = 'true';
   const meta = node('div', 'message-meta', role === 'user' ? 'YOU' : 'XYST');
   if (role === 'assistant') {
     const avatar = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -780,9 +781,49 @@ function addMessage(role, content = '') {
 function appendActivity(text, status = 'working') {
   const activity = node('div', 'tool-activity', text);
   activity.dataset.status = status;
-  elements.timeline.append(activity);
+  const pending = elements.timeline.querySelector('.message.assistant[data-pending="true"]:last-child');
+  elements.timeline.insertBefore(activity, pending);
   chatScroller.contentChanged();
   return activity;
+}
+
+function createLiveChatReply() {
+  let body = addMessage('assistant');
+  let text = '';
+  return {
+    get body() {
+      return body;
+    },
+    reset() {
+      if (!body.textContent) body.closest('.message')?.remove();
+      body = addMessage('assistant');
+      text = '';
+    },
+    handle(event) {
+      if (event.type === 'model_call_started') {
+        if (text) {
+          body = addMessage('assistant');
+          text = '';
+        } else elements.timeline.append(body.closest('.message'));
+        chatScroller.contentChanged();
+      }
+      if (event.type === 'assistant_delta' && typeof event.data.text === 'string') {
+        text += event.data.text;
+        const message = body.closest('.message');
+        message.dataset.pending = 'false';
+        body.append(document.createTextNode(event.data.text));
+        if (elements.timeline.lastElementChild !== message) elements.timeline.append(message);
+        chatScroller.contentChanged();
+      }
+      if (event.type === 'model_call_finished' && text) {
+        renderChatMessage(body, text);
+        chatScroller.contentChanged();
+      }
+    },
+    finish() {
+      body.closest('.message')?.removeAttribute('data-pending');
+    },
+  };
 }
 
 function appendToolDetail(tool, args, { status = 'proposed', result } = {}) {
@@ -791,7 +832,8 @@ function appendToolDetail(tool, args, { status = 'proposed', result } = {}) {
   const summary = node('summary', '', `${tool} · ${status}`);
   const body = node('pre', 'tool-detail-body', formatToolDetail(result === undefined ? args : result));
   detail.append(summary, body);
-  elements.timeline.append(detail);
+  const pending = elements.timeline.querySelector('.message.assistant[data-pending="true"]:last-child');
+  elements.timeline.insertBefore(detail, pending);
   chatScroller.contentChanged();
   return detail;
 }
@@ -984,11 +1026,25 @@ async function reconnectActiveBrowserRun() {
   renderRunBudgetFields();
   renderRunBudgetControl();
   for (const request of state.approval_requests || []) createApproval({ type: 'approval_required', data: request });
-  appendActivity('Reconnected to the active run. The conversation will refresh when it finishes.', 'working');
+  appendActivity('Reconnected · live updates resumed.', 'complete');
+  const liveReply = createLiveChatReply();
+  let replayText = '';
 
   try {
-    for await (const event of client.followRunEvents(state.run_id, { after: state.last_event_sequence, signal: runController.signal })) {
+    for await (const event of client.followRunEvents(state.run_id, { signal: runController.signal })) {
       const data = event.data;
+      // Saved turns are already rendered. Replay only the unfinished model
+      // response that was still streaming at the reconnection snapshot.
+      if (Number(event.id) <= state.last_event_sequence) {
+        if (event.type === 'model_call_started' || event.type === 'model_call_finished') replayText = '';
+        if (event.type === 'assistant_delta') replayText += data.text || '';
+        if (Number(event.id) === state.last_event_sequence && replayText)
+          liveReply.handle({ type: 'assistant_delta', data: { text: replayText } });
+        continue;
+      }
+      liveReply.handle(event);
+      if (event.type === 'tool_started') appendActivity(`Running · ${data.tool}`, 'working');
+      if (event.type === 'tool_finished') appendActivity(`Finished · ${data.tool}`, 'complete');
       if (event.type === 'approval_required') createApproval(event);
       if (event.type === 'model_fallback') {
         activeRunModel = data.to_model;
@@ -1060,6 +1116,7 @@ async function reconnectActiveBrowserRun() {
   } catch (error) {
     if (error.name !== 'AbortError') showToast(`Reconnected run monitoring stopped: ${error.message}`);
   } finally {
+    liveReply.finish();
     if (activeRunId === state.run_id) {
       activeRunId = null;
       runController = null;
@@ -1527,7 +1584,7 @@ async function submitPrompt(prompt) {
   elements.prompt_input.value = '';
   resizeComposer();
   addMessage('user', `${prompt.trim()}${attachedImageFiles.length ? `\n[${attachedImageFiles.length} image(s) attached]` : ''}`);
-  let responseBody = addMessage('assistant');
+  const liveReply = createLiveChatReply();
   chatScroller.jumpToLatest();
   const activityRows = new Map();
   const modelLoadRows = new Map();
@@ -1562,8 +1619,13 @@ async function submitPrompt(prompt) {
     activeRunPaused = false;
     activeRunPauseRequested = false;
     currentRoutingDecision = null;
-    usageSnapshot = await client.getUsage().catch(() => null);
-    renderRunInspector();
+    void client
+      .getUsage()
+      .then((usage) => {
+        usageSnapshot = usage;
+        renderRunInspector();
+      })
+      .catch(() => {});
     elements.pause_run.hidden = false;
     elements.pause_run.disabled = false;
     elements.pause_run.textContent = 'Pause run';
@@ -1590,10 +1652,7 @@ async function submitPrompt(prompt) {
           .catch(() => renderRunInspector());
         renderRunInspector();
       }
-      if (event.type === 'assistant_delta' && typeof data.text === 'string') {
-        responseBody.textContent += data.text;
-        chatScroller.contentChanged();
-      }
+      liveReply.handle(event);
       if (event.type === 'model_fallback') {
         activeRunModel = data.to_model;
         ensureModelPickerOption(activeRunModel);
@@ -1743,9 +1802,9 @@ async function submitPrompt(prompt) {
         showToast('The budget change could not be applied; previous limits remain active.');
       }
       if (event.type === 'user_direction_added' && typeof data.content === 'string') {
-        if (!responseBody.textContent) responseBody.closest('.message')?.remove();
+        if (!liveReply.body.textContent) liveReply.body.closest('.message')?.remove();
         addMessage('user', `Direction during run: ${data.content}`);
-        responseBody = addMessage('assistant');
+        liveReply.reset();
       }
       if (event.type === 'run_direction_queued') showToast('Direction queued for the next safe checkpoint.');
       if (event.type === 'run_policy_changed') {
@@ -1777,7 +1836,7 @@ async function submitPrompt(prompt) {
           'complete',
         );
       if (event.type === 'api_run_failed') {
-        responseBody.classList.add('run-error');
+        liveReply.body.classList.add('run-error');
         appendActivity(formatRunFailure(data.error), 'error');
       }
       if (event.type === 'api_run_finished') {
@@ -1792,7 +1851,7 @@ async function submitPrompt(prompt) {
         rememberSessionId(activeSessionId);
         void rememberDesktopSessionId(activeSessionId);
         elements.conversation_title.textContent = sessionsById.get(activeSessionId)?.title || 'Conversation';
-        if (!responseBody.textContent && data.status !== 'complete') responseBody.textContent = `Run ${data.status}.`;
+        if (!liveReply.body.textContent && data.status !== 'complete') liveReply.body.textContent = `Run ${data.status}.`;
         await refreshSessions();
       }
     }
@@ -1801,6 +1860,7 @@ async function submitPrompt(prompt) {
   } catch (error) {
     if (error.name !== 'AbortError') showError(error);
   } finally {
+    liveReply.finish();
     activeRunId = null;
     runController = null;
     activeRunModel = null;

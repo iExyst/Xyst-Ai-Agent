@@ -55,3 +55,13 @@ test('a queued follow operation does not override a reader scrolling up before t
   scroller.setEnabled(false);
   assert.equal(button.hidden, true);
 });
+
+test('a content-growth scroll event does not cancel the pending auto-scroll', () => {
+  const { timeline, scroller, flush } = fixture();
+  timeline.scrollHeight = 1600;
+  scroller.contentChanged();
+  timeline.dispatchEvent(new Event('scroll'));
+  flush();
+  assert.equal(timeline.scrollTop, 1500);
+  assert.equal(scroller.isFollowing(), true);
+});
