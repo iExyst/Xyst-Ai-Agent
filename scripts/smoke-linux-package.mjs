@@ -373,7 +373,10 @@ function runChecked(command, args, { timeoutMs = 30_000, env = process.env } = {
     shell: false,
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} exited with ${result.status}: ${result.stderr.trim()}`);
+  if (result.status !== 0) {
+    const output = [result.stderr, result.stdout].filter((value) => value?.trim()).map((value) => value.trim()).join('\n');
+    throw new Error(`${command} exited with ${result.status}${output ? `:\n${output.slice(-12_000)}` : ''}`);
+  }
   return result;
 }
 
