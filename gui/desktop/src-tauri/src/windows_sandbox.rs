@@ -31,12 +31,12 @@ use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeleteAppContainerProfile,
     DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
-#[cfg(test)]
 use windows_sys::Win32::Security::PROTECTED_DACL_SECURITY_INFORMATION;
 use windows_sys::Win32::Security::{
-    EqualSid, FreeSid, GetSecurityDescriptorControl, DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE,
-    OBJECT_INHERIT_ACE, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SE_DACL_PROTECTED,
-    UNPROTECTED_DACL_SECURITY_INFORMATION,
+    EqualSid, FreeSid, GetSecurityDescriptorControl, GetTokenInformation, TokenAppContainerSid,
+    TokenIsAppContainer, DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE,
+    SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SE_DACL_PROTECTED, TOKEN_APPCONTAINER_INFORMATION,
+    TOKEN_QUERY, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, MoveFileExW, BY_HANDLE_FILE_INFORMATION,
@@ -57,10 +57,10 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForMultipleObjects, WaitForSingleObject, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
-    EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    InitializeProcThreadAttributeList, OpenProcessToken, ResumeThread, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForMultipleObjects, WaitForSingleObject, CREATE_SUSPENDED,
+    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
 const MAX_COMMAND_LINE_UNITS: usize = 32_767;
@@ -344,6 +344,67 @@ pub fn run_appcontainer_command_with_input(
         return Err(win32_error("Could not create the AppContainer process"));
     }
     let process_handles = ProcessHandles(process);
+    let mut process_token = null_mut();
+    if unsafe { OpenProcessToken(process_handles.0.hProcess, TOKEN_QUERY, &mut process_token) } == 0
+    {
+        unsafe { TerminateProcess(process_handles.0.hProcess, 1) };
+        return Err(win32_error(
+            "Could not inspect the AppContainer process token",
+        ));
+    }
+    let process_token = OwnedHandle(process_token);
+    let mut is_app_container = 0u32;
+    let mut token_information_length = 0u32;
+    if unsafe {
+        GetTokenInformation(
+            process_token.0,
+            TokenIsAppContainer,
+            (&mut is_app_container as *mut u32).cast(),
+            size_of::<u32>() as u32,
+            &mut token_information_length,
+        )
+    } == 0
+    {
+        unsafe { TerminateProcess(process_handles.0.hProcess, 1) };
+        return Err(win32_error(
+            "Could not verify the AppContainer process token",
+        ));
+    }
+    if is_app_container == 0 {
+        unsafe { TerminateProcess(process_handles.0.hProcess, 1) };
+        return Err("Windows did not create the sandbox child as an AppContainer".into());
+    }
+    let mut app_container_information_storage = [0usize; 64];
+    if unsafe {
+        GetTokenInformation(
+            process_token.0,
+            TokenAppContainerSid,
+            app_container_information_storage.as_mut_ptr().cast(),
+            size_of::<[usize; 64]>() as u32,
+            &mut token_information_length,
+        )
+    } == 0
+    {
+        unsafe { TerminateProcess(process_handles.0.hProcess, 1) };
+        return Err(win32_error(
+            "Could not inspect the AppContainer package identity",
+        ));
+    }
+    let app_container_information = unsafe {
+        app_container_information_storage
+            .as_ptr()
+            .cast::<TOKEN_APPCONTAINER_INFORMATION>()
+            .read()
+    };
+    if app_container_information.TokenAppContainer.is_null()
+        || unsafe { EqualSid(app_container_information.TokenAppContainer, profile.sid) } == 0
+    {
+        unsafe { TerminateProcess(process_handles.0.hProcess, 1) };
+        return Err(
+            "Windows created the sandbox child with an unexpected AppContainer identity".into(),
+        );
+    }
+    drop(process_token);
     if unsafe { AssignProcessToJobObject(job_handle.0, process_handles.0.hProcess) } == 0 {
         unsafe { TerminateProcess(process_handles.0.hProcess, 1) };
         return Err(win32_error(
@@ -1126,6 +1187,11 @@ impl WorkspaceAclGrant {
             identity,
             active: true,
         };
+        grant._agent_state_handle = Some(set_agent_state_deny(
+            &agent_state_path,
+            sid,
+            agent_state_identity,
+        )?);
         let status = unsafe {
             SetSecurityInfo(
                 grant.handle.0,
@@ -1143,11 +1209,6 @@ impl WorkspaceAclGrant {
                 "Could not grant AppContainer workspace access (Windows error {status})"
             ));
         }
-        grant._agent_state_handle = Some(set_agent_state_deny(
-            &agent_state_path,
-            sid,
-            agent_state_identity,
-        )?);
         Ok(grant)
     }
 
@@ -1407,7 +1468,7 @@ fn set_agent_state_deny(
         SetSecurityInfo(
             handle.0,
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             null_mut(),
             null_mut(),
             updated_dacl,
@@ -2451,20 +2512,10 @@ mod tests {
                 .trim(),
             "workspace-write"
         );
-        let powershell = Path::new(&system_root)
-            .join("System32")
-            .join("WindowsPowerShell")
-            .join("v1.0")
-            .join("powershell.exe");
-        let state_probe = "$p = Join-Path $PWD '.agent\\approvals\\rules.json'; try { Get-Content -LiteralPath $p -ErrorAction Stop; exit 31 } catch {}; try { Set-Content -LiteralPath $p -Value 'forged' -ErrorAction Stop; exit 32 } catch {}; Write-Output 'approval-state-protected'";
+        let state_probe = "findstr /c:host-approval-canary .agent\\approvals\\rules.json >NUL 2>&1 && exit /b 31 & (echo forged > .agent\\approvals\\rules.json) >NUL 2>&1 && exit /b 32 & echo approval-state-protected";
         let state_outcome = run_appcontainer_command(
-            &powershell,
-            &[
-                "-NoLogo".into(),
-                "-NoProfile".into(),
-                "-Command".into(),
-                state_probe.into(),
-            ],
+            &command,
+            &["/d".into(), "/c".into(), state_probe.into()],
             &workspace,
             &workspace,
             &environment,
