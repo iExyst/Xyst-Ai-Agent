@@ -1130,7 +1130,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .control-room-nav button:hover { border-color: var(--line); background: var(--surface-active); color: var(--brand-cyan); }
 .sidebar { overflow-y: auto; }
 .welcome-state > img, .welcome-state .welcome-mark { width: 42px; height: 42px; border-radius: 7px; box-shadow: none; }
-@media (max-width: 760px) { .control-room-nav { padding: 8px 5px; } .control-room-nav button { justify-content: center; padding: 5px; } .control-room-nav button span, .control-room-nav .section-heading { display: none; } }
+@media (max-width: 760px) { .control-room-nav { padding: 8px 5px; } .control-room-nav button { justify-content: center; padding: 5px; } .control-room-nav button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } .control-room-nav .section-heading { display: none; } }
 .topbar, .primary-tabs { background: var(--panel); border-color: var(--line-soft); backdrop-filter: none; }
 .new-session-button, .send-button { background: #396b55; color: #eef7f1; border: 1px solid #527d64; border-radius: 5px; box-shadow: none; }
 .new-session-button:hover, .send-button:hover:not(:disabled) { background: #487d62; }
