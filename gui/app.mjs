@@ -150,7 +150,7 @@ let localModelResultsExpanded = false;
 let localModelSearchTerm = '';
 let localDiscoveryServers = [];
 let selectedPrimaryTab = 'agent';
-let selectedSettingsCategory = 'overview';
+let selectedSettingsCategory = 'models';
 let localDiscoveryCompleted = false;
 let attachedImageFiles = [];
 let mcpServerCatalog = [];
@@ -214,7 +214,20 @@ function selectPrimaryTab(tab) {
     elements.mode_workspace.setAttribute('aria-labelledby', `tab-${mode}`);
   } else {
     void renderSettingsOverview();
-    void openSettings();
+    if (document.querySelector('#inline-settings-content .runtime-settings-form')) showSettingsCategory();
+    else void openSettings();
+  }
+}
+
+function showSettingsCategory() {
+  for (const panel of document.querySelectorAll('#inline-settings-content [data-settings-panel]')) {
+    panel.hidden = panel.dataset.settingsPanel !== selectedSettingsCategory;
+  }
+  for (const button of document.querySelectorAll('#control-room-nav [data-settings-category]')) {
+    button.setAttribute(
+      'aria-current',
+      selectedPrimaryTab === 'settings' && button.dataset.settingsCategory === selectedSettingsCategory ? 'page' : 'false',
+    );
   }
 }
 
@@ -488,6 +501,13 @@ function findDiscoveredProfile(server, modelId) {
 async function renderSettingsOverview() {
   if (!runtimeSettings || !elements.settings_view) return;
   renderConfiguredModelProfiles();
+}
+
+function renderMainOverview(settings) {
+  const host = elements.welcome.querySelector('#main-overview');
+  if (!host) return;
+  const tools = elements.memory_button.closest('.settings-page-card');
+  host.replaceChildren(createSettingsOverview(settings), tools);
 }
 
 function ensureModelPickerOption(profile) {
@@ -3262,17 +3282,8 @@ function createSettingsEditor(settings, usage) {
     'muted-copy',
     'Changes apply to new runs and are saved in a separate user settings file. Clearing a field removes its override. Credential values are not editable here.',
   );
-  const nav = node('nav', 'runtime-settings-nav');
-  nav.setAttribute('aria-label', 'Runtime settings categories');
   const panels = node('div', 'runtime-settings-panels');
   const categoryDefinitions = [
-    {
-      id: 'overview',
-      title: 'Overview',
-      description: 'The current setup at a glance.',
-      icon: '◌',
-      content: [createSettingsOverview(settings)],
-    },
     {
       id: 'models',
       title: 'Models',
@@ -3330,40 +3341,24 @@ function createSettingsEditor(settings, usage) {
       content: [budgetSection, createUsageBreakdown(usage)],
     },
   ];
-  const navItems = [];
-  const categoryPanels = [];
   for (const category of categoryDefinitions) {
     const panelId = `settings-panel-${category.id}`;
-    const button = node('button', 'settings-nav-item');
-    button.type = 'button';
-    button.id = `settings-nav-${category.id}`;
-    button.setAttribute('aria-controls', panelId);
-    button.setAttribute('aria-current', category.id === selectedSettingsCategory ? 'page' : 'false');
-    button.append(node('span', 'settings-nav-icon', category.icon), node('span', 'settings-nav-label', category.title));
     const panel = node('section', 'settings-category-panel');
     panel.id = panelId;
     panel.dataset.settingsPanel = category.id;
-    panel.setAttribute('aria-labelledby', button.id);
+    panel.setAttribute('aria-labelledby', `${panelId}-title`);
     panel.hidden = category.id !== selectedSettingsCategory;
     const heading = node('header', 'settings-category-heading');
     heading.append(node('p', 'eyebrow', 'RUNTIME SETTINGS'), node('h3', '', category.title), node('p', 'muted-copy', category.description));
+    heading.querySelector('h3').id = `${panelId}-title`;
     const content = node('div', 'settings-category-content');
     content.append(...category.content);
     panel.append(heading, content);
-    button.addEventListener('click', () => {
-      selectedSettingsCategory = category.id;
-      for (const item of navItems) item.setAttribute('aria-current', item === button ? 'page' : 'false');
-      for (const currentPanel of categoryPanels) currentPanel.hidden = currentPanel !== panel;
-      panels.scrollTop = 0;
-    });
-    navItems.push(button);
-    categoryPanels.push(panel);
-    nav.append(button);
     panels.append(panel);
   }
   const footer = node('div', 'runtime-settings-footer');
   footer.append(note, save);
-  form.append(nav, panels, footer);
+  form.append(panels, footer);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     save.disabled = true;
@@ -3623,7 +3618,6 @@ function createUsageBreakdown(usage) {
 async function openSettings() {
   const host = document.getElementById('inline-settings-content');
   const discoveryCard = elements.local_model_results.closest('.settings-page-card');
-  const toolsCard = elements.memory_button.closest('.settings-page-card');
   host.setAttribute('aria-busy', 'true');
   try {
     const [settings, usage, sandboxCapability] = await Promise.all([
@@ -3633,12 +3627,13 @@ async function openSettings() {
     ]);
     settings.sandbox = { ...settings.sandbox, ...sandboxCapability };
     runtimeSettings = settings;
+    renderMainOverview(settings);
     applyUiPreferences(settings.ui);
     usageSnapshot = usage;
     const editor = createSettingsEditor(settings, usage);
     editor.querySelector('[data-settings-panel="models"] .settings-category-content').prepend(discoveryCard);
-    editor.querySelector('[data-settings-panel="overview"] .settings-category-content').append(toolsCard);
     host.replaceChildren(editor);
+    showSettingsCategory();
     if (settings.retrieval?.semantic?.enabled) await renderRetrievalControls(editor.querySelector('[data-settings-panel="data"]'));
   } catch (error) {
     host.replaceChildren(node('p', 'muted-copy', error.message));
@@ -5024,6 +5019,7 @@ async function initialize() {
     modelProfiles = settings.models || {};
     runtimeSettings = settings;
     renderConfiguredModelProfiles();
+    renderMainOverview(settings);
     mcpServerCatalog = mcpServers;
     renderMcpRunSelection();
     applyUiPreferences(settings.ui);
