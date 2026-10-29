@@ -2180,15 +2180,19 @@ function createSettingsEditor(settings, usage) {
     }
   });
   addProfile.append(newProfileName, newProfileUrl, newProfileModel, localProfileLabel, createProfile);
-  providersSection.append(addProfile);
-  providersSection.append(
-    node(
-      'p',
-      'muted-copy',
-      'Prices are your estimates and can be edited at any time. Record when you checked the source; prices older than 90 days are marked stale. Cached-input pricing applies only when the provider reports cached tokens. Removing a profile leaves its OS-vault credential intact; a credential may be shared with another configuration.',
-    ),
+  const addProfileDisclosure = node('details', 'model-profile-disclosure model-profile-add');
+  addProfileDisclosure.append(node('summary', '', '+ Add provider profile'), addProfile);
+  addProfileDisclosure.addEventListener('toggle', () => {
+    if (!addProfileDisclosure.open) return;
+    for (const sibling of providersSection.querySelectorAll('.model-profile-disclosure')) {
+      if (sibling !== addProfileDisclosure) sibling.open = false;
+    }
+  });
+  providersSection.append(addProfileDisclosure);
+  const orderedProfiles = Object.entries(settings.models || {}).sort(
+    ([left], [right]) => Number(right === settings.default_model) - Number(left === settings.default_model),
   );
-  for (const [profileName, definition] of Object.entries(settings.models || {})) {
+  for (const [profileName, definition] of orderedProfiles) {
     const profile = node('fieldset', 'provider-profile-editor');
     profile.append(node('legend', '', profileName));
     const fields = {};
@@ -2558,8 +2562,24 @@ function createSettingsEditor(settings, usage) {
     );
     actions.append(saveProfile, removeProfile, credentialState);
     profile.append(actions);
-    providersSection.append(profile);
+    const disclosure = node('details', 'model-profile-disclosure');
+    const summary = node('summary', 'model-profile-summary');
+    const identity = node('span', 'model-profile-identity');
+    identity.append(node('strong', '', profileName), node('span', '', definition.model || definition.provider || 'Model profile'));
+    summary.append(
+      identity,
+      node('span', 'model-profile-status', profileName === settings.default_model ? 'DEFAULT' : definition.local ? 'LOCAL' : 'REMOTE'),
+    );
+    disclosure.append(summary, profile);
+    disclosure.addEventListener('toggle', () => {
+      if (!disclosure.open) return;
+      for (const sibling of providersSection.querySelectorAll('.model-profile-disclosure')) {
+        if (sibling !== disclosure) sibling.open = false;
+      }
+    });
+    providersSection.append(disclosure);
   }
+  providersSection.append(addProfileDisclosure);
 
   const connectionsSection = node('fieldset', 'settings-budget-editor settings-autonomy-editor');
   connectionsSection.append(node('legend', '', 'Model connections'));
@@ -3255,9 +3275,16 @@ function createSettingsEditor(settings, usage) {
     {
       id: 'models',
       title: 'Models',
-      description: 'Choose a model, manage provider profiles, and tune routing.',
+      description: 'Choose your default. Open a profile only when you need to edit it.',
       icon: '◈',
-      content: [modelLabel, ...roleModelLabels, routingEnabledLabel, routingLabel, localLabel, providersSection, connectionsSection],
+      content: [modelLabel, providersSection, connectionsSection],
+    },
+    {
+      id: 'routing',
+      title: 'Routing',
+      description: 'Choose how tasks are assigned and which models handle planning and review.',
+      icon: '⌁',
+      content: [...roleModelLabels, routingEnabledLabel, routingLabel, localLabel],
     },
     {
       id: 'agents',
