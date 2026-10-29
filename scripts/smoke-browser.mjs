@@ -1186,6 +1186,9 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       'Run failed · RATE_LIMITED: LM Studio returned HTTP 429. Retry the run after the provider limit clears.',
     );
     await browserApiMutation(service, `/v1/sessions/${encodeURIComponent(failedSession.session.id)}`, 'DELETE', {}, 200);
+    // The stale sidebar entry produces an operation-level 404 from a healthy service.
+    await evaluate(protocol, failedSessionSelector);
+    await waitForConnectionLabel(protocol, 'Connected to local runtime', true);
     await browserApiMutation(service, `/v1/sessions/${encodeURIComponent(interruptedSession.session.id)}`, 'DELETE', {}, 200);
     await evaluate(
       protocol,
@@ -1257,11 +1260,23 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       'Deleting a sidebar conversation must remove its saved record',
     );
 
+    progress('checking connection status independently of operation errors');
+    try {
+      await protocol.call('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 });
+      await evaluate(protocol, `document.querySelector('#refresh-sessions').click()`);
+      await waitForConnectionLabel(protocol, 'Runtime unavailable', true);
+    } finally {
+      await protocol.call('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    }
+    await protocol.call('Page.reload', { ignoreCache: true });
+    await waitForAppReady(protocol, pageErrors, failedResponses);
+    await waitForConnectionLabel(protocol, 'Connected to local runtime');
     progress('browser assertions complete');
     return {
       browser: path.basename(browser),
       title: pageState.title,
       connection: pageState.connection,
+      connectionStatusRecovery: true,
       responsiveWindowSizes: resizeLayouts.map(({ viewportWidth, viewportHeight }) => `${viewportWidth}x${viewportHeight}`),
       recentConversationList: { scrollable: recentScroll.canScroll, deleteAction: deleteControl.label },
       themeRendering,
@@ -1665,6 +1680,20 @@ async function waitForRunBudgetApplied(protocol) {
     await delay(50);
   }
   throw new Error(`Active-run budget change was not confirmed: '${status}'`);
+}
+
+async function waitForConnectionLabel(protocol, label, requireError = false) {
+  const deadline = Date.now() + 10_000;
+  let state;
+  while (Date.now() < deadline) {
+    state = await evaluate(
+      protocol,
+      `(() => ({ label: document.querySelector('#connection-indicator').title, error: !document.querySelector('#status-banner').hidden }))()`,
+    );
+    if (state.label === label && (!requireError || state.error)) return state;
+    await delay(50);
+  }
+  throw new Error(`Connection status did not become ${label}: ${JSON.stringify(state)}`);
 }
 
 async function waitForToast(protocol, text) {

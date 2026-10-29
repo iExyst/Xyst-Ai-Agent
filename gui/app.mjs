@@ -179,7 +179,10 @@ const RUN_BUDGET_FIELDS = [
   { key: 'max_monthly_cost', label: 'Monthly cost (USD)', integer: false },
 ];
 
+let connectionHealthCheckId = 0;
+
 function setConnected(connected) {
+  connectionHealthCheckId += 1;
   document.documentElement.dataset.xystStartupReported = 'true';
   elements.connection_indicator.className = `connection-dot${connected ? ' ready' : ' error'}`;
   elements.connection_indicator.title = connected ? 'Connected to local runtime' : 'Runtime unavailable';
@@ -681,7 +684,20 @@ function showError(error) {
       : 'The local runtime could not complete that request.';
   elements.status_banner.textContent = message;
   elements.status_banner.hidden = false;
-  setConnected(false);
+  if (error instanceof ControlApiError && error.status !== null) setConnected(true);
+  else void refreshConnectionHealth();
+}
+
+async function refreshConnectionHealth() {
+  const checkId = ++connectionHealthCheckId;
+  let connected;
+  try {
+    await withStartupTimeout('runtime health check', (signal) => client.health({ signal }));
+    connected = true;
+  } catch {
+    connected = false;
+  }
+  if (checkId === connectionHealthCheckId) setConnected(connected);
 }
 
 function clearError() {
@@ -1777,8 +1793,6 @@ async function submitPrompt(prompt) {
     renderRunBudgetControl();
     elements.send_direction.hidden = true;
     for (const button of elements.session_actions.querySelectorAll('button')) button.disabled = false;
-    if (!elements.status_banner.hidden) setConnected(false);
-    else setConnected(true);
     elements.prompt_input.focus();
   }
 }

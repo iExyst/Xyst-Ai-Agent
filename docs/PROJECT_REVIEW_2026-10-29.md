@@ -28,3 +28,9 @@ Project-wide JavaScript syntax, lint, and automated tests; Windows Rust compilat
 - Browser integration covers four viewport sizes, dark/light themes, discovery/loading, settings persistence, package/MCP controls, approval and file-write flow, runtime model/budget changes, goals, interrupted/failed sessions, scrolling, and browser-to-CLI conversation continuity.
 
 The Windows development installer is rebuilt for these repairs. Native Linux builds and Linux desktop acceptance were not rerun on this Windows host; skipped platform/permission-specific tests are not treated as passed.
+
+## Follow-up: compaction continuity and connection reporting
+
+- Compaction now selects the largest complete oldest prefix that fits the summary model without dropping any of its turns. Only that prefix is archived and removed; unsummarized turns stay active. Histories larger than the summary model's window can be compacted incrementally.
+- Operation-level API errors no longer imply an offline runtime. Transport/local errors trigger a bounded health check, stale health results cannot overwrite newer connection evidence, and run cleanup does not infer connectivity from the visibility of an error banner.
+- Validation: 8 compaction tests and 11 related agent/context/budget tests passed; lint passed. Browser smoke passed with added checks for a healthy-service 404, a simulated transport outage, and successful reconnection, alongside the existing integration coverage.

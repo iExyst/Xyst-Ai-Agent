@@ -82,6 +82,49 @@ test('session compaction archives full older transcript and keeps recent turns p
   assert.match(recapSession(session), /Earlier context summary/);
 });
 
+test('compaction summarizes an oldest prefix without removing turns the model did not receive', async (t) => {
+  for (const contextLength of [800, 600]) {
+    const root = await createTempDirectory('xyst-compaction-prefix-');
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const store = new SessionStore(root);
+    const session = store.create({ model: 'local' });
+    for (let index = 0; index < 5; index += 1) {
+      session.messages.push(
+        { role: 'user', content: `request-${index} ${'constraint '.repeat(45)}` },
+        { role: 'assistant', content: `answer-${index} ${'verified '.repeat(30)}` },
+      );
+    }
+    await store.save(session);
+    const original = structuredClone(session.messages);
+    let summarized;
+    const result = await compactSession(session, {
+      config: {
+        default_model: 'local',
+        models: { local: { model: 'summary', context_length: contextLength, supports_tools: false } },
+        budgets: { max_output_tokens: 200 },
+      },
+      workspaceRoot: root,
+      sessionStore: store,
+      providerFactory: () => ({
+        listModels: async () => [],
+        stream: async function* () {},
+        chat: async (messages) => {
+          summarized = messages.filter((message) => message.content.startsWith('request-') || message.content.startsWith('answer-'));
+          return { content: 'Verified summary of the supplied prefix.', usage: null, toolCalls: [] };
+        },
+      }),
+    });
+    assert.equal(result.compacted, true);
+    assert.ok(summarized.length > 0 && summarized.length < 6);
+    assert.equal(summarized[0].content, original[0].content);
+    assert.deepEqual([...summarized, ...session.messages], original);
+    const archive = JSON.parse(await fs.readFile(path.join(root, result.archive), 'utf8'));
+    assert.deepEqual(archive.messages, summarized);
+    assert.equal(result.archived_messages, summarized.length);
+    assert.deepEqual((await store.load(session.id)).messages, original.slice(summarized.length));
+  }
+});
+
 test('session compaction uses the injected ModelProvider factory', async (t) => {
   const root = await createTempDirectory('xyst-compaction-provider-factory-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

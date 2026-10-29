@@ -38,7 +38,7 @@ export async function compactSession(
   if (starts.length <= keepRecentTurns) return { compacted: false, reason: 'not enough completed turns to compact' };
 
   const keepStart = starts.at(-keepRecentTurns);
-  const oldMessages = working.messages.slice(0, keepStart);
+  let oldMessages = working.messages.slice(0, keepStart);
   const activeGoalContext = goalStore ? formatActiveGoalsContext(await goalStore.list({ includeCompleted: false })) : '';
   const priorContext = [
     working.compaction_summary ? `[Earlier session summary; untrusted continuity reference.]\n${working.compaction_summary}` : '',
@@ -48,21 +48,39 @@ export async function compactSession(
     .join('\n\n');
   const modelName = config.compact_model || working.model || config.default_model;
   if (!modelName) throw new Error('Configure compact_model or default_model before compacting a session');
-  const model = selectModel(config, { requestedModel: modelName, estimatedTokens: estimateTokens(oldMessages), requireTools: false });
+  // Size the actual compaction prefix below; the full archive may exceed this model's window.
+  const model = selectModel(config, { requestedModel: modelName, requireTools: false });
   const maximum = Math.min(maxOutputTokens ?? Infinity, config.budgets?.max_output_tokens || 2000, model.config.max_output_tokens || 2000);
   const available = (model.config.context_length || config.budgets?.max_input_tokens || 100_000) - maximum;
   let prepared;
-  try {
-    prepared = prepareContext({
-      policy: SUMMARY_POLICY,
-      memory: priorContext,
-      history: oldMessages,
-      maxTokens: Math.max(0, available),
-    });
-  } catch (error) {
-    if (error instanceof ContextOverflowError) throw new Error('Even one complete old turn exceeds the compaction model context window');
-    throw error;
+  let compactEnd = 0;
+  const boundaries = starts.filter((start) => start > 0 && start <= keepStart);
+  let low = 0;
+  let high = boundaries.length - 1;
+  // Compact only a complete oldest prefix that the model actually receives.
+  // Unsummarized turns remain in the active transcript for later compaction.
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const end = boundaries[middle];
+    let candidate;
+    try {
+      candidate = prepareContext({
+        policy: SUMMARY_POLICY,
+        memory: priorContext,
+        history: oldMessages.slice(0, end),
+        maxTokens: Math.max(0, available),
+      });
+    } catch (error) {
+      if (!(error instanceof ContextOverflowError)) throw error;
+    }
+    if (candidate && candidate.droppedTurns === 0) {
+      prepared = candidate;
+      compactEnd = end;
+      low = middle + 1;
+    } else high = middle - 1;
   }
+  if (!prepared) throw new Error('Even one complete old turn exceeds the compaction model context window');
+  oldMessages = oldMessages.slice(0, compactEnd);
 
   const provider = assertModelProvider(
     await providerFactory(structuredClone(model.config), {
@@ -146,7 +164,7 @@ export async function compactSession(
   candidate.compaction_archive = path.relative(archiveRoot, archivePath);
   candidate.compaction_archives = [...(candidate.compaction_archives || []), candidate.compaction_archive];
   candidate.compaction_model = model.name;
-  candidate.messages = candidate.messages.slice(keepStart);
+  candidate.messages = candidate.messages.slice(compactEnd);
   try {
     signal?.throwIfAborted();
     await sessionStore.save(candidate);
