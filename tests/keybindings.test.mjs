@@ -22,3 +22,9 @@ test('UI shortcut matching requires the configured modifier combination', () => 
   assert.equal(matchesUiShortcut({ key: '/', ctrlKey: false, altKey: false, metaKey: false, shiftKey: false }, '/'), true);
   assert.equal(matchesUiShortcut({ key: '/', ctrlKey: true, altKey: false, metaKey: false, shiftKey: false }, '/'), false);
 });
+
+test('resetting a shortcut checks collisions against its restored default', () => {
+  assert.throws(() => assertUniqueUiShortcuts({ toggle_sidebar: 'Ctrl+K', new_session: null }), /conflicts/);
+  assert.throws(() => assertUniqueUiShortcuts({ toggle_sidebar: null, new_session: 'Ctrl+B' }), /conflicts/);
+  assert.deepEqual(assertUniqueUiShortcuts({ toggle_sidebar: null, new_session: null, focus_search: null }), DEFAULT_UI_SHORTCUTS);
+});

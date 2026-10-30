@@ -36,6 +36,74 @@ function config() {
   };
 }
 
+test('input and output settings constrain actual model requests and can be restored', async (t) => {
+  const root = await createTempDirectory('xyst-request-budget-settings-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.budgets.max_input_tokens = 1;
+  settings.budgets.max_output_tokens = 120;
+  settings.budgets.final_response_reserve_tokens = 20;
+  settings.budgets.recovery_summary_input_tokens = 0;
+  const calls = [];
+  const fetchImpl = async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    return Response.json({
+      choices: [{ message: { role: 'assistant', content: 'Done.' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+  };
+  const run = () =>
+    new AgentRuntime({ config: settings, workspaceRoot: root, sessionStore: new SessionStore(root), fetchImpl }).run({
+      prompt: 'Say hello.',
+    });
+  const blocked = await run();
+  assert.notEqual(blocked.status, 'complete');
+  assert.equal(calls.length, 0, 'an insufficient input budget must stop before sending context');
+  settings.budgets.max_input_tokens = 10000;
+  assert.equal((await run()).status, 'complete');
+  assert.ok(calls[0].max_tokens <= 120 && calls[0].max_tokens > 0);
+  settings.budgets.max_output_tokens = 1000;
+  assert.equal((await run()).status, 'complete');
+  assert.ok(calls[1].max_tokens > calls[0].max_tokens && calls[1].max_tokens <= 1000);
+});
+
+test('turn limits stop tool loops and increasing the limit permits the final answer', async (t) => {
+  const root = await createTempDirectory('xyst-turn-budget-settings-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'note.txt'), 'checked');
+  for (const maxTurns of [1, 2]) {
+    const settings = config();
+    settings.budgets.max_turns = maxTurns;
+    settings.budgets.recovery_summary_input_tokens = 0;
+    let calls = 0;
+    const runtime = new AgentRuntime({
+      config: settings,
+      workspaceRoot: root,
+      sessionStore: new SessionStore(root),
+      fetchImpl: async () => {
+        calls += 1;
+        return Response.json({
+          choices: [
+            {
+              message:
+                calls === 1
+                  ? {
+                      role: 'assistant',
+                      tool_calls: [{ id: 'read', type: 'function', function: { name: 'read_file', arguments: '{"path":"note.txt"}' } }],
+                    }
+                  : { role: 'assistant', content: 'Checked.' },
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        });
+      },
+    });
+    const result = await runtime.run({ prompt: 'Read note.txt then report.' });
+    assert.equal(calls, maxTurns);
+    assert.equal(result.status, maxTurns === 1 ? 'max_turns' : 'complete');
+  }
+});
+
 test('long saved history does not force a larger model to load when the current request fits the default', async (t) => {
   const root = await createTempDirectory('xyst-long-chat-default-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -1135,6 +1203,63 @@ test('agent automatically loads only the selected installed LM Studio model befo
   assert.equal(events.find((event) => event.type === 'model_load_finished').already_loaded, false);
 });
 
+test('automatic routing falls back when its selected LM Studio profile is not installed', async (t) => {
+  const root = await createTempDirectory('xyst-agent-missing-selected-lm-studio-model-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const settings = config();
+  settings.default_model = 'missing';
+  settings.routing = { enabled: true, prefer_local: true, selection: 'quality' };
+  settings.models = {
+    missing: {
+      ...config().models.local,
+      base_url: 'http://127.0.0.1:1234/v1',
+      model: 'missing-model',
+      coding_strength: 10,
+      tool_calling_quality: 10,
+    },
+    available: {
+      ...config().models.local,
+      base_url: 'http://127.0.0.1:1234/v1',
+      model: 'available-model',
+      coding_strength: 5,
+      tool_calling_quality: 5,
+    },
+  };
+  const requests = [];
+  const events = [];
+  const runtime = new AgentRuntime({
+    config: settings,
+    workspaceRoot: root,
+    sessionStore: new SessionStore(root),
+    onEvent: (event) => events.push(event),
+    fetchImpl: async (url, options = {}) => {
+      const address = String(url);
+      requests.push({ address, method: options.method || 'GET' });
+      if (address === 'http://127.0.0.1:1234/api/v1/models')
+        return Response.json({
+          models: [{ key: 'available-model', type: 'llm', loaded_instances: [{ config: { context_length: 16000 } }] }],
+        });
+      if (address === 'http://127.0.0.1:1234/v1/models') return Response.json({ data: [{ id: 'available-model' }] });
+      if (address === 'http://127.0.0.1:1234/v1/chat/completions')
+        return Response.json({ choices: [{ message: { role: 'assistant', content: 'Used the available model.' } }] });
+      assert.fail(`unexpected LM Studio request: ${address}`);
+    },
+  });
+  t.after(() => runtime.close());
+
+  const result = await runtime.run({ prompt: 'Answer briefly.' });
+
+  assert.equal(result.status, 'complete');
+  assert.equal(result.session.model, 'available');
+  assert.equal(result.content, 'Used the available model.');
+  assert.match(result.session.routing_decision.reason, /provider availability fallback/);
+  assert.deepEqual(
+    events.filter((event) => event.type === 'model_fallback').map(({ from_model, to_model, cause }) => [from_model, to_model, cause]),
+    [['missing', 'available', 'LM_STUDIO_MODEL_NOT_FOUND']],
+  );
+  assert.ok(requests.some(({ address }) => address.endsWith('/v1/chat/completions')));
+});
+
 test('agent keeps using the configured model when older LM Studio lacks model-management support', async (t) => {
   const root = await createTempDirectory('xyst-agent-lm-studio-legacy-api-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -1660,28 +1785,29 @@ test('agent retries a transient provider failure once before succeeding on the s
   );
 });
 
-test('agent honors retry_attempts zero and does not replay the request', async (t) => {
-  const root = await createTempDirectory('xyst-agent-no-provider-retry-');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const settings = config();
-  settings.models.local.retry_attempts = 0;
-  let chatCalls = 0;
-  await assert.rejects(
-    () =>
-      new AgentRuntime({
-        config: settings,
-        workspaceRoot: root,
-        sessionStore: new SessionStore(root),
-        fetchImpl: async () => {
-          chatCalls += 1;
-          return new Response('temporary unavailable', { status: 503 });
-        },
-      }).run({ prompt: 'Complete the task.' }),
-    /temporary unavailable/,
-  );
+for (const retries of [0, 1, 2])
+  test(`agent honors retry_attempts ${retries} when a provider stays unavailable`, async (t) => {
+    const root = await createTempDirectory('xyst-agent-no-provider-retry-');
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const settings = config();
+    settings.models.local.retry_attempts = retries;
+    let chatCalls = 0;
+    await assert.rejects(
+      () =>
+        new AgentRuntime({
+          config: settings,
+          workspaceRoot: root,
+          sessionStore: new SessionStore(root),
+          fetchImpl: async () => {
+            chatCalls += 1;
+            return new Response('temporary unavailable', { status: 503 });
+          },
+        }).run({ prompt: 'Complete the task.' }),
+      /temporary unavailable/,
+    );
 
-  assert.equal(chatCalls, 1);
-});
+    assert.equal(chatCalls, retries + 1);
+  });
 
 test('agent does not charge failed output after same-profile retries are exhausted', async (t) => {
   const root = await createTempDirectory('xyst-agent-retry-accounting-');
@@ -3861,33 +3987,41 @@ test('automatic retrieval failure is audited and does not prevent the primary mo
   assert.match(audit, /"outcome":"failed"/);
 });
 
-test('agent enforces session token ceilings across resumed runs before another provider call', async (t) => {
-  const root = await createTempDirectory('xyst-session-budget-');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const settings = config();
-  settings.budgets.max_session_input_tokens = 10_000;
-  let providerCalls = 0;
-  const fetchImpl = async () => {
-    providerCalls += 1;
-    return Response.json({
-      choices: [{ message: { role: 'assistant', content: 'first response' } }],
-      usage: { prompt_tokens: 1, completion_tokens: 1 },
+for (const field of ['max_session_input_tokens', 'max_session_output_tokens'])
+  test(`agent enforces ${field} across resumed runs and restores uncapped behavior`, async (t) => {
+    const root = await createTempDirectory('xyst-session-budget-');
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const settings = config();
+    settings.budgets[field] = 10_000;
+    let providerCalls = 0;
+    const fetchImpl = async () => {
+      providerCalls += 1;
+      return Response.json({
+        choices: [{ message: { role: 'assistant', content: 'first response' } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    };
+    const sessions = new SessionStore(root);
+    const first = await new AgentRuntime({ config: settings, workspaceRoot: root, sessionStore: sessions, fetchImpl }).run({
+      prompt: 'Say hello',
     });
-  };
-  const sessions = new SessionStore(root);
-  const first = await new AgentRuntime({ config: settings, workspaceRoot: root, sessionStore: sessions, fetchImpl }).run({
-    prompt: 'Say hello',
+    assert.equal(first.status, 'complete');
+    assert.equal(first.session.usage.input_tokens, 1);
+    settings.budgets[field] = 1;
+    const resumed = await new AgentRuntime({ config: settings, workspaceRoot: root, sessionStore: sessions, fetchImpl }).run({
+      prompt: 'Continue',
+      session: first.session,
+    });
+    assert.equal(resumed.status, 'budget_exceeded');
+    assert.equal(providerCalls, 1);
+    delete settings.budgets[field];
+    const restored = await new AgentRuntime({ config: settings, workspaceRoot: root, sessionStore: sessions, fetchImpl }).run({
+      prompt: 'Continue without the session cap',
+      session: resumed.session,
+    });
+    assert.equal(restored.status, 'complete');
+    assert.equal(providerCalls, 2);
   });
-  assert.equal(first.status, 'complete');
-  assert.equal(first.session.usage.input_tokens, 1);
-  settings.budgets.max_session_input_tokens = 1;
-  const resumed = await new AgentRuntime({ config: settings, workspaceRoot: root, sessionStore: sessions, fetchImpl }).run({
-    prompt: 'Continue',
-    session: first.session,
-  });
-  assert.equal(resumed.status, 'budget_exceeded');
-  assert.equal(providerCalls, 1);
-});
 
 test('agent reserves a conservative estimated call cost before using a session cost budget', async (t) => {
   const root = await createTempDirectory('xyst-session-cost-');
@@ -5694,7 +5828,9 @@ test('review requests expose parsed read_file JSON as untrusted evidence instead
   const root = await createTempDirectory('xyst-agent-review-readable-evidence-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(path.join(root, 'src'), { recursive: true });
-  await fs.writeFile(path.join(root, 'src', 'rule.mjs'), 'export const retries = attempt <= maxRetries;\n', { flag: 'wx' });
+  await fs.writeFile(path.join(root, 'src', 'rule.mjs'), '// Source context\nexport const retries = attempt <= maxRetries;\n', {
+    flag: 'wx',
+  });
   const settings = config();
   settings.budgets.max_turns = 2;
   let calls = 0;
@@ -5715,7 +5851,7 @@ test('review requests expose parsed read_file JSON as untrusted evidence instead
                   {
                     id: 'call_review_source',
                     type: 'function',
-                    function: { name: 'read_file', arguments: '{"path":"src/rule.mjs"}' },
+                    function: { name: 'read_file', arguments: '{"path":"src/rule.mjs","start_line":2,"end_line":2}' },
                   },
                 ],
               },
@@ -5742,6 +5878,8 @@ test('review requests expose parsed read_file JSON as untrusted evidence instead
       assert.equal(evidence[0].trust, 'untrusted');
       assert.equal(evidence[0].path.replaceAll('\\', '/'), 'src/rule.mjs');
       assert.match(evidence[0].content, /attempt <= maxRetries/);
+      assert.match(evidence[0].content, /^2: export const retries = attempt <= maxRetries;/);
+      assert.match(evidence[0].content_format, /absolute file line number/);
       return Response.json({ choices: [{ message: { role: 'assistant', content: '{"findings":[]}' } }] });
     },
   });

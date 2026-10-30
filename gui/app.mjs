@@ -1234,7 +1234,7 @@ async function openSession(id) {
     }
     if (isInterruptedSession(session, { running: session.run_active === true }))
       appendActivity('This conversation has an unfinished turn and is not currently running. Send a message to continue.', 'error');
-    renderSavedPlan(session.plan, session.id);
+    renderSavedPlan(session.plan, session.id, session.run_active === true);
     renderSavedFindings(session.review_findings, session.worktree_path || null);
     renderSessions([...sessionsById.values()]);
     if (preservePosition) chatScroller.restore(previousTop);
@@ -1244,7 +1244,7 @@ async function openSession(id) {
   }
 }
 
-function renderSavedPlan(plan, sessionId) {
+function renderSavedPlan(plan, sessionId, runActive = Boolean(activeRunId)) {
   if (typeof plan !== 'string' || !plan.trim()) return;
   const card = node('section', 'saved-plan-card');
   card.append(node('h2', '', 'Saved implementation plan'));
@@ -1264,9 +1264,9 @@ function renderSavedPlan(plan, sessionId) {
   add.type = 'button';
   const clear = node('button', 'text-button', 'Clear plan');
   clear.type = 'button';
-  clear.disabled = Boolean(activeRunId);
+  clear.disabled = runActive;
   const markDirty = () => {
-    save.disabled = Boolean(activeRunId);
+    save.disabled = runActive;
     implement.disabled = true;
   };
   const renderSteps = () => {
@@ -1285,7 +1285,7 @@ function renderSavedPlan(plan, sessionId) {
       const controls = node('div', 'plan-step-controls');
       const moveUp = node('button', 'text-button', 'Move up');
       moveUp.type = 'button';
-      moveUp.disabled = index === 0 || Boolean(activeRunId);
+      moveUp.disabled = index === 0 || runActive;
       moveUp.setAttribute('aria-label', `Move plan step ${index + 1} up`);
       moveUp.addEventListener('click', () => {
         [steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
@@ -1294,7 +1294,7 @@ function renderSavedPlan(plan, sessionId) {
       });
       const moveDown = node('button', 'text-button', 'Move down');
       moveDown.type = 'button';
-      moveDown.disabled = index === steps.length - 1 || Boolean(activeRunId);
+      moveDown.disabled = index === steps.length - 1 || runActive;
       moveDown.setAttribute('aria-label', `Move plan step ${index + 1} down`);
       moveDown.addEventListener('click', () => {
         [steps[index], steps[index + 1]] = [steps[index + 1], steps[index]];
@@ -1303,7 +1303,7 @@ function renderSavedPlan(plan, sessionId) {
       });
       const remove = node('button', 'text-button', 'Remove');
       remove.type = 'button';
-      remove.disabled = Boolean(activeRunId);
+      remove.disabled = runActive;
       remove.setAttribute('aria-label', `Remove plan step ${index + 1}`);
       remove.addEventListener('click', () => {
         steps.splice(index, 1);
@@ -1317,8 +1317,8 @@ function renderSavedPlan(plan, sessionId) {
   };
   const implement = node('button', 'send-button', 'Implement this plan');
   implement.type = 'button';
-  implement.disabled = plan.length > MAX_PLAN_IMPLEMENTATION_CHARACTERS || Boolean(activeRunId);
-  add.disabled = steps.length >= MAX_PLAN_STEPS || Boolean(activeRunId);
+  implement.disabled = plan.length > MAX_PLAN_IMPLEMENTATION_CHARACTERS || runActive;
+  add.disabled = steps.length >= MAX_PLAN_STEPS || runActive;
   add.addEventListener('click', () => {
     if (steps.length >= MAX_PLAN_STEPS) return;
     steps.push('');
@@ -2655,6 +2655,7 @@ function createSettingsEditor(settings, usage) {
         ['tool_calling_quality', 1, 10],
         ['speed_score', 1, 10],
         ['priority', 0, 1000],
+        ['retry_attempts', 0, 2],
       ]) {
         if (fields[key].dataset.dirty !== 'true') continue;
         const rawValue = fields[key].value.trim();
@@ -3191,7 +3192,7 @@ function createSettingsEditor(settings, usage) {
     node(
       'p',
       'muted-copy',
-      'Use an absolute path. This currently stores cross-project global memory. Existing files stay in the old location and are not moved automatically.',
+      'Use an absolute path. Xyst copies existing global memory to the new location and keeps the original as a backup.',
     ),
   );
 

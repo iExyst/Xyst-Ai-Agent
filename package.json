@@ -24,6 +24,7 @@
     "eval:compare": "node scripts/compare-evaluations.mjs",
     "bench:retrieval": "node scripts/benchmark-semantic-index.mjs",
     "smoke:live-model": "node scripts/smoke-live-model.mjs",
+    "smoke:live-internet": "node scripts/smoke-live-internet.mjs",
     "smoke:live-review": "node scripts/smoke-live-review.mjs",
     "smoke:live-delegation": "node scripts/smoke-live-delegation.mjs",
     "smoke:live-resume": "node scripts/smoke-live-resume.mjs",

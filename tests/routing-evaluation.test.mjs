@@ -7,6 +7,42 @@ import { selectModel } from '../src/core/router.mjs';
 
 const datasetPath = path.join(process.cwd(), 'eval', 'routing-cases.json');
 
+test('individual model ratings select the intended profile and reset to the default route', () => {
+  for (const [field, selection] of [
+    ['coding_strength', 'quality'],
+    ['tool_calling_quality', 'quality'],
+    ['speed_score', 'speed'],
+  ]) {
+    const profile = { context_length: 8192, supports_tools: true, coding_strength: 5, tool_calling_quality: 5, speed_score: 5 };
+    const config = {
+      default_model: 'alpha',
+      routing: { selection, prefer_local: false },
+      models: { alpha: { ...profile }, beta: { ...profile, [field]: 9 } },
+    };
+    assert.equal(selectModel(config, { requireTools: true, taskType: 'review' }).name, 'beta', field);
+    config.models.beta[field] = 5;
+    assert.equal(selectModel(config, { requireTools: true, taskType: 'review' }).name, 'alpha', `${field} reset`);
+  }
+});
+
+test('model priority orders eligible fallbacks while explicit selection remains authoritative', () => {
+  const profile = { context_length: 8192, supports_tools: true };
+  const config = {
+    default_model: 'unavailable',
+    routing: { prefer_local: false },
+    models: {
+      unavailable: { ...profile, supports_tools: false },
+      alpha: { ...profile },
+      beta: { ...profile, priority: 1 },
+    },
+  };
+  const options = { requireTools: true, taskType: 'agent' };
+  assert.equal(selectModel(config, options).name, 'beta');
+  assert.equal(selectModel(config, { ...options, requestedModel: 'alpha' }).name, 'alpha');
+  delete config.models.beta.priority;
+  assert.equal(selectModel(config, options).name, 'alpha');
+});
+
 test('routing evaluation dataset measures expected strategies and reports per-category accuracy', async () => {
   const dataset = JSON.parse(await fs.readFile(datasetPath, 'utf8'));
   assert.equal(validateRoutingDataset(dataset), dataset);

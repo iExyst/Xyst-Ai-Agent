@@ -9,6 +9,31 @@ import { UsageBudgetStore } from '../src/session/usage-budget.mjs';
 
 const execFileAsync = promisify(execFile);
 
+for (const [field, metric] of [
+  ['max_daily_input_tokens', 'inputTokens'],
+  ['max_daily_output_tokens', 'outputTokens'],
+  ['max_monthly_input_tokens', 'inputTokens'],
+  ['max_monthly_output_tokens', 'outputTokens'],
+  ['max_daily_cost', 'costUsd'],
+  ['max_monthly_cost', 'costUsd'],
+])
+  test(`${field} enforces pending and settled usage and responds to a changed limit`, async (t) => {
+    const root = await createTempDirectory('xyst-individual-shared-cap-');
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const store = new UsageBudgetStore(root);
+    const amount = (value) => ({ inputTokens: 0, outputTokens: 0, costUsd: 0, [metric]: value });
+    const limits = { [field]: 10 };
+    const first = await store.reserve({ ...amount(6), limits });
+    const boundary = await store.reserve({ ...amount(4), limits });
+    await assert.rejects(store.reserve({ ...amount(1), limits }), { code: 'BUDGET_EXCEEDED' });
+    await store.settle(first, amount(6));
+    await store.settle(boundary, amount(0));
+    await assert.rejects(store.reserve({ ...amount(5), limits }), { code: 'BUDGET_EXCEEDED' });
+    const raised = await store.reserve({ ...amount(5), limits: { [field]: 20 } });
+    await store.settle(raised, amount(0));
+    assert.equal(await store.reserve({ ...amount(100), limits: {} }), null, 'removing the cap restores uncapped reservations');
+  });
+
 test('usage ledger restores one validated atomic-replacement backup instead of resetting totals', async (t) => {
   const root = await createTempDirectory('xyst-usage-budget-backup-recovery-');
   t.after(() => fs.rm(root, { recursive: true, force: true }));

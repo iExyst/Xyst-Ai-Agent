@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from '../src/platform/process.mjs';
 import { buildExampleMcpPackage } from './build-example-mcp-package.mjs';
 import { installSignedPackage } from '../src/extensions/signed-packages.mjs';
+import { RUN_BUDGET_FIELDS } from '../src/core/budgets.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TIMEOUT_MS = 30_000;
@@ -856,6 +857,12 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     assert.equal(capabilitySettings.supportsVision, 'true');
     assert.equal(capabilitySettings.speedScore, '8');
     assert.equal(capabilitySettings.priority, '15');
+    progress('checking per-profile retry saving, validation, and reset');
+    await verifyRetrySetting(protocol, service);
+    progress('checking every editable non-credential model field independently');
+    await verifyModelFieldRoundTrips(protocol, service);
+    progress('checking model profile removal and default protection');
+    await verifyModelProfileRemoval(protocol, service);
     const roleSettings = await updateRoutingRoleSettings(protocol);
     assert.equal(roleSettings.reviewModel, '');
     assert.equal(roleSettings.planModel, '');
@@ -865,8 +872,12 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     assert.equal(shortcutSettings.toggleSidebar, 'Alt+B');
     assert.equal(shortcutSettings.newSession, 'Alt+M');
     assert.equal(shortcutSettings.focusSearch, '/');
-    const dataDirectorySettings = await updateDataDirectorySettings(protocol, path.join(temporaryDirectory, 'custom-user-data'));
+    progress('checking saved appearance and real keyboard actions');
+    await verifyAppearanceAndKeyboard(protocol, service);
+    const dataDirectorySettings = await updateDataDirectorySettings(protocol, path.join(temporaryDirectory, 'custom-user-data'), service);
     assert.match(dataDirectorySettings.directory, /custom-user-data/);
+    progress('checking runtime setting changes and restoration');
+    await verifyRuntimeSettingRoundTrips(protocol, service);
     progress('checking signed package panels');
     const skillPackages = await waitForSignedSkillPanel(protocol);
     assert.match(skillPackages.title, /Instruction skills/);
@@ -1130,6 +1141,16 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     assert.equal(await fs.readFile(path.join(workspace, 'approval-smoke.txt'), 'utf8'), 'approved by browser smoke\n');
     assert.equal(mockProvider.chatRequests, 2, 'The mock provider should make one tool-call turn and one final-answer turn');
     assert.deepEqual(mockProvider.requestModels, ['browser-approval-smoke', 'browser-approval-fast']);
+    const configuredRequest = mockProvider.requestAt(0);
+    assert.equal(configuredRequest.reasoning_effort, 'none', 'Saved profile reasoning must reach the actual model request');
+    assert.equal(configuredRequest.prompt_cache_key, 'browser-smoke-cache');
+    assert.equal(configuredRequest.prompt_cache_retention, '24h');
+    assert.equal(Object.hasOwn(mockProvider.requestAt(1), 'reasoning_effort'), false, 'Switching profiles must restore provider defaults');
+    assert.equal(
+      Object.hasOwn(mockProvider.requestAt(1), 'prompt_cache_key'),
+      false,
+      'Cache controls must remain specific to the opted-in profile',
+    );
     assert.ok(mockProvider.outputCaps[1] <= 300, 'the active-run output cap and reserve constrain the next request');
 
     progress('checking project goal conversation controls');
@@ -2356,6 +2377,268 @@ async function saveWebSearchProvider(protocol, provider) {
   throw new Error(`Live web search provider did not save as ${provider}`);
 }
 
+async function verifyModelFieldRoundTrips(protocol, service) {
+  const cases = [
+    ['base_url', 'API base URL', 'http://127.0.0.1:45678/v1'],
+    ['model', 'Model ID', 'audit-model-id'],
+    ['context_mode', 'Context sizing', 'auto'],
+    ['context_length', 'Manual limit / fallback · tokens', 24576],
+    ['reasoning_effort', 'Reasoning effort', 'low'],
+    ['local', 'Prefer as a local model', true],
+    ['supports_tools', 'Supports tool calls', false],
+    ['supports_vision', 'Supports image input', false],
+    ['prompt_cache_enabled', 'Provider supports prompt cache controls', false],
+    ['coding_strength', 'Coding strength · 1–10', 9],
+    ['tool_calling_quality', 'Tool-call reliability · 1–10', 9],
+    ['speed_score', 'Speed score · 1–10', 4],
+    ['priority', 'Routing priority · 0–1000 (lower first)', 3],
+    ['input_cost_per_million', 'Input price · USD per 1M tokens', 2],
+    ['cached_input_cost_per_million', 'Cached input price · USD per 1M tokens', 0.5],
+    ['output_cost_per_million', 'Output price · USD per 1M tokens', 5],
+    ['prompt_cache_key', 'Prompt cache key · non-sensitive identifier', 'audit-cache'],
+    ['prompt_cache_retention', 'Prompt cache retention', ''],
+    ['pricing_updated_at', 'Prices last checked (UTC)', '2026-10-29'],
+    ['pricing_source', 'Pricing source or note', 'Isolated settings audit'],
+    ['capabilities_updated_at', 'Capabilities last checked (UTC)', '2026-10-29'],
+    ['capabilities_source', 'Capability source or note', 'Isolated model card'],
+  ];
+  for (const [key, label, value] of cases) {
+    const locate = `const profile = [...document.querySelectorAll('#inline-settings-content fieldset.provider-profile-editor')].find(item => item.querySelector('legend')?.textContent === 'approval-smoke');
+      const field = [...profile.querySelectorAll('label')].find(item => item.querySelector('span')?.textContent === ${JSON.stringify(label)})?.querySelector('input,select');
+      if (!field) throw new Error('Missing model field: ' + ${JSON.stringify(key)});`;
+    const { settings: before } = await browserApiRequest(service, '/v1/settings');
+    const original = await evaluate(protocol, `(() => { ${locate} return field.value; })()`);
+    for (const [input, expected] of [
+      [String(value), value === '' ? undefined : value],
+      [original, before.models['approval-smoke'][key]],
+    ]) {
+      await evaluate(
+        protocol,
+        `(() => { ${locate}
+        field.value = ${JSON.stringify(input)};
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+        [...profile.querySelectorAll('button')].find(button => button.textContent.trim() === 'Save profile').click();
+      })()`,
+      );
+      const deadline = Date.now() + 10_000;
+      let verified = false;
+      while (Date.now() < deadline) {
+        const { settings } = await browserApiRequest(service, '/v1/settings');
+        const ui = await evaluate(
+          protocol,
+          `(() => { ${locate} return { value: field.value, dirty: field.dataset.dirty === 'true' }; })()`,
+        );
+        if (settings.models['approval-smoke'][key] === expected && ui.value === input && !ui.dirty) {
+          verified = true;
+          break;
+        }
+        await delay(50);
+      }
+      assert.ok(verified, `Model field did not save/reset independently: ${key} = ${JSON.stringify(input)}`);
+    }
+  }
+}
+
+async function verifyModelProfileRemoval(protocol, service) {
+  const name = 'audit-removal';
+  const before = await browserApiRequest(service, '/v1/settings');
+  assert.notEqual(before.settings.default_model, name);
+  await browserApiMutation(
+    service,
+    '/v1/settings',
+    'PATCH',
+    { models: { [name]: { provider: 'openai-compatible', base_url: 'http://127.0.0.1:45679/v1', model: name } } },
+    200,
+  );
+  await protocol.call('Page.reload', { ignoreCache: true });
+  await waitForAppReady(protocol, [], []);
+  await evaluate(protocol, `document.querySelector('#settings-button').click()`);
+  await evaluate(protocol, `document.querySelector('[data-settings-category="models"]').click()`);
+  const exists = `Boolean([...document.querySelectorAll('#inline-settings-content fieldset.provider-profile-editor')].find(item => item.querySelector('legend')?.textContent === ${JSON.stringify(name)}))`;
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline && !(await evaluate(protocol, exists))) await delay(50);
+  assert.equal(await evaluate(protocol, exists), true, 'The disposable profile should appear in the model editor');
+  await evaluate(protocol, 'window.__xystAuditOriginalConfirm = window.confirm; window.confirm = () => true');
+  try {
+    const clicked = await evaluate(
+      protocol,
+      `(() => {
+        const profile = [...document.querySelectorAll('#inline-settings-content fieldset.provider-profile-editor')]
+          .find(item => item.querySelector('legend')?.textContent === ${JSON.stringify(name)});
+        const remove = profile?.querySelector('button.danger-text');
+        if (!remove) return false;
+        remove.click();
+        return true;
+      })()`,
+    );
+    assert.equal(clicked, true, 'The profile editor should expose its remove action');
+    const removeDeadline = Date.now() + 10_000;
+    let after;
+    while (Date.now() < removeDeadline) {
+      after = await browserApiRequest(service, '/v1/settings');
+      if (!after.settings.models?.[name]) break;
+      await delay(50);
+    }
+    assert.equal(after.settings.models?.[name], undefined, 'Remove profile should delete the saved profile');
+    assert.equal(after.settings.default_model, before.settings.default_model, 'Removing another profile should preserve the default');
+    const blockedDefault = await evaluate(
+      protocol,
+      `(() => {
+        const profile = [...document.querySelectorAll('#inline-settings-content fieldset.provider-profile-editor')]
+          .find(item => item.querySelector('legend')?.textContent === ${JSON.stringify(before.settings.default_model)});
+        const remove = profile?.querySelector('button.danger-text');
+        if (!remove) return false;
+        remove.click();
+        return true;
+      })()`,
+    );
+    assert.equal(blockedDefault, true, 'The configured default profile should expose its guarded remove action');
+    const rejectionDeadline = Date.now() + 10_000;
+    let rejectionToast = '';
+    while (Date.now() < rejectionDeadline) {
+      rejectionToast = await evaluate(protocol, `document.querySelector('#toast')?.textContent || ''`);
+      const afterRejectedRemoval = await browserApiRequest(service, '/v1/settings');
+      if (rejectionToast.includes('Could not remove') && afterRejectedRemoval.settings.models?.[before.settings.default_model]) break;
+      await delay(50);
+    }
+    assert.match(rejectionToast, /Could not remove/, 'The service should reject removing a profile still assigned as default');
+    const afterRejectedRemoval = await browserApiRequest(service, '/v1/settings');
+    assert.ok(
+      afterRejectedRemoval.settings.models?.[before.settings.default_model],
+      'A rejected removal must preserve the default model profile',
+    );
+  } finally {
+    await evaluate(protocol, 'window.confirm = window.__xystAuditOriginalConfirm; delete window.__xystAuditOriginalConfirm');
+  }
+}
+
+async function verifyRetrySetting(protocol, service) {
+  await evaluate(
+    protocol,
+    `(() => {
+    const input = document.querySelector('[aria-label="approval-smoke Same-provider retries · 0–2 (default 1)"]');
+    input.value = '3';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    [...input.closest('fieldset').querySelectorAll('button')].find(button => button.textContent.trim() === 'Save profile').click();
+  })()`,
+  );
+  await waitForToast(protocol, 'retry attempts must be an integer from 0 to 2.');
+  for (const value of ['2', '0', '']) {
+    await evaluate(
+      protocol,
+      `(() => {
+      const profile = [...document.querySelectorAll('#inline-settings-content fieldset.provider-profile-editor')].find(item => item.querySelector('legend')?.textContent === 'approval-smoke');
+      const input = profile.querySelector('[aria-label="approval-smoke Same-provider retries · 0–2 (default 1)"]');
+      input.value = ${JSON.stringify(value)};
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      [...profile.querySelectorAll('button')].find(button => button.textContent.trim() === 'Save profile').click();
+    })()`,
+    );
+    const deadline = Date.now() + 10_000;
+    let verified = false;
+    while (Date.now() < deadline) {
+      const { settings } = await browserApiRequest(service, '/v1/settings');
+      const actual = settings.models['approval-smoke'].retry_attempts;
+      const state = await evaluate(
+        protocol,
+        `(() => {
+        const input = document.querySelector('[aria-label="approval-smoke Same-provider retries · 0–2 (default 1)"]');
+        return { value: input?.value, dirty: input?.dataset.dirty === 'true' };
+      })()`,
+      );
+      if (actual === (value === '' ? undefined : Number(value)) && state.value === value && !state.dirty) {
+        verified = true;
+        break;
+      }
+      await delay(50);
+    }
+    assert.ok(verified, `Same-provider retries did not save and reload: ${JSON.stringify(value)}`);
+  }
+}
+
+async function verifyRuntimeSettingRoundTrips(protocol, service) {
+  await evaluate(protocol, 'window.__xystSettingsConfirm = window.confirm; window.confirm = () => true');
+  const cases = [
+    { category: 'routing', name: 'routing.selection', value: 'speed', path: ['routing', 'selection'] },
+    { category: 'routing', name: 'routing.selection', value: 'quality', path: ['routing', 'selection'] },
+    { category: 'routing', name: 'routing.selection', value: 'cost', path: ['routing', 'selection'] },
+    { category: 'routing', name: 'routing.enabled', value: false, path: ['routing', 'enabled'] },
+    { category: 'routing', name: 'routing.prefer_local', value: true, path: ['routing', 'prefer_local'] },
+    { category: 'data', name: 'memory.global_enabled', value: true, path: ['memory', 'global_enabled'] },
+    { category: 'usage', name: 'budgets.max_turns', value: '3', path: ['budgets', 'max_turns'], numeric: true },
+    ...RUN_BUDGET_FIELDS.filter((key) => key !== 'max_turns').map((key) => ({
+      category: 'usage',
+      name: `budgets.${key}`,
+      path: ['budgets', key],
+      numeric: true,
+      value: String(
+        key === 'recovery_summary_input_tokens'
+          ? 0
+          : key === 'final_response_reserve_tokens'
+            ? 64
+            : key.endsWith('_cost')
+              ? 2
+              : key.includes('input')
+                ? 20000
+                : 4000,
+      ),
+    })),
+    { category: 'agents', name: 'tools.autonomy', value: 'unrestricted', path: ['tools', 'autonomy'] },
+    { category: 'safety', label: 'Sandbox policy', value: 'read-only', path: ['sandbox', 'mode'], saveLabel: 'Save sandbox setting' },
+    { category: 'data', label: 'Enable automatic web, news, and reference lookups', value: false, path: ['web_search', 'enabled'] },
+  ];
+  for (const entry of cases) {
+    const locate = `const entry = ${JSON.stringify(entry)};
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
+      const field = entry.name ? [...form.elements].find(item => item.name === entry.name)
+        : [...form.querySelectorAll('label')].find(item => item.textContent.trim().startsWith(entry.label))?.querySelector('input, select');
+      if (!field) throw new Error('Missing settings control: ' + (entry.name || entry.label));`;
+    await evaluate(protocol, `document.querySelector('[data-settings-category="${entry.category}"]').click()`);
+    const original = await evaluate(protocol, `(() => { ${locate} return field.type === 'checkbox' ? field.checked : field.value; })()`);
+    const changedValue = typeof original === 'boolean' && entry.value === original ? !original : entry.value;
+    for (const value of [changedValue, original]) {
+      await evaluate(
+        protocol,
+        `(() => { ${locate}
+        if (field.type === 'checkbox') field.checked = ${JSON.stringify(value)};
+        else field.value = ${JSON.stringify(value)};
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+        const save = entry.saveLabel ? [...form.querySelectorAll('button')].find(button => button.textContent.trim() === entry.saveLabel) : form.querySelector('button[type="submit"]');
+        save.click();
+      })()`,
+      );
+      const deadline = Date.now() + 10_000;
+      let matched = false;
+      let lastState;
+      while (Date.now() < deadline) {
+        const { settings } = await browserApiRequest(service, '/v1/settings');
+        const actual = entry.path.reduce((result, key) => result?.[key], settings);
+        const expected = entry.numeric ? (value === '' ? undefined : Number(value)) : value;
+        const ready = await evaluate(
+          protocol,
+          `(() => { ${locate} return field.dataset.dirty !== 'true' && !form.querySelector('button[type="submit"]').disabled; })()`,
+        );
+        lastState = {
+          actual,
+          expected,
+          ready,
+          ui: await evaluate(
+            protocol,
+            `(() => { ${locate} return { value: field.value, dirty: field.dataset.dirty, invalid: [...form.querySelectorAll(':invalid')].map(item => item.name || item.type), toast: document.querySelector('#toast')?.textContent }; })()`,
+          ),
+        };
+        if (actual === expected && ready) {
+          matched = true;
+          break;
+        }
+        await delay(50);
+      }
+      assert.ok(matched, `Setting did not persist: ${entry.path.join('.')} = ${JSON.stringify(value)}; ${JSON.stringify(lastState)}`);
+    }
+  }
+  await evaluate(protocol, 'window.confirm = window.__xystSettingsConfirm; delete window.__xystSettingsConfirm');
+}
+
 async function updateRoutingRoleSettings(protocol) {
   const submitted = await evaluate(
     protocol,
@@ -2497,6 +2780,125 @@ async function updateSubagentSettings(protocol) {
   throw new Error('Runtime settings did not persist the subagent availability toggle and concurrency setting');
 }
 
+async function verifyAppearanceAndKeyboard(protocol, service) {
+  const waitUntil = async (expression, label) => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (await evaluate(protocol, expression)) return;
+      await delay(50);
+    }
+    throw new Error(`Appearance/keyboard check timed out: ${label}`);
+  };
+  const save = async (name, value) => {
+    await evaluate(protocol, `document.querySelector('[data-settings-category="appearance"]').click()`);
+    await waitUntil(`Boolean(document.querySelector('[name="${name}"]'))`, `load ${name}`);
+    await evaluate(
+      protocol,
+      `(() => {
+      const form = document.querySelector('#inline-settings-content form.runtime-settings-form');
+      const field = [...form.elements].find(item => item.name === ${JSON.stringify(name)});
+      if (field.type === 'checkbox') field.checked = ${JSON.stringify(value)}; else field.value = ${JSON.stringify(value)};
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+      form.querySelector('button[type="submit"]').click();
+    })()`,
+    );
+    await waitUntil(
+      `(() => { const field = document.querySelector('[name="${name}"]'); return field && field.dataset.dirty !== 'true' && !field.closest('form').querySelector('button[type="submit"]').disabled; })()`,
+      name,
+    );
+    const { settings } = await browserApiRequest(service, '/v1/settings');
+    assert.equal(settings.ui[name.slice(3)], value);
+  };
+  const key = async (letter, modifiers = 0) => {
+    const code = letter === '/' ? 'Slash' : `Key${letter.toUpperCase()}`;
+    const event = { key: letter, code, modifiers, windowsVirtualKeyCode: letter === '/' ? 191 : letter.toUpperCase().charCodeAt(0) };
+    await protocol.call('Input.dispatchKeyEvent', { type: 'keyDown', ...event });
+    await protocol.call('Input.dispatchKeyEvent', { type: 'keyUp', ...event });
+  };
+  const blur = () => evaluate(protocol, 'document.activeElement?.blur()');
+  for (const theme of ['dark', 'light', 'system']) {
+    await save('ui.theme', theme);
+    assert.equal(await evaluate(protocol, 'document.documentElement.dataset.theme'), theme);
+    if (theme !== 'system') assert.equal(await evaluate(protocol, 'getComputedStyle(document.documentElement).colorScheme'), theme);
+  }
+  for (const scheme of ['dark', 'light']) {
+    await protocol.call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+    await waitUntil(`getComputedStyle(document.documentElement).colorScheme === '${scheme}'`, `system ${scheme}`);
+  }
+  await protocol.call('Emulation.setEmulatedMedia', { features: [] });
+  await save('ui.sidebar_collapsed', true);
+  assert.equal(await evaluate(protocol, 'document.querySelector("#app-frame").classList.contains("sidebar-collapsed")'), true);
+  await protocol.call('Page.reload');
+  await waitUntil(
+    'document.querySelector("#connection-indicator")?.getAttribute("aria-label") === "Connected to local runtime" && document.querySelector("#app-frame")?.classList.contains("sidebar-collapsed")',
+    'persisted layout after reload',
+  );
+  await blur();
+  await key('b', 1);
+  await waitUntil('!document.querySelector("#app-frame").classList.contains("sidebar-collapsed")', 'custom Alt+B');
+  await save('ui.shortcuts_enabled', false);
+  await blur();
+  await key('b', 1);
+  assert.equal(await evaluate(protocol, 'document.querySelector("#app-frame").classList.contains("sidebar-collapsed")'), false);
+  await save('ui.shortcuts_enabled', true);
+  await evaluate(protocol, `document.querySelector('[aria-label="Toggle sidebar shortcut"]').focus()`);
+  await key('b', 1);
+  assert.equal(
+    await evaluate(protocol, 'document.querySelector("#app-frame").classList.contains("sidebar-collapsed")'),
+    false,
+    'editing text suppresses shortcuts',
+  );
+  for (const [binding, modifiers, letter] of [
+    ['Ctrl+Shift+F', 10, 'f'],
+    ['', 0, '/'],
+  ]) {
+    await evaluate(
+      protocol,
+      `(() => {
+      const input = document.querySelector('[aria-label="Focus workspace search shortcut"]');
+      input.value = ${JSON.stringify(binding)}; input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.closest('form').querySelector('button[type="submit"]').click();
+    })()`,
+    );
+    await waitUntil(
+      `(() => { const input = document.querySelector('[aria-label="Focus workspace search shortcut"]'); return input?.value === ${JSON.stringify(binding || '/')} && input.dataset.dirty !== 'true' && !input.closest('form').querySelector('button[type="submit"]').disabled; })()`,
+      'search shortcut save/reset',
+    );
+    await blur();
+    await key(letter, modifiers);
+    assert.equal(await evaluate(protocol, 'document.activeElement.id'), 'workspace-search');
+  }
+  await blur();
+  await key('/');
+  assert.equal(await evaluate(protocol, 'document.activeElement.id'), 'workspace-search');
+  await blur();
+  await key('m', 1);
+  assert.equal(await evaluate(protocol, 'document.querySelector("#conversation-title").textContent'), 'New conversation');
+  for (const [label, expected] of [
+    ['Toggle sidebar shortcut', 'Ctrl+B'],
+    ['Start new session shortcut', 'Ctrl+K'],
+  ]) {
+    await evaluate(
+      protocol,
+      `(() => {
+      document.querySelector('[data-settings-category="appearance"]').click();
+      const input = document.querySelector('[aria-label="${label}"]'); input.value = ''; input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.closest('form').querySelector('button[type="submit"]').click();
+    })()`,
+    );
+    await waitUntil(`document.querySelector('[aria-label="${label}"]')?.value === '${expected}'`, `reset ${label}`);
+  }
+  await blur();
+  await key('b', 2);
+  await waitUntil('document.querySelector("#app-frame").classList.contains("sidebar-collapsed")', 'restored Ctrl+B');
+  await save('ui.sidebar_collapsed', false);
+  await blur();
+  await key('k', 2);
+  assert.equal(await evaluate(protocol, 'document.activeElement.id'), 'prompt-input');
+  // Keep the later workflow assertions independent of the keyboard exercise.
+  await evaluate(protocol, 'document.querySelector("#settings-button").click()');
+}
+
 async function updateUiShortcutSettings(protocol) {
   const submitBindings = async (bindings) => {
     const result = await evaluate(
@@ -2559,7 +2961,16 @@ async function updateUiShortcutSettings(protocol) {
   return waitForBindings({ toggleSidebar: 'Alt+B', newSession: 'Alt+M', focusSearch: '/' });
 }
 
-async function updateDataDirectorySettings(protocol, directory) {
+async function updateDataDirectorySettings(protocol, directory, service) {
+  const { settings: initialSettings } = await browserApiRequest(service, '/v1/settings');
+  await browserApiMutation(service, '/v1/settings', 'PATCH', { memory: { global_enabled: true } }, 200);
+  const seed = await browserApiMutation(
+    service,
+    '/v1/memory/global',
+    'POST',
+    { section: 'user_preferences', text: 'Disposable data-location audit note.' },
+    201,
+  );
   const defaultDirectory = await evaluate(
     protocol,
     `document.querySelector('#inline-settings-content [aria-label="Xyst AI Assistant user data directory"]')?.value || ''`,
@@ -2595,6 +3006,12 @@ async function updateDataDirectorySettings(protocol, directory) {
     await delay(50);
   }
   if (!customPathSaved) throw new Error('Runtime settings did not persist the custom user data directory');
+  const copied = await browserApiRequest(service, '/v1/memory/global/export');
+  assert.ok(JSON.stringify(copied).includes(seed.item.id), 'Changing the data directory must preserve existing global memory');
+  assert.ok(
+    (await fs.readFile(path.join(defaultDirectory, '.agent', 'global-memory.json'), 'utf8')).includes(seed.item.id),
+    'Original memory remains as a backup',
+  );
   if (!defaultDirectory) throw new Error('Runtime settings did not show the default user data directory');
   await evaluate(
     protocol,
@@ -2616,7 +3033,32 @@ async function updateDataDirectorySettings(protocol, directory) {
         return { directory: input?.value || '', saving: form?.querySelector('button[type="submit"]')?.disabled ?? true, dirty: input?.dataset.dirty === 'true' };
       })()`,
     );
-    if (state.directory === defaultDirectory && !state.saving && !state.dirty) return { directory, restored: state.directory };
+    if (state.directory === defaultDirectory && !state.saving && !state.dirty) {
+      assert.ok(JSON.stringify(await browserApiRequest(service, '/v1/memory/global/export')).includes(seed.item.id));
+      await browserApiMutation(service, `/v1/memory/global/user_preferences/${seed.item.id}`, 'DELETE', {}, 200);
+      await evaluate(
+        protocol,
+        `(() => {
+        const input = document.querySelector('[name="memory.global_enabled"]');
+        input.checked = ${JSON.stringify(initialSettings.memory.global_enabled)};
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.closest('form').querySelector('button[type="submit"]').click();
+      })()`,
+      );
+      const resetDeadline = Date.now() + 10_000;
+      let restored = false;
+      while (Date.now() < resetDeadline) {
+        const { settings } = await browserApiRequest(service, '/v1/settings');
+        const clean = await evaluate(protocol, `document.querySelector('[name="memory.global_enabled"]')?.dataset.dirty !== 'true'`);
+        if (settings.memory.global_enabled === initialSettings.memory.global_enabled && clean) {
+          restored = true;
+          break;
+        }
+        await delay(50);
+      }
+      assert.ok(restored, 'The data-location test must restore memory opt-in through the UI');
+      return { directory, restored: state.directory };
+    }
     await delay(50);
   }
   throw new Error('Runtime settings did not restore the default user data directory');

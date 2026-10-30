@@ -14,6 +14,21 @@ import {
 import { createSymlinkOrSkip, createTempDirectory } from './helpers.mjs';
 import { isSensitivePath, redactSecrets } from '../src/platform/redaction.mjs';
 import { prepareFileChange } from '../src/tools/file-change-preview.mjs';
+
+test('maximum tool output bytes bounds truncation markers and multibyte content, and resetting restores content', async (t) => {
+  const root = await createTempDirectory('xyst-output-byte-cap-');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'note.txt'), '😀測試'.repeat(100));
+  for (const limit of [1, 16, 32, 65, 128, 257]) {
+    const config = { tools: { autonomy: 'assisted' }, budgets: { max_tool_output_bytes: limit } };
+    const tools = createBuiltinTools({ workspaceRoot: root, config });
+    const output = await tools.call('read_file', { path: 'note.txt' });
+    assert.ok(Buffer.byteLength(output) <= limit, `${limit}: received ${Buffer.byteLength(output)} bytes`);
+    assert.doesNotMatch(output, /\uFFFD/, 'truncation must not split a UTF-8 code point');
+  }
+  const restored = createBuiltinTools({ workspaceRoot: root, config: { tools: { autonomy: 'assisted' } } });
+  assert.equal(JSON.parse(await restored.call('read_file', { path: 'note.txt' })).content, '😀測試'.repeat(100));
+});
 import { GlobalMemoryStore, MemoryStore } from '../src/memory/store.mjs';
 
 test('tool schemas reject unknown fields and malformed values', () => {

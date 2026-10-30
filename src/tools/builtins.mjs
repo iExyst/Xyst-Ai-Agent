@@ -516,5 +516,9 @@ function isIgnoredName(name) {
 function truncate(text, maxBytes) {
   const buffer = Buffer.from(text);
   if (buffer.length <= maxBytes) return text;
-  return `${buffer.subarray(0, Math.max(0, maxBytes - 64)).toString('utf8')}\n[tool output truncated at ${maxBytes} bytes]`;
+  const marker = Buffer.from(`\n[tool output truncated at ${maxBytes} bytes]`);
+  if (marker.length >= maxBytes) return marker.subarray(0, maxBytes).toString('utf8');
+  let end = maxBytes - marker.length;
+  while (end > 0 && (buffer[end] & 0xc0) === 0x80) end -= 1;
+  return buffer.subarray(0, end).toString('utf8') + marker.toString('utf8');
 }

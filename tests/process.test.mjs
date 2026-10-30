@@ -142,31 +142,47 @@ test('process adapter escalates a timeout when a child ignores graceful terminat
 });
 
 test('process timeout kills descendants in the child process tree', async (t) => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const marker = path.join(process.cwd(), `.xyst-child-survived-${process.pid}-${Date.now()}`);
-  t.after(() => fs.rm(marker, { force: true }));
-  const childCode = `process.on('SIGTERM',()=>{});setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'survived'),900);setTimeout(()=>{},2000)`;
-  const parentCode = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childCode)}],{stdio:'ignore'});setTimeout(()=>{},5000)`;
-  await assert.rejects(runProcess(process.execPath, ['-e', parentCode], { timeoutMs: 100 }), (error) => error.code === 'ETIMEDOUT');
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  await assert.rejects(fs.access(marker), { code: 'ENOENT' });
+  await assertDescendantStops(t, false);
 });
 
 test('process cancellation kills descendants in the child process tree', async (t) => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const marker = path.join(process.cwd(), `.xyst-cancelled-child-survived-${process.pid}-${Date.now()}`);
-  t.after(() => fs.rm(marker, { force: true }));
-  const childCode = `setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'survived'),900);setTimeout(()=>{},2000)`;
-  const parentCode = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childCode)}],{stdio:'ignore'});setTimeout(()=>{},5000)`;
-  const controller = new AbortController();
-  const pending = runProcess(process.execPath, ['-e', parentCode], { signal: controller.signal });
-  setTimeout(() => controller.abort(), 100);
-  await assert.rejects(pending, (error) => error.code === 'ABORT_ERR');
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  await assert.rejects(fs.access(marker), { code: 'ENOENT' });
+  await assertDescendantStops(t, true);
 });
+
+async function assertDescendantStops(t, cancel) {
+  // Check the actual descendant after termination. A marker written before a slow
+  // Windows taskkill finishes does not demonstrate that the descendant survived.
+  const childCode = "process.on('SIGTERM',()=>{});setTimeout(()=>{},60000)";
+  const parentCode = `const child=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childCode)}],{stdio:'ignore'});console.log(child.pid);setTimeout(()=>{},60000)`;
+  const controller = new AbortController();
+  const timer = cancel ? setTimeout(() => controller.abort(), 400) : null;
+  t.after(() => clearTimeout(timer));
+  let descendant;
+  await assert.rejects(
+    runProcess(process.execPath, ['-e', parentCode], cancel ? { signal: controller.signal } : { timeoutMs: 400 }),
+    (error) => {
+      descendant = Number(error.result?.stdout.trim());
+      return error.code === (cancel ? 'ABORT_ERR' : 'ETIMEDOUT');
+    },
+  );
+  assert.ok(Number.isSafeInteger(descendant) && descendant > 0, 'the test must observe a real descendant');
+  t.after(() => {
+    try {
+      process.kill(descendant, 'SIGKILL');
+    } catch {}
+  });
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(descendant, 0);
+    } catch (error) {
+      if (error.code === 'ESRCH') return;
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`descendant ${descendant} is still present after process-tree termination`);
+}
 
 test('process adapter reports timeout and cancellation distinctly', async () => {
   await assert.rejects(

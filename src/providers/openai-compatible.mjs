@@ -287,6 +287,7 @@ function classifyHttpError(status, detail, endpoint) {
   if (status === 429) return 'RATE_LIMITED';
   const isChatRequest = endpoint === '/chat/completions';
   if (isChatRequest && (status === 413 || (status === 400 && indicatesContextOverflow(detail)))) return 'CONTEXT_OVERFLOW';
+  if (isChatRequest && status === 400 && indicatesTransientInferenceFailure(detail)) return 'PROVIDER_UNAVAILABLE';
   if ([500, 502, 503, 504].includes(status)) return 'PROVIDER_UNAVAILABLE';
   if (status === 400) return 'BAD_REQUEST';
   return 'HTTP_ERROR';
@@ -297,6 +298,12 @@ function indicatesContextOverflow(detail) {
     /context(?:[_\s-]+(?:length|window|size))?[_\s-]*(?:has[_\s-]+been[_\s-]+)?(?:exceeded|exceeds|overflow|limit)/i.test(detail) ||
     /(?:exceeded|exceeds|overflow|too many tokens).{0,100}context/i.test(detail) ||
     /maximum context length|too many tokens/i.test(detail)
+  );
+}
+
+function indicatesTransientInferenceFailure(detail) {
+  return /engine protocol predict request failed|inference (?:engine|server).*(?:failed|unavailable)|model (?:is )?(?:not loaded|unloaded)/i.test(
+    detail,
   );
 }
 
@@ -461,11 +468,7 @@ function validateStreamEvent(event, state) {
       typeof event.error === 'string' ? event.error : typeof event.error?.message === 'string' ? event.error.message : ''
     ).slice(0, MAX_ERROR_RESPONSE_BYTES);
     if (indicatesContextOverflow(detail)) throw new ProviderError('Provider context limit was exceeded', { code: 'CONTEXT_OVERFLOW' });
-    if (
-      /engine protocol predict request failed|inference (?:engine|server).*(?:failed|unavailable)|model (?:is )?(?:not loaded|unloaded)/i.test(
-        detail,
-      )
-    )
+    if (indicatesTransientInferenceFailure(detail))
       throw new ProviderError('The model inference engine is temporarily unavailable', { code: 'PROVIDER_UNAVAILABLE', retryable: true });
     throw new ProviderError('Provider returned an error event in its stream', { code: 'STREAM_FAILED' });
   }

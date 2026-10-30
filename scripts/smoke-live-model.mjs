@@ -302,6 +302,9 @@ async function main() {
               file: String(fileResult.content ?? '').slice(0, 400),
               command: String(commandResult.content ?? '').slice(0, 400),
             },
+            command_tool_diagnostics: commandResult.session.messages
+              .filter((message) => message.role === 'tool')
+              .map((message) => message.content),
           }
         : {}),
       failure_reasons: [

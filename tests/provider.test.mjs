@@ -301,6 +301,19 @@ test('prompt cache controls are omitted by default and sent only after profile o
       ['xyst-main', '24h'],
     ],
   );
+  const optedOut = createOpenAICompatibleProvider(
+    {
+      base_url: 'http://localhost/v1',
+      model: 'x',
+      prompt_cache_enabled: false,
+      prompt_cache_key: 'ignored-cache-key',
+      prompt_cache_retention: '24h',
+    },
+    { fetchImpl },
+  );
+  await optedOut.chat([{ role: 'user', content: 'hi' }]);
+  assert.equal(Object.hasOwn(calls.at(-1), 'prompt_cache_key'), false);
+  assert.equal(Object.hasOwn(calls.at(-1), 'prompt_cache_retention'), false);
 });
 
 test('reasoning effort is opt-in per profile and reaches chat and stream requests', async () => {
@@ -782,6 +795,24 @@ test('provider classifies explicit context overflow and unavailable gateway resp
     assert.equal(error.retryable, true);
     return true;
   });
+});
+
+test('provider retries HTTP 400 inference engine failures but preserves ordinary bad requests', async () => {
+  for (const [detail, expected] of [
+    ['Engine protocol predict request failed: fetch failed', 'PROVIDER_UNAVAILABLE'],
+    ['Invalid temperature', 'BAD_REQUEST'],
+    ['Engine protocol predict request failed: context size exceeded', 'CONTEXT_OVERFLOW'],
+  ]) {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: 'http://localhost/v1',
+      model: 'x',
+      fetchImpl: async () => Response.json({ error: detail }, { status: 400 }),
+    });
+    await assert.rejects(
+      provider.chat([]),
+      (error) => error.code === expected && error.retryable === (expected === 'PROVIDER_UNAVAILABLE'),
+    );
+  }
 });
 
 test('provider marks only the supported transient server statuses retryable', async () => {

@@ -35,7 +35,7 @@ import { StdioMcpManager } from '../tools/mcp-stdio.mjs';
 import { SkillLibrary } from '../tools/skills.mjs';
 import { containsSensitiveMaterial } from '../platform/redaction.mjs';
 import { updateRuntimeOverrides, validateRuntimeOverrides } from '../config/runtime-overrides.mjs';
-import { resolveRunBudgetChange } from '../core/budgets.mjs';
+import { resolveRunBudgetChange, RUN_BUDGET_FIELDS } from '../core/budgets.mjs';
 import { inspectWorkspace, readWorkspaceFile } from '../platform/workspace-inspector.mjs';
 import { createPlatformSecretStore } from '../platform/secrets.mjs';
 import { findBubblewrap, findWindowsSandboxHelper } from '../platform/sandbox.mjs';
@@ -3294,6 +3294,7 @@ function publicSettings(config) {
           'context_length',
           'context_mode',
           'timeout_ms',
+          'retry_attempts',
           'reasoning_effort',
           'prompt_cache_enabled',
           'prompt_cache_key',
@@ -3323,22 +3324,7 @@ function publicSettings(config) {
     review_model: config.review_model ?? null,
     plan_model: config.plan_model ?? null,
     models,
-    budgets: pick(config.budgets, [
-      'max_turns',
-      'max_input_tokens',
-      'max_output_tokens',
-      'max_tool_output_bytes',
-      'max_session_input_tokens',
-      'max_session_output_tokens',
-      'recovery_summary_input_tokens',
-      'max_session_cost',
-      'max_daily_input_tokens',
-      'max_daily_output_tokens',
-      'max_monthly_input_tokens',
-      'max_monthly_output_tokens',
-      'max_daily_cost',
-      'max_monthly_cost',
-    ]),
+    budgets: pick(config.budgets, RUN_BUDGET_FIELDS),
     compaction: pick(config.compaction, ['enabled', 'trigger_ratio', 'budget_trigger_ratio', 'keep_recent_turns']),
     routing: pick(config.routing, ['enabled', 'prefer_local', 'minimum_context_tokens', 'selection']),
     memory: pick(config.memory, ['global_enabled', 'max_context_chars']),

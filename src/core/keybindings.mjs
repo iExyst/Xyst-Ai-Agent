@@ -21,11 +21,9 @@ export function assertUniqueUiShortcuts(overrides = {}) {
     throw new TypeError('ui.shortcuts contains an unsupported action');
   const bindings = { ...DEFAULT_UI_SHORTCUTS, ...overrides };
   const assigned = new Map();
-  for (const [action, shortcut] of Object.entries(bindings)) {
-    if (shortcut === null) {
-      bindings[action] = DEFAULT_UI_SHORTCUTS[action];
-      continue;
-    }
+  for (const [action, configured] of Object.entries(bindings)) {
+    const shortcut = configured === null ? DEFAULT_UI_SHORTCUTS[action] : configured;
+    bindings[action] = shortcut;
     if (!isValidUiShortcut(shortcut)) throw new TypeError(`ui.shortcuts.${action} is not a supported key binding`);
     const normalized = shortcut.toLocaleLowerCase('en-US');
     const existing = assigned.get(normalized);
