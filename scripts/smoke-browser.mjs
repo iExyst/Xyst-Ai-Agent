@@ -999,6 +999,14 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await evaluate(
       protocol,
       `(() => {
+        const timeline = document.querySelector('#timeline');
+        timeline.scrollTop = timeline.scrollHeight;
+        timeline.dispatchEvent(new Event('scroll'));
+      })()`,
+    );
+    await evaluate(
+      protocol,
+      `(() => {
         const prompt = document.querySelector('#prompt-input');
         prompt.value = 'Create the approval smoke file.';
         prompt.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1098,7 +1106,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     );
     assert.equal(liveReply.text, 'Browser approval', 'partial text must be visible before the provider finishes');
     assert.equal(liveReply.running, true);
-    assert.ok(liveReply.bottomGap <= 4, 'streaming reply must follow the bottom of the timeline');
+    assert.ok(liveReply.bottomGap <= 4, `streaming reply must follow the bottom of the timeline: ${JSON.stringify(liveReply)}`);
     await protocol.call('Page.reload', { ignoreCache: true });
     await waitForTimelineText(protocol, 'Browser approval');
     assert.equal(
