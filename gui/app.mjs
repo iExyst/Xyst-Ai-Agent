@@ -774,7 +774,8 @@ function addMessage(role, content = '') {
   if (role === 'assistant' && content) renderChatMessage(body, content);
   message.append(meta, body);
   elements.timeline.append(message);
-  chatScroller.contentChanged();
+  if (role === 'user') chatScroller.jumpToLatest();
+  else chatScroller.contentChanged();
   return body;
 }
 
