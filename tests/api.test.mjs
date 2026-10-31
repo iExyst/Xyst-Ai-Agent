@@ -1020,7 +1020,7 @@ test('local control API authenticates, rejects hostile origins and streams a com
   assert.equal(workspaceModule.status, 200);
   const workspaceModuleText = await workspaceModule.text();
   assert.match(workspaceModuleText, /mountWorkspacePanel/);
-  assert.match(workspaceModuleText, /Remove worktree/);
+  assert.match(workspaceModuleText, /Remove separate work area/);
   const onboardingModule = await fetch(`${url}/app/onboarding.mjs`);
   assert.equal(onboardingModule.status, 200);
   assert.match(await onboardingModule.text(), /localProfileFromDiscovery/);
@@ -1089,7 +1089,7 @@ test('local control API authenticates, rejects hostile origins and streams a com
   assert.match(appCode, /toggleRunPause/);
   assert.match(appCode, /sendRunDirection/);
   assert.match(appCode, /Live web search/);
-  assert.match(appCode, /Agent orchestration/);
+  assert.match(appCode, /Let helper AIs work on separate parts/);
   const timelineModule = await fetch(`${url}/app/timeline.mjs`);
   assert.equal(timelineModule.status, 200);
   assert.match(await timelineModule.text(), /parseStoredToolObservation/);
@@ -2086,7 +2086,7 @@ test('local control API settings snapshot never exposes credential references or
   const shell = await fs.readFile(new URL('../gui/app.mjs', import.meta.url), 'utf8');
   assert.match(shell, /Semantic retrieval/);
   assert.match(shell, /Usage detail · last 45 days/);
-  assert.match(shell, /Automation access/);
+  assert.match(shell, /How much freedom Xyst has/);
   assert.match(shell, /async function openSkills/);
   assert.match(shell, /detail\.textContent =/);
   assert.match(shell, /window\.confirm\(`Semantic search sends redacted workspace excerpts/);

@@ -28,8 +28,8 @@ test('workspace panel renders the selected directory and Git state from the API 
   const heading = content.children.find((child) => child.className === 'workspace-path-heading');
   const git = content.children.find((child) => child.className === 'workspace-git');
   const files = content.children.find((child) => child.className === 'workspace-tree');
-  assert.match(heading.children[0].textContent, /Workspace \/ src/);
-  assert.equal(git.children[0].textContent, 'Git · main');
+  assert.match(heading.children[0].textContent, /Main project \/ src/);
+  assert.equal(git.children[0].textContent, 'File changes · main');
   assert.equal(files.children[1].children[0].children[0].textContent, '· agent.mjs');
 });
 

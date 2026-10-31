@@ -248,7 +248,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     );
     assert.equal(pageState.title, 'Xyst AI Assistant');
     assert.ok(pageState.welcome, 'The first-run welcome content did not render');
-    assert.equal(pageState.connection, 'Connected to local runtime', 'The browser UI did not connect to its local runtime');
+    assert.equal(pageState.connection, 'Xyst is ready', 'The browser UI did not connect to its local runtime');
     assert.equal(pageState.mainCount, 1, 'The app must expose one primary main landmark');
     assert.equal(pageState.navigationName, 'Recent conversations', 'Session navigation must have an accessible name');
     assert.equal(pageState.layout.viewportWidth, 900);
@@ -408,7 +408,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
       `(() => ({ value: document.querySelector('#model-picker').value, label: document.querySelector('#model-picker').selectedOptions[0]?.textContent.trim() || '' }))()`,
     );
     assert.equal(initialModelChoice.value, '__xyst_auto__', 'The composer should start with automatic task-aware model routing');
-    assert.match(initialModelChoice.label, /^Auto · best match for this task$/);
+    assert.match(initialModelChoice.label, /^Auto · pick an AI for each task$/);
     const localDiscovery = await waitForLocalModelChoice(protocol, 'browser-local-smoke');
     if (!localDiscovery) {
       const observedDiscovery = await evaluate(
@@ -880,40 +880,42 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await verifyRuntimeSettingRoundTrips(protocol, service);
     progress('checking signed package panels');
     const skillPackages = await waitForSignedSkillPanel(protocol);
-    assert.match(skillPackages.title, /Instruction skills/);
-    assert.match(skillPackages.text, /Signed skill packages/);
-    assert.match(skillPackages.text, /No signed skill packages have been activated/);
+    assert.match(skillPackages.title, /Reusable instructions/);
+    assert.match(skillPackages.text, /Verified instruction add-ons/);
+    assert.match(skillPackages.text, /No verified instruction add-ons are active/);
     const extensionUpdates = await waitForExtensionUpdatesPanel(protocol);
-    assert.match(extensionUpdates.title, /Signed package updates/);
+    assert.match(extensionUpdates.title, /Tool add-on updates/);
     assert.match(extensionUpdates.text, /no signed package update feed is set/i);
     assert.equal(extensionUpdates.checkDisabled, true);
     const mcpCatalog = await waitForMcpCatalog(protocol);
-    assert.match(mcpCatalog.title, /MCP servers/);
-    assert.match(mcpCatalog.text, /Signed MCP packages/);
+    assert.match(mcpCatalog.title, /Connected tools/);
+    assert.match(mcpCatalog.text, /Verified tool add-ons/);
     assert.match(mcpCatalog.text, /hello-world-mcp/);
     assert.match(mcpCatalog.text, /Activate 1\.1\.0/);
     assert.match(mcpCatalog.text, /smoke/);
     assert.match(mcpCatalog.text, /Enable/);
+    progress('activating first verified tool add-on version');
     await evaluate(
       protocol,
       `window.confirm = () => true; [...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Activate 1.0.0').click()`,
     );
     const activatedMcpPackage = await waitForMcpState(protocol, 'Active version 1.0.0');
+    progress('updating verified tool add-on version');
     await evaluate(
       protocol,
       `window.confirm = () => true; [...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Activate 1.1.0').click()`,
     );
     await waitForMcpState(protocol, 'Active version 1.1.0');
+    progress('rolling back verified tool add-on version');
     await evaluate(
       protocol,
       `window.confirm = () => true; [...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Roll back to 1.0.0').click()`,
     );
     await waitForMcpState(protocol, 'Active version 1.0.0');
-    await evaluate(
-      protocol,
-      `window.confirm = () => true; [...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Disable package').click()`,
-    );
+    progress('disabling verified tool add-on');
+    await waitForMcpButton(protocol, 'Disable package', { confirm: true, click: true });
     await waitForMcpState(protocol, 'Installed and inactive');
+    progress('checking connected tool selection');
     const runMcpSelection = await evaluate(
       protocol,
       `(() => ({ hidden: document.querySelector('#mcp-selection').hidden, summary: document.querySelector('#mcp-selection-summary').textContent.trim(), choices: document.querySelectorAll('#mcp-selection-options input[type=checkbox]').length }))()`,
@@ -925,43 +927,27 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await evaluate(protocol, `document.querySelector('#mcp-selection-options input[type=checkbox]').click()`);
     const selectedNone = await evaluate(protocol, `document.querySelector('#mcp-selection-summary').textContent.trim()`);
     assert.equal(selectedNone, 'MCP tools · none selected');
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#mcp-selection-options button')].find((button) => button.textContent.trim() === 'Use all configured servers')).click()`,
-    );
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Enable')).click()`,
-    );
+    await clickButtonByText(protocol, '#mcp-selection-options button', 'Use all configured servers');
+    progress('re-enabling connected tool');
+    await clickButtonByText(protocol, '#settings-content button', 'Enable');
     const enabledMcp = await waitForMcpState(protocol, 'Error · MCP_SPAWN_FAILED');
+    progress('disabling connected tool');
     assert.match(enabledMcp.text, /Disable/);
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Disable')).click()`,
-    );
+    await clickButtonByText(protocol, '#settings-content button', 'Disable');
     const disabledMcp = await waitForMcpState(protocol, 'Disabled');
+    progress('testing connected tool');
     assert.match(disabledMcp.text, /Enable/);
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Test connection')).click()`,
-    );
+    await clickButtonByText(protocol, '#settings-content button', 'Test connection');
     const testedMcp = await waitForMcpState(protocol, 'Connection failed · MCP_SPAWN_FAILED');
+    progress('editing connected tool');
     assert.match(testedMcp.text, /Edit settings/);
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Edit settings')).click()`,
-    );
+    await clickButtonByText(protocol, '#settings-content button', 'Edit settings');
     const editor = await waitForMcpState(protocol, 'Save settings');
+    progress('returning from connected tool editor');
     assert.match(editor.text, /Command/);
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Cancel')).click()`,
-    );
-    await waitForMcpState(protocol, 'Add MCP server');
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Add MCP server')).click()`,
-    );
+    await clickButtonByText(protocol, '#settings-content button', 'Cancel');
+    await waitForMcpState(protocol, 'Connect a tool');
+    await clickButtonByText(protocol, '#settings-content button', 'Connect a tool');
     await waitForMcpState(protocol, 'Add server');
     assert.deepEqual(
       await evaluate(protocol, `Array.from(document.querySelector('.mcp-editor select').options, (option) => option.value)`),
@@ -981,17 +967,11 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     );
     const addedMcp = await waitForMcpState(protocol, 'smoke-added');
     assert.match(addedMcp.text, /Error · MCP_SPAWN_FAILED/);
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Audit history')).click()`,
-    );
+    await clickButtonByText(protocol, '#settings-content button', 'Connection history');
     const mcpAudit = await waitForMcpState(protocol, 'smoke-added · add');
     assert.match(mcpAudit.text, /smoke-added · add/);
     assert.doesNotMatch(mcpAudit.text, /xyst-missing|command=/i);
-    await evaluate(
-      protocol,
-      `([...document.querySelectorAll('#settings-content button')].find((button) => button.textContent.trim() === 'Back to MCP servers')).click()`,
-    );
+    await clickButtonByText(protocol, '#settings-content button', 'Back to connected tools');
     progress('checking MCP editor and audit controls');
     await waitForMcpState(protocol, 'smoke-added');
     await evaluate(protocol, `document.querySelector('#settings-dialog').close()`);
@@ -1282,7 +1262,7 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     await browserApiMutation(service, `/v1/sessions/${encodeURIComponent(failedSession.session.id)}`, 'DELETE', {}, 200);
     // The stale sidebar entry produces an operation-level 404 from a healthy service.
     await evaluate(protocol, failedSessionSelector);
-    await waitForConnectionLabel(protocol, 'Connected to local runtime', true);
+    await waitForConnectionLabel(protocol, 'Xyst is ready', true);
     await browserApiMutation(service, `/v1/sessions/${encodeURIComponent(interruptedSession.session.id)}`, 'DELETE', {}, 200);
     await evaluate(
       protocol,
@@ -1358,13 +1338,13 @@ export async function smokeBrowser({ browserExecutable = process.env.XYST_BROWSE
     try {
       await protocol.call('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 });
       await evaluate(protocol, `document.querySelector('#refresh-sessions').click()`);
-      await waitForConnectionLabel(protocol, 'Runtime unavailable', true);
+      await waitForConnectionLabel(protocol, 'Xyst is unavailable', true);
     } finally {
       await protocol.call('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     }
     await protocol.call('Page.reload', { ignoreCache: true });
     await waitForAppReady(protocol, pageErrors, failedResponses);
-    await waitForConnectionLabel(protocol, 'Connected to local runtime');
+    await waitForConnectionLabel(protocol, 'Xyst is ready');
     if (process.env.XYST_SMOKE_SCREENSHOT) {
       await protocol.call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 960, deviceScaleFactor: 1, mobile: false });
       await evaluate(protocol, `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
@@ -2584,7 +2564,7 @@ async function verifyRuntimeSettingRoundTrips(protocol, service) {
       ),
     })),
     { category: 'agents', name: 'tools.autonomy', value: 'unrestricted', path: ['tools', 'autonomy'] },
-    { category: 'safety', label: 'Sandbox policy', value: 'read-only', path: ['sandbox', 'mode'], saveLabel: 'Save sandbox setting' },
+    { category: 'safety', label: 'Limit what commands can access', value: 'read-only', path: ['sandbox', 'mode'], saveLabel: 'Save sandbox setting' },
     { category: 'data', label: 'Enable automatic web, news, and reference lookups', value: false, path: ['web_search', 'enabled'] },
   ];
   for (const entry of cases) {
@@ -2616,7 +2596,10 @@ async function verifyRuntimeSettingRoundTrips(protocol, service) {
         const expected = entry.numeric ? (value === '' ? undefined : Number(value)) : value;
         const ready = await evaluate(
           protocol,
-          `(() => { ${locate} return field.dataset.dirty !== 'true' && !form.querySelector('button[type="submit"]').disabled; })()`,
+          `(() => { ${locate}
+            const save = entry.saveLabel ? [...form.querySelectorAll('button')].find(button => button.textContent.trim() === entry.saveLabel) : form.querySelector('button[type="submit"]');
+            return field.dataset.dirty !== 'true' && save && !save.disabled;
+          })()`,
         );
         lastState = {
           actual,
@@ -2830,7 +2813,7 @@ async function verifyAppearanceAndKeyboard(protocol, service) {
   assert.equal(await evaluate(protocol, 'document.querySelector("#app-frame").classList.contains("sidebar-collapsed")'), true);
   await protocol.call('Page.reload');
   await waitUntil(
-    'document.querySelector("#connection-indicator")?.getAttribute("aria-label") === "Connected to local runtime" && document.querySelector("#app-frame")?.classList.contains("sidebar-collapsed")',
+    'document.querySelector("#connection-indicator")?.getAttribute("aria-label") === "Xyst is ready" && document.querySelector("#app-frame")?.classList.contains("sidebar-collapsed")',
     'persisted layout after reload',
   );
   await blur();
@@ -2873,7 +2856,7 @@ async function verifyAppearanceAndKeyboard(protocol, service) {
   assert.equal(await evaluate(protocol, 'document.activeElement.id'), 'workspace-search');
   await blur();
   await key('m', 1);
-  assert.equal(await evaluate(protocol, 'document.querySelector("#conversation-title").textContent'), 'New conversation');
+  assert.equal(await evaluate(protocol, 'document.querySelector("#conversation-title").textContent'), 'New chat');
   for (const [label, expected] of [
     ['Toggle sidebar shortcut', 'Ctrl+B'],
     ['Start new session shortcut', 'Ctrl+K'],
@@ -3078,7 +3061,7 @@ async function waitForSignedSkillPanel(protocol) {
       }))()`,
     );
     lastState = state;
-    if (state.open && state.text.includes('Signed skill packages')) return state;
+    if (state.open && state.text.includes('Verified instruction add-ons')) return state;
     await delay(50);
   }
   throw new Error(`Skills panel did not show signed skill package controls: ${JSON.stringify(lastState)}`);
@@ -3140,6 +3123,48 @@ async function waitForMcpState(protocol, expectedText) {
   throw new Error(`MCP panel did not show ${JSON.stringify(expectedText)}: ${JSON.stringify(lastState)}`);
 }
 
+async function waitForMcpButton(protocol, label, { confirm = false, click = false } = {}) {
+  const deadline = Date.now() + 10_000;
+  let lastState;
+  while (Date.now() < deadline) {
+    lastState = await evaluate(
+      protocol,
+      `(() => ({
+        found: (() => {
+          const button = [...document.querySelectorAll('#settings-content button')].find((item) => item.textContent.trim() === ${JSON.stringify(label)});
+          if (!button) return false;
+          ${confirm ? 'window.confirm = () => true;' : ''}
+          ${click ? 'button.click();' : ''}
+          return true;
+        })(),
+        text: document.querySelector('#settings-content')?.innerText || '',
+      }))()`,
+    );
+    if (lastState.found) return;
+    await delay(50);
+  }
+  throw new Error(`MCP panel did not show button ${JSON.stringify(label)}: ${JSON.stringify(lastState)}`);
+}
+
+async function clickButtonByText(protocol, selector, label) {
+  const deadline = Date.now() + 10_000;
+  let lastState;
+  while (Date.now() < deadline) {
+    lastState = await evaluate(
+      protocol,
+      `(() => {
+        const button = [...document.querySelectorAll(${JSON.stringify(selector)})].find((item) => item.textContent.trim() === ${JSON.stringify(label)});
+        if (!button) return { clicked: false, text: document.querySelector(${JSON.stringify(selector.split(' ')[0])})?.innerText || '' };
+        button.click();
+        return { clicked: true };
+      })()`,
+    );
+    if (lastState.clicked) return;
+    await delay(50);
+  }
+  throw new Error(`Expected button ${JSON.stringify(label)}: ${JSON.stringify(lastState)}`);
+}
+
 async function waitForAppReady(protocol, pageErrors, failedResponses) {
   const deadline = Date.now() + TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -3150,8 +3175,8 @@ async function waitForAppReady(protocol, pageErrors, failedResponses) {
         title: document.title,
         welcome: !!document.querySelector('#welcome h1'),
         controls: !!document.querySelector('#prompt-input'),
-        connected: document.querySelector('#connection-indicator')?.getAttribute('aria-label') === 'Connected to local runtime',
-        unavailable: document.querySelector('#connection-indicator')?.getAttribute('aria-label') === 'Runtime unavailable',
+        connected: document.querySelector('#connection-indicator')?.getAttribute('aria-label') === 'Xyst is ready',
+        unavailable: document.querySelector('#connection-indicator')?.getAttribute('aria-label') === 'Xyst is unavailable',
       })`,
     );
     if (state.ready === 'complete' && state.controls && state.connected) return;
