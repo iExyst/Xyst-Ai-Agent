@@ -79,6 +79,7 @@ export async function smokeWindowsInstaller({ installerPath } = {}) {
     await assertRegularFile(thirdPartyNotice, 'The installed third-party license notice is missing');
     for (const relativePath of [
       'gui/app.mjs',
+      'gui/project-manager.mjs',
       'gui/session-status.mjs',
       'gui/timeline.mjs',
       'gui/web-search-settings.mjs',

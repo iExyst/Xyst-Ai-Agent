@@ -19,6 +19,7 @@ import {
   reviewFindingsForDisplay,
 } from './review-plan.mjs';
 import { mountWorkspacePanel } from './workspace-panel.mjs';
+import { mountProjectManager } from './project-manager.mjs';
 import { localProfileFromDiscovery, markDiscoveredModelLoaded, postLoadModelChoice } from './onboarding.mjs';
 import {
   getDesktopRememberedSessionId,
@@ -44,6 +45,21 @@ const elements = Object.fromEntries(
     'toggle-sidebar',
     'connection-indicator',
     'workspace-status',
+    'project-current-name',
+    'project-current-detail',
+    'project-switcher',
+    'project-dialog',
+    'project-list',
+    'project-dialog-status',
+    'close-projects',
+    'create-project',
+    'open-project-folder',
+    'new-project-dialog',
+    'new-project-form',
+    'new-project-name',
+    'new-project-location',
+    'cancel-new-project',
+    'cancel-new-project-button',
     'session-list',
     'refresh-sessions',
     'new-session',
@@ -131,6 +147,25 @@ const workspacePanel = mountWorkspacePanel({
   onError: showToast,
 });
 
+const projectManager = mountProjectManager({
+  dialog: elements.project_dialog,
+  currentName: elements.project_current_name,
+  currentDetail: elements.project_current_detail,
+  list: elements.project_list,
+  status: elements.project_dialog_status,
+  openButton: elements.project_switcher,
+  closeButton: elements.close_projects,
+  createButton: elements.create_project,
+  openFolderButton: elements.open_project_folder,
+  createDialog: elements.new_project_dialog,
+  createForm: elements.new_project_form,
+  nameInput: elements.new_project_name,
+  locationLabel: elements.new_project_location,
+  cancelCreateButtons: [elements.cancel_new_project, elements.cancel_new_project_button],
+  isBusy: () => Boolean(activeRunId || [...sessionsById.values()].some((session) => session.run_active)),
+  notify: showToast,
+});
+
 let activeSessionId = null;
 let activeRunId = null;
 let runController = null;
@@ -188,9 +223,9 @@ function setConnected(connected) {
   connectionHealthCheckId += 1;
   document.documentElement.dataset.xystStartupReported = 'true';
   elements.connection_indicator.className = `connection-dot${connected ? ' ready' : ' error'}`;
-  elements.connection_indicator.title = connected ? 'Connected to local runtime' : 'Runtime unavailable';
+  elements.connection_indicator.title = connected ? 'Xyst is ready' : 'Xyst is unavailable';
   elements.connection_indicator.setAttribute('aria-label', elements.connection_indicator.title);
-  elements.workspace_status.textContent = connected ? 'Local · connected' : 'Local · unavailable';
+  elements.workspace_status.textContent = connected ? 'On this computer · ready' : 'On this computer · unavailable';
 }
 
 function showToast(message) {
@@ -216,8 +251,13 @@ function selectPrimaryTab(tab) {
   elements.settings_button.setAttribute('aria-current', mode ? 'false' : 'page');
   if (mode) {
     elements.run_mode.value = mode;
+    elements.conversation_title.textContent = activeSessionId ? sessionsById.get(activeSessionId)?.title || 'Conversation' : 'New chat';
     elements.active_mode_label.textContent =
-      mode === 'plan' ? 'Plan mode · read only' : mode === 'review' ? 'Review mode · read only' : 'Agent mode';
+      mode === 'plan'
+        ? 'Plan · suggests steps only'
+        : mode === 'review'
+          ? 'Review · checks without changing files'
+          : 'Agent · can make changes';
     elements.mode_workspace.setAttribute('aria-labelledby', `tab-${mode}`);
     showSettingsCategory();
   } else {
@@ -235,6 +275,7 @@ function showSettingsCategory() {
       document.getElementById('settings-page-description').textContent = panel.querySelector(
         '.settings-category-heading .muted-copy',
       ).textContent;
+      if (selectedPrimaryTab === 'settings') elements.conversation_title.textContent = panel.querySelector('h3').textContent;
     }
   }
   for (const button of document.querySelectorAll('#control-room-nav [data-settings-category]')) {
@@ -250,7 +291,11 @@ function renderConfiguredModelProfiles() {
   elements.configured_models_list.replaceChildren();
   if (!entries.length) {
     elements.configured_models_list.append(
-      node('p', 'muted-copy', 'No profiles are configured yet. Find a local model below or add a provider in All runtime settings.'),
+      node(
+        'p',
+        'muted-copy',
+        'No AI services are set up yet. Find an AI on this computer below, or connect another AI service in the settings menu.',
+      ),
     );
     return;
   }
@@ -262,7 +307,11 @@ function renderConfiguredModelProfiles() {
       node('strong', '', name),
       node('span', '', `${profile.model || 'Model ID not set'} · ${profile.provider || 'provider'}${profile.local ? ' · local' : ''}`),
     );
-    const action = node('button', isDefault ? 'model-default-badge' : 'model-select-button', isDefault ? 'Default' : 'Use model');
+    const action = node(
+      'button',
+      isDefault ? 'model-default-badge' : 'model-select-button',
+      isDefault ? 'Default AI' : 'Use for new chats',
+    );
     action.type = 'button';
     action.disabled = isDefault;
     action.addEventListener('click', async () => {
@@ -272,7 +321,7 @@ function renderConfiguredModelProfiles() {
         const option = [...elements.model_picker.options].find((item) => item.value === name);
         if (option && elements.model_picker.value !== AUTO_MODEL_OPTION) elements.model_picker.value = name;
         renderConfiguredModelProfiles();
-        showToast(`${name} is now the default model.`);
+        showToast(`${name} is now the default AI.`);
       } catch (error) {
         showError(error);
       }
@@ -290,13 +339,7 @@ function renderLocalModelDiscovery(result) {
   const list = elements.local_model_results;
   list.replaceChildren();
   if (!localModelChoices.length) {
-    list.append(
-      node(
-        'p',
-        'muted-copy',
-        'No local models found. Start the LM Studio server or another local OpenAI-compatible server, then try again.',
-      ),
-    );
+    list.append(node('p', 'muted-copy', 'No local AI found. Open LM Studio or your AI app, turn on its local server, and try again.'));
   } else {
     const disclosure = node('details', 'local-model-disclosure');
     disclosure.open = localModelResultsExpanded;
@@ -305,7 +348,7 @@ function renderLocalModelDiscovery(result) {
     });
     const summary = node('summary', 'local-model-summary');
     summary.append(
-      node('strong', '', `${localModelChoices.length} model${localModelChoices.length === 1 ? '' : 's'} found`),
+      node('strong', '', `${localModelChoices.length} AI${localModelChoices.length === 1 ? '' : 's'} found`),
       node('span', '', 'Search or browse local servers'),
     );
     const controls = node('div', 'local-model-browser-controls');
@@ -524,10 +567,14 @@ function renderMainOverview(settings) {
   const cards = node('div', 'home-status-grid');
   const profiles = Object.keys(settings.models || {});
   for (const [label, value, detail] of [
-    ['RUNTIME', 'Ready', 'Connected to local runtime'],
-    ['MODEL PROFILES', String(profiles.length).padStart(2, '0'), 'Available in your configuration'],
-    ['AUTOMATION', settings.tools?.autonomy === 'unrestricted' ? 'Unrestricted' : 'Assisted', 'Current access profile'],
-    ['WORKSPACE', 'Local', 'Files and tools on this computer'],
+    ['APP STATUS', 'Ready', 'Xyst is running on this computer'],
+    ['AI OPTIONS', String(profiles.length), 'Available for this project'],
+    [
+      'PERMISSION MODE',
+      settings.tools?.autonomy === 'unrestricted' ? 'Full access' : 'Asks first',
+      settings.tools?.autonomy === 'unrestricted' ? 'No Xyst approval prompts or usage limits' : 'Approval prompts and limits are active',
+    ],
+    ['PROJECT FILES', 'On this computer', 'Xyst can use files in the selected project'],
   ]) {
     const card = node('article', 'home-status-card');
     card.append(node('span', 'eyebrow', label), node('strong', '', value), node('span', 'muted-copy', detail));
@@ -537,23 +584,23 @@ function renderMainOverview(settings) {
   elements.welcome.querySelector('#home-tools').replaceChildren(tools);
   const model = settings.models?.[settings.default_model];
   const modelPanel = elements.welcome.querySelector('#home-model-status');
-  const manage = node('button', 'home-manage-model', 'Manage models →');
+  const manage = node('button', 'home-manage-model', 'Choose or connect an AI →');
   manage.type = 'button';
   manage.addEventListener('click', () => {
     selectedSettingsCategory = 'models';
     selectPrimaryTab('settings');
   });
   modelPanel.replaceChildren(
-    node('p', 'eyebrow', 'INFERENCE ENGINE'),
-    node('h2', '', 'Model status'),
+    node('p', 'eyebrow', 'AI STATUS'),
+    node('h2', '', 'AI for this project'),
     node('div', 'home-model-orbit', '◈'),
     node('strong', 'home-model-name', model?.model || 'No default model'),
     node(
       'p',
       'muted-copy',
       model
-        ? `${model.local ? 'Local' : 'Remote'} provider · ${model.supports_tools ? 'Tool support configured' : 'Text profile'}`
-        : 'Choose a model to start a conversation.',
+        ? `${model.local ? 'Runs on this computer' : 'Online AI service'} · ${model.supports_tools ? 'Can use project tools' : 'Replies with text'}`
+        : 'Choose an AI to start a chat.',
     ),
     manage,
   );
@@ -860,7 +907,7 @@ function renderSessions(sessions) {
     return;
   }
   for (const session of sessions) {
-    const title = session.title || 'New conversation';
+    const title = session.title || 'New chat';
     const item = node('div', `session-item${session.id === activeSessionId ? ' active' : ''}`);
     item.dataset.sessionId = session.id;
     const openButton = node('button', 'session-open-button');
@@ -909,7 +956,7 @@ function renderSessions(sessions) {
             rememberSessionId(null);
             void rememberDesktopSessionId(null);
             elements.session_actions.hidden = true;
-            elements.conversation_title.textContent = 'New conversation';
+            elements.conversation_title.textContent = 'New chat';
             resetTimeline();
           }
           await refreshSessions();
@@ -959,7 +1006,7 @@ function renderRunInspector() {
       group.append(node('summary', '', `Alternatives (${decision.alternatives.length})`), list);
       fragment.append(group);
     }
-  } else fragment.append(node('p', 'muted-copy', 'Routing details appear when a run starts.'));
+  } else fragment.append(node('p', 'muted-copy', 'Xyst shows which AI it chose when a chat starts.'));
 
   const budgets = budgetRemainingRows(runtimeSettings, usageSnapshot);
   const budgetGroup = node('div', 'inspector-budgets');
@@ -1969,7 +2016,7 @@ async function applyRunModelChange() {
   if (!model || model === AUTO_MODEL_OPTION || model === activeRunModel) return;
   const profile = modelProfiles[model];
   if (!profile) {
-    showToast('Choose a configured model profile.');
+    showToast('Choose an AI from the menu at the top of the chat.');
     return;
   }
   if (activeRunMode !== 'agent' && profile.supports_tools === false) {
@@ -2015,7 +2062,7 @@ async function manageSession(action) {
   try {
     if (action === 'rename') {
       const current = sessionsById.get(id)?.title || '';
-      const title = window.prompt('Conversation name (up to 80 characters)', current);
+      const title = window.prompt('Chat name (up to 80 characters)', current);
       if (title === null) return;
       const normalized = title.replace(/\s+/g, ' ').trim();
       if (!normalized || normalized.length > 80) {
@@ -2025,14 +2072,14 @@ async function manageSession(action) {
       await client.renameSession(id, normalized);
       await refreshSessions();
       elements.conversation_title.textContent = normalized;
-      showToast('Conversation renamed.');
+      showToast('Chat renamed.');
       return;
     }
     if (action === 'fork') {
       const fork = await client.forkSession(id);
       await refreshSessions();
       await openSession(fork.id);
-      showToast('Conversation forked.');
+      showToast('Started a new chat from the selected one.');
       return;
     }
     if (action === 'export') {
@@ -2046,7 +2093,7 @@ async function manageSession(action) {
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-      showToast('Session export downloaded. Review it before sharing.');
+      showToast('Chat file saved. Review it before sharing.');
       return;
     }
     if (action === 'archive') {
@@ -2055,20 +2102,20 @@ async function manageSession(action) {
       rememberSessionId(null);
       void rememberDesktopSessionId(null);
       elements.session_actions.hidden = true;
-      elements.conversation_title.textContent = 'New conversation';
+      elements.conversation_title.textContent = 'New chat';
       resetTimeline();
       await refreshSessions();
-      showToast('Conversation archived.');
+      showToast('Chat archived.');
       return;
     }
     if (action === 'delete') {
-      if (!window.confirm('Delete this conversation and its saved transcript? This cannot be undone.')) return;
+      if (!window.confirm('Delete this chat and its saved messages? This cannot be undone.')) return;
       await client.deleteSession(id);
       activeSessionId = null;
       rememberSessionId(null);
       void rememberDesktopSessionId(null);
       elements.session_actions.hidden = true;
-      elements.conversation_title.textContent = 'New conversation';
+      elements.conversation_title.textContent = 'New chat';
       resetTimeline();
       await refreshSessions();
       showToast('Conversation deleted.');
@@ -2167,7 +2214,7 @@ function settingRow(label, value) {
 
 function createSettingsEditor(settings, usage) {
   const form = node('form', 'runtime-settings-form');
-  const modelLabel = node('label', '', 'Default model profile');
+  const modelLabel = node('label', '', 'Default AI for new chats');
   const model = node('select', 'data-input');
   model.name = 'default_model';
   for (const [profile, definition] of Object.entries(settings.models || {})) {
@@ -2185,13 +2232,13 @@ function createSettingsEditor(settings, usage) {
   const roleModels = {};
   const roleModelLabels = [];
   for (const [key, labelText] of [
-    ['review_model', 'Review model profile'],
-    ['plan_model', 'Plan model profile'],
+    ['review_model', 'AI for reviewing changes'],
+    ['plan_model', 'AI for making plans'],
   ]) {
     const label = node('label', '', labelText);
     const select = node('select', 'data-input');
     select.name = key;
-    const fallback = node('option', '', 'Use default model profile');
+    const fallback = node('option', '', 'Use the default AI');
     fallback.value = '';
     select.append(fallback);
     for (const [profile, definition] of Object.entries(settings.models || {})) {
@@ -2217,7 +2264,7 @@ function createSettingsEditor(settings, usage) {
   routingEnabled.addEventListener('change', () => {
     routingEnabled.dataset.dirty = 'true';
   });
-  routingEnabledLabel.append(routingEnabled, document.createTextNode('Enable automatic model routing'));
+  routingEnabledLabel.append(routingEnabled, document.createTextNode('Let Xyst choose an AI for each task'));
 
   const routingLabel = node('label', '', 'Routing strategy');
   const routing = node('select', 'data-input');
@@ -2241,10 +2288,10 @@ function createSettingsEditor(settings, usage) {
   local.addEventListener('change', () => {
     local.dataset.dirty = 'true';
   });
-  localLabel.append(local, document.createTextNode('Prefer capable local models'));
+  localLabel.append(local, document.createTextNode('Prefer AIs that run on this computer'));
 
   const orchestrationSection = node('fieldset', 'settings-budget-editor settings-autonomy-editor');
-  orchestrationSection.append(node('legend', '', 'Agent orchestration'));
+  orchestrationSection.append(node('legend', '', 'Let helper AIs work on separate parts'));
   const subagentsLabel = node('label', 'settings-checkbox');
   const subagentsEnabled = node('input');
   subagentsEnabled.type = 'checkbox';
@@ -2253,15 +2300,15 @@ function createSettingsEditor(settings, usage) {
   const subagentsConcurrency = node('select', 'data-picker');
   subagentsConcurrency.name = 'subagents.max_concurrent';
   for (let count = 1; count <= 8; count += 1) {
-    const option = node('option', '', `${count} concurrent agent${count === 1 ? '' : 's'}`);
+    const option = node('option', '', `${count} helper AI${count === 1 ? '' : 's'} at once`);
     option.value = String(count);
     subagentsConcurrency.append(option);
   }
   subagentsConcurrency.value = String(settings.subagents?.max_concurrent || 2);
   subagentsConcurrency.disabled = !subagentsEnabled.checked;
-  subagentsLabel.append(subagentsEnabled, document.createTextNode('Enable child agents for independent work'));
+  subagentsLabel.append(subagentsEnabled, document.createTextNode('Allow Xyst to split independent work between helper AIs'));
   const subagentsConcurrencyLabel = node('label', 'budget-setting');
-  subagentsConcurrencyLabel.append(node('span', '', 'Maximum concurrent agents'), subagentsConcurrency);
+  subagentsConcurrencyLabel.append(node('span', '', 'Maximum helper AIs at once'), subagentsConcurrency);
   subagentsEnabled.addEventListener('change', () => {
     subagentsEnabled.dataset.dirty = 'true';
     subagentsConcurrency.disabled = !subagentsEnabled.checked;
@@ -2275,16 +2322,16 @@ function createSettingsEditor(settings, usage) {
     node(
       'p',
       'muted-copy',
-      'Child agents work in isolated Git worktrees. Enable this to make delegation available; Xyst uses it when you ask or when parallel work will help.',
+      'Helper AIs can work on separate parts of a task at the same time. Xyst keeps each helper’s file changes separate so you can review them before they are combined.',
     ),
   );
 
   const providersSection = node('fieldset', 'settings-budget-editor settings-provider-editor');
-  providersSection.append(node('legend', '', 'Provider profiles'));
+  providersSection.append(node('legend', '', 'Connect another AI service'));
   const addProfile = node('div', 'provider-profile-editor provider-profile-create');
   addProfile.append(node('strong', '', 'Add a model profile'));
   const newProfileName = node('input', 'data-input');
-  newProfileName.placeholder = 'Profile name';
+  newProfileName.placeholder = 'Name this AI';
   newProfileName.setAttribute('aria-label', 'New model profile name');
   const newProfileUrl = node('input', 'data-input');
   newProfileUrl.type = 'url';
@@ -2330,7 +2377,7 @@ function createSettingsEditor(settings, usage) {
   });
   addProfile.append(newProfileName, newProfileUrl, newProfileModel, localProfileLabel, createProfile);
   const addProfileDisclosure = node('details', 'model-profile-disclosure model-profile-add');
-  addProfileDisclosure.append(node('summary', '', '+ Add provider profile'), addProfile);
+  addProfileDisclosure.append(node('summary', '', '+ Connect another AI service'), addProfile);
   addProfileDisclosure.addEventListener('toggle', () => {
     if (!addProfileDisclosure.open) return;
     for (const sibling of providersSection.querySelectorAll('.model-profile-disclosure')) {
@@ -2792,12 +2839,12 @@ function createSettingsEditor(settings, usage) {
   connectionsSection.append(connectionButton, connectionResults);
 
   const approvalsSection = node('fieldset', 'settings-budget-editor settings-approval-editor');
-  approvalsSection.append(node('legend', '', 'Temporary approval rules'));
+  approvalsSection.append(node('legend', '', 'Optional: remember an approval for a short time'));
   approvalsSection.append(
     node(
       'p',
       'muted-copy',
-      'In Assisted mode, rules are workspace-scoped, audited, and expire automatically. Allow rules apply only to the selected tool and pattern. Unrestricted mode bypasses Xyst AI Assistant approval rules; OS permissions and sandbox limits still apply.',
+      'Most people can leave these settings alone. In Ask first mode, a rule can temporarily remember your choice for a specific action. Rules apply only to this project and expire automatically. Full access mode skips approval rules.',
     ),
   );
   const ruleForm = node('div', 'approval-rule-form');
@@ -2826,17 +2873,37 @@ function createSettingsEditor(settings, usage) {
     'read_background_process',
     'stop_background_process',
   ];
+  const ruleToolLabels = {
+    read_file: 'Read files',
+    list_dir: 'Browse folders',
+    search_files: 'Find files',
+    semantic_search: 'Find related files by meaning',
+    web_search: 'Search the web',
+    delegate_task: 'Ask a helper AI',
+    list_skills: 'List saved instructions',
+    load_skill: 'Use a saved instruction',
+    write_file: 'Create or replace files',
+    edit_file: 'Change files',
+    run_process: 'Run a program',
+    run_shell_script: 'Run a command',
+    computer_control: 'Control apps and the screen',
+    start_background_process: 'Start a background task',
+    send_background_input: 'Send input to a background task',
+    list_background_processes: 'List background tasks',
+    read_background_process: 'Read background task output',
+    stop_background_process: 'Stop a background task',
+  };
   for (const value of ruleTools) {
-    const option = node('option', '', value);
+    const option = node('option', '', ruleToolLabels[value] || value);
     option.value = value;
     ruleTool.append(option);
   }
   const ruleScope = node('select', 'data-picker');
   ruleScope.setAttribute('aria-label', 'Approval rule scope');
   for (const [value, label] of [
-    ['tool', 'Entire tool'],
-    ['path_glob', 'Workspace path glob'],
-    ['command_glob', 'Command glob'],
+    ['tool', 'All uses of this tool'],
+    ['path_glob', 'Only matching files or folders'],
+    ['command_glob', 'Only matching commands'],
   ]) {
     const option = node('option', '', label);
     option.value = value;
@@ -2945,15 +3012,15 @@ function createSettingsEditor(settings, usage) {
   approvalsSection.append(ruleForm, ruleList);
 
   const sandboxSection = node('fieldset', 'settings-budget-editor settings-autonomy-editor');
-  sandboxSection.append(node('legend', '', 'Process sandbox'));
+  sandboxSection.append(node('legend', '', 'Limit what commands can access'));
   const sandboxLabel = node('label', 'budget-setting');
-  sandboxLabel.append(node('span', '', 'Sandbox policy'));
+  sandboxLabel.append(node('span', '', 'Limit what commands can access'));
   const sandboxMode = node('select', 'data-picker');
   for (const [value, label] of [
-    ['none', 'None · use account permissions'],
-    ['workspace-write', 'Workspace write · isolate process with workspace access'],
-    ['workspace-read', 'Workspace read · isolate process with read-only workspace'],
-    ['read-only', 'Read-only · expose only non-mutating tools'],
+    ['none', 'Use this computer’s normal permissions'],
+    ['workspace-write', 'Limit commands to this project’s files'],
+    ['workspace-read', 'Allow commands to read this project only'],
+    ['read-only', 'Allow only actions that do not change files'],
   ]) {
     const option = node('option', '', label);
     option.value = value;
@@ -2967,7 +3034,7 @@ function createSettingsEditor(settings, usage) {
   sandboxMode.value = settings.sandbox?.mode || 'none';
   sandboxLabel.append(sandboxMode);
   const sandboxToolOverrides = node('div', 'budget-setting');
-  sandboxToolOverrides.append(node('span', '', 'Process-tool overrides'));
+  sandboxToolOverrides.append(node('span', '', 'Extra limits for individual actions'));
   const sandboxToolSelectors = {};
   for (const [toolName, label] of [
     ['run_process', 'Run process'],
@@ -3059,14 +3126,14 @@ function createSettingsEditor(settings, usage) {
   );
 
   const autonomySection = node('fieldset', 'settings-budget-editor settings-autonomy-editor');
-  autonomySection.append(node('legend', '', 'Automation access'));
+  autonomySection.append(node('legend', '', 'How much freedom Xyst has'));
   const autonomyLabel = node('label', 'budget-setting');
-  autonomyLabel.append(node('span', '', 'Tool approval mode'));
+  autonomyLabel.append(node('span', '', 'When should Xyst ask before acting?'));
   const autonomy = node('select', 'data-picker');
   autonomy.name = 'tools.autonomy';
   for (const [value, label] of [
-    ['assisted', 'Assisted · ask before changes'],
-    ['unrestricted', 'Unrestricted · no Xyst AI Assistant approvals or usage caps'],
+    ['assisted', 'Ask first · confirm sensitive actions'],
+    ['unrestricted', 'Full access · no approval prompts or usage limits'],
   ]) {
     const option = node('option', '', label);
     option.value = value;
@@ -3084,13 +3151,13 @@ function createSettingsEditor(settings, usage) {
       'p',
       'muted-copy',
       ['workspace-write', 'workspace-read'].includes(settings.sandbox?.mode)
-        ? 'Unrestricted mode is unavailable while workspace process isolation is active.'
-        : 'Unrestricted mode removes Xyst AI Assistant approval prompts and configured token/cost caps, enables machine-wide file and process access, and includes unredacted data. The OS account, model context/output limits, and explicit cancellation still apply. Pause every active run before changing autonomy; the change takes effect when the runs resume.',
+        ? 'Full access is unavailable while command access is limited to the project.'
+        : 'Full access removes Xyst’s approval prompts and configured usage limits. It also lets Xyst use files and programs available to your computer account. Pause active chats before changing this; the new choice takes effect when they resume.',
     ),
   );
 
   const layoutSection = node('fieldset', 'settings-budget-editor settings-autonomy-editor');
-  layoutSection.append(node('legend', '', 'Interface layout'));
+  layoutSection.append(node('legend', '', 'Layout and keyboard shortcuts'));
   const collapsedLabel = node('label', 'settings-checkbox');
   const collapsed = node('input');
   collapsed.type = 'checkbox';
@@ -3168,7 +3235,7 @@ function createSettingsEditor(settings, usage) {
   themeSection.append(themeLabel, node('p', 'muted-copy', 'Saved to your settings and applied immediately.'));
 
   const dataDirectorySection = node('fieldset', 'settings-budget-editor settings-autonomy-editor');
-  dataDirectorySection.append(node('legend', '', 'User data location'));
+  dataDirectorySection.append(node('legend', '', 'Where Xyst saves its settings and memory'));
   const dataDirectoryLabel = node('label', 'budget-setting');
   dataDirectoryLabel.append(node('span', '', 'Data directory'));
   const dataDirectory = node('input', 'data-input');
@@ -3390,12 +3457,12 @@ function createSettingsEditor(settings, usage) {
   );
 
   const budgetSection = node('fieldset', 'settings-budget-editor');
-  budgetSection.append(node('legend', '', 'Assisted-mode budget caps · blank removes the cap'));
+  budgetSection.append(node('legend', '', 'Optional usage limits for “Asks first” mode'));
   budgetSection.append(
     node(
       'p',
       'muted-copy',
-      'These caps are enforced in Assisted mode. Unrestricted runs ignore configured token and cost caps; the selected provider still applies its own context, output, and billing limits.',
+      'These limits apply when Xyst asks before actions. Full access mode skips these limits. Your AI service may still have its own message, context, or billing limits.',
     ),
   );
   const budgetNames = [
@@ -3436,63 +3503,65 @@ function createSettingsEditor(settings, usage) {
   const note = node(
     'p',
     'muted-copy',
-    'Changes apply to new runs and are saved in a separate user settings file. Clearing a field removes its override. Credential values are not editable here.',
+    'Press Save settings to keep your choices. Some changes take effect after the current chat ends; private credentials are managed separately.',
   );
   const panels = node('div', 'runtime-settings-panels');
   const categoryDefinitions = [
     {
       id: 'models',
-      title: 'Models',
-      description: 'Choose your default. Open a profile only when you need to edit it.',
+      title: 'Choose an AI',
+      description:
+        'An AI writes Xyst’s replies. Choose a default to get started. You can connect other AI services below if you need them.',
       icon: '◈',
       content: [modelLabel, providersSection, connectionsSection],
     },
     {
       id: 'routing',
-      title: 'Routing',
-      description: 'Choose how tasks are assigned and which models handle planning and review.',
+      title: 'Choose how Xyst picks an AI',
+      description: 'Use the same AI for every task, or let Xyst choose the best available one for each task.',
       icon: '⌁',
       content: [...roleModelLabels, routingEnabledLabel, routingLabel, localLabel],
     },
     {
       id: 'agents',
-      title: 'Agent',
-      description: 'Set how Xyst plans work and runs independent tasks.',
+      title: 'How Xyst works',
+      description:
+        'Choose whether Xyst can make changes or should only suggest them. Ask first mode requests approval for sensitive actions.',
       icon: '✳',
       content: [orchestrationSection, autonomySection],
     },
     {
       id: 'safety',
-      title: 'Safety',
-      description: 'Control approvals and process isolation.',
+      title: 'Permissions and safety',
+      description: 'Choose which files and computer features Xyst can use, and when it must ask you first.',
       icon: '⬡',
       content: [approvalsSection, sandboxSection],
     },
     {
       id: 'appearance',
-      title: 'Appearance',
-      description: 'Set your workspace layout, theme, and shortcuts.',
+      title: 'Look and feel',
+      description: 'Change colors, layout, and keyboard shortcuts.',
       icon: '◐',
       content: [layoutSection, themeSection],
     },
     {
       id: 'data',
-      title: 'Data & search',
-      description: 'Manage memory, search, and where app data is stored.',
+      title: 'Memory and web search',
+      description: 'Choose what Xyst remembers, where it saves its settings, and whether it can look up current information online.',
       icon: '⌁',
       content: [dataDirectorySection, memorySection, webSearchSection],
     },
     {
       id: 'updates',
       title: 'Updates',
-      description: 'Configure trusted application update checks.',
+      description: 'Check for a verified Xyst update when a trusted release feed is available.',
       icon: '↻',
       content: [appUpdatesSection],
     },
     {
       id: 'usage',
-      title: 'Usage & limits',
-      description: 'Review usage details and configure Assisted-mode caps.',
+      title: 'Usage and limits',
+      description: 'See how much the model has been used. Optional limits apply while Xyst is in Assisted mode.',
       icon: '▤',
       content: [budgetSection, createUsageBreakdown(usage)],
     },
@@ -3505,7 +3574,7 @@ function createSettingsEditor(settings, usage) {
     panel.setAttribute('aria-labelledby', `${panelId}-title`);
     panel.hidden = category.id !== selectedSettingsCategory;
     const heading = node('header', 'settings-category-heading');
-    heading.append(node('p', 'eyebrow', 'RUNTIME SETTINGS'), node('h3', '', category.title), node('p', 'muted-copy', category.description));
+    heading.append(node('p', 'eyebrow', 'XYST SETTINGS'), node('h3', '', category.title), node('p', 'muted-copy', category.description));
     heading.querySelector('h3').id = `${panelId}-title`;
     const content = node('div', 'settings-category-content');
     content.append(...category.content);
@@ -4034,14 +4103,14 @@ async function openMemory(scope = 'project') {
   const updateItem = (section, id, text) =>
     isGlobal ? client.updateGlobalMemory(section, id, text) : client.updateMemory(section, id, text);
   const deleteItem = (section, id) => (isGlobal ? client.deleteGlobalMemory(section, id) : client.deleteMemory(section, id));
-  elements.settings_title.textContent = isGlobal ? 'Global user memory' : 'Project memory';
+  elements.settings_title.textContent = isGlobal ? 'Memory shared across projects' : 'Notes for this project';
   if (!elements.settings_dialog.open) elements.settings_dialog.showModal();
   const content = elements.settings_content;
   content.replaceChildren(node('p', 'muted-copy', `Loading ${isGlobal ? 'global user' : 'project'} memory…`));
   try {
     const sections = await Promise.all(MEMORY_SECTIONS.map(async ([key, label]) => ({ key, label, ...(await listItems(key)) })));
     const memoryActions = node('div', 'memory-actions');
-    const scopeSwitch = node('button', 'secondary-button', isGlobal ? 'Project memory' : 'Global user memory');
+    const scopeSwitch = node('button', 'secondary-button', isGlobal ? 'Notes for this project' : 'Memory shared across projects');
     scopeSwitch.type = 'button';
     scopeSwitch.addEventListener('click', () => void openMemory(isGlobal ? 'project' : 'global'));
     memoryActions.append(scopeSwitch);
@@ -4294,6 +4363,11 @@ async function openGoals() {
   content.replaceChildren(node('p', 'muted-copy', 'Loading project goals…'));
   try {
     const [goals, selectedSession] = await Promise.all([client.listGoals(), loadSelectedSessionForGoals()]);
+    const intro = node(
+      'p',
+      'muted-copy',
+      'Save the outcomes you want Xyst to work toward. Add progress or decisions so future chats can pick up where you left off.',
+    );
     const list = node('div', 'data-list');
     if (!goals.length) list.append(node('p', 'empty-sessions', 'No project goals yet.'));
     for (const goal of goals) {
@@ -4454,14 +4528,15 @@ async function openGoals() {
       ? node(
           'p',
           'muted-copy',
-          `Select which project goals to carry with “${selectedSession.title || 'New conversation'}”. Goal notes remain untrusted context.`,
+          `Choose which goals should guide “${selectedSession.title || 'New chat'}”. Xyst still follows your current permissions.`,
         )
-      : node('p', 'muted-copy', 'Select a conversation to choose which project goals it carries into its context and portable export.');
+      : node('p', 'muted-copy', 'Open a chat to choose which project goals it should use.');
     content.replaceChildren(
+      intro,
       sessionGoalNote,
       list,
       form,
-      node('p', 'muted-copy', 'Goals are shared with future runs and preserved during context compaction.'),
+      node('p', 'muted-copy', 'Project goals are available to future chats in this project.'),
     );
   } catch (error) {
     content.replaceChildren(node('p', 'muted-copy', error.message));
@@ -4484,22 +4559,27 @@ async function loadSelectedSessionForGoals() {
 }
 
 async function openSkills() {
-  elements.settings_title.textContent = 'Instruction skills';
+  elements.settings_title.textContent = 'Reusable instructions';
   if (!elements.settings_dialog.open) elements.settings_dialog.showModal();
   const content = elements.settings_content;
-  content.replaceChildren(node('p', 'muted-copy', 'Loading configured skills…'));
+  content.replaceChildren(node('p', 'muted-copy', 'Loading reusable instructions…'));
   try {
     const [skillState, packageState] = await Promise.allSettled([client.listSkills(), client.listSignedSkillPackages()]);
     const result = skillState.status === 'fulfilled' ? skillState.value : { enabled: false, skills: [] };
     const packageResult = packageState.status === 'fulfilled' ? packageState.value : { configured: false, packages: [] };
     const list = node('div', 'data-list');
-    const detail = node('pre', 'skill-detail', 'Choose a skill to inspect its instructions.');
-    const packageHeading = node('h3', 'skills-package-heading', 'Signed skill packages');
+    const detail = node('pre', 'skill-detail', 'Choose an instruction to preview what it tells Xyst.');
+    const intro = node(
+      'p',
+      'muted-copy',
+      'Reusable instructions give Xyst extra guidance for specific kinds of work. Preview them before use. They cannot grant Xyst new permissions.',
+    );
+    const packageHeading = node('h3', 'skills-package-heading', 'Verified instruction add-ons');
     const packageList = node('div', 'data-list');
     if (!packageResult.configured) {
-      packageList.append(node('p', 'muted-copy', 'Configure signed package trust in the user config to manage activated skills here.'));
+      packageList.append(node('p', 'muted-copy', 'Verified instruction add-ons are not set up for this copy of Xyst.'));
     } else if (!packageResult.packages.length) {
-      packageList.append(node('p', 'empty-sessions', 'No signed skill packages have been activated.'));
+      packageList.append(node('p', 'empty-sessions', 'No verified instruction add-ons are active.'));
     }
     for (const skillPackage of packageResult.packages) {
       const card = node('article', 'data-card skill-card');
@@ -4561,9 +4641,9 @@ async function openSkills() {
       card.append(actions);
       packageList.append(card);
     }
-    if (!result.enabled) list.append(node('p', 'empty-sessions', 'Skills are disabled in user configuration.'));
+    if (!result.enabled) list.append(node('p', 'empty-sessions', 'Reusable instructions are turned off in Xyst settings.'));
     else if (skillState.status === 'rejected') list.append(node('p', 'muted-copy', skillState.reason.message));
-    else if (!result.skills.length) list.append(node('p', 'empty-sessions', 'No valid skills were found in the configured directories.'));
+    else if (!result.skills.length) list.append(node('p', 'empty-sessions', 'No reusable instructions were found.'));
     if (packageState.status === 'rejected') packageList.replaceChildren(node('p', 'muted-copy', packageState.reason.message));
     for (const skill of result.skills) {
       const card = node('article', 'data-card skill-card');
@@ -4586,6 +4666,7 @@ async function openSkills() {
       list.append(card);
     }
     content.replaceChildren(
+      intro,
       packageHeading,
       packageList,
       list,
@@ -4593,7 +4674,7 @@ async function openSkills() {
       node(
         'p',
         'muted-copy',
-        'Skill instructions are untrusted reference material. Activation applies to new runs only; instructions already loaded into an active run cannot be recalled. Skills cannot grant permissions or override runtime policy.',
+        'Changes apply to new chats. Xyst treats saved instructions as guidance; they cannot override your permissions or safety settings.',
       ),
     );
   } catch (error) {
@@ -4602,7 +4683,7 @@ async function openSkills() {
 }
 
 async function openExtensions() {
-  elements.settings_title.textContent = 'Signed package updates';
+  elements.settings_title.textContent = 'Tool add-on updates';
   if (!elements.settings_dialog.open) elements.settings_dialog.showModal();
   const content = elements.settings_content;
   content.replaceChildren(node('p', 'muted-copy', 'Loading package update status…'));
@@ -4729,10 +4810,10 @@ async function openExtensions() {
 }
 
 async function openMcpServers() {
-  elements.settings_title.textContent = 'MCP servers';
+  elements.settings_title.textContent = 'Connected tools';
   if (!elements.settings_dialog.open) elements.settings_dialog.showModal();
   const content = elements.settings_content;
-  content.replaceChildren(node('p', 'muted-copy', 'Loading configured MCP servers…'));
+  content.replaceChildren(node('p', 'muted-copy', 'Loading connected tools…'));
   try {
     const [catalogState, packageState] = await Promise.allSettled([client.getMcpServerCatalog(), client.listSignedMcpPackages()]);
     if (catalogState.status === 'rejected') throw catalogState.reason;
@@ -4749,23 +4830,25 @@ async function openMcpServers() {
       mcpServerSelection = mcpServerSelection.filter((name) => configuredMcpServers.has(name));
     }
     renderMcpRunSelection();
-    const addButton = node('button', 'text-button', 'Add MCP server');
+    const intro = node('p', 'muted-copy', 'Connect services or tools that Xyst can use during a chat. Only add a service you trust.');
+    const addButton = node('button', 'text-button', 'Connect a tool');
     addButton.type = 'button';
     addButton.disabled = catalog.enabled !== true;
     addButton.title = addButton.disabled ? 'MCP is disabled globally in user configuration.' : '';
     addButton.addEventListener('click', () => renderMcpServerEditor({ name: '', config: { transport: 'stdio' } }));
-    const auditButton = node('button', 'text-button', 'Audit history');
+    const auditButton = node('button', 'text-button', 'Connection history');
     auditButton.type = 'button';
     auditButton.addEventListener('click', () => void openMcpAuditHistory());
     if (!servers.length) {
       content.replaceChildren(
+        intro,
         ...packageSection,
         addButton,
         auditButton,
         node(
           'p',
           'empty-sessions',
-          catalog.enabled ? 'No MCP servers are configured in the user settings.' : 'MCP is disabled globally in user configuration.',
+          catalog.enabled ? 'No extra tools are connected yet.' : 'Connected tools are turned off in Xyst settings.',
         ),
       );
       return;
@@ -4780,7 +4863,7 @@ async function openMcpServers() {
             : server.connection_state === 'error'
               ? `Error · ${server.error_code || 'MCP_CONNECT_FAILED'}`
               : 'Disconnected';
-      const subtitle = server.package_id ? `${server.transport} · signed package ${server.package_id}` : server.transport;
+      const subtitle = server.package_id ? `${server.transport} · verified add-on` : server.transport;
       card.append(node('strong', 'goal-title', server.name), node('p', 'goal-details', `${state} · ${subtitle}`));
       const serverMetadata = [
         server.server_info?.name && server.server_info?.version
@@ -4874,6 +4957,7 @@ async function openMcpServers() {
       return card;
     });
     content.replaceChildren(
+      intro,
       ...packageSection,
       addButton,
       auditButton,
@@ -4895,14 +4979,14 @@ async function openMcpServers() {
 }
 
 function renderSignedMcpPackageSection(packageState, catalog, packageError = null) {
-  const heading = node('h3', 'skills-package-heading', 'Signed MCP packages');
+  const heading = node('h3', 'skills-package-heading', 'Verified tool add-ons');
   const packageList = node('div', 'data-list');
   if (packageError) {
     packageList.append(node('p', 'muted-copy', packageError.message));
   } else if (!packageState?.configured) {
-    packageList.append(node('p', 'muted-copy', 'Configure signed package trust in the user settings to manage MCP packages here.'));
+    packageList.append(node('p', 'muted-copy', 'Verified tool add-ons are not set up for this copy of Xyst.'));
   } else if (!packageState.packages.length) {
-    packageList.append(node('p', 'empty-sessions', 'No signed MCP packages are installed.'));
+    packageList.append(node('p', 'empty-sessions', 'No verified tool add-ons are installed.'));
   } else {
     for (const mcpPackage of packageState.packages) {
       const card = node('article', 'data-card skill-card');
@@ -4990,13 +5074,13 @@ function renderSignedMcpPackageSection(packageState, catalog, packageError = nul
 }
 
 async function openMcpAuditHistory() {
-  elements.settings_title.textContent = 'MCP audit history';
+  elements.settings_title.textContent = 'Connected tool history';
   if (!elements.settings_dialog.open) elements.settings_dialog.showModal();
   const content = elements.settings_content;
-  content.replaceChildren(node('p', 'muted-copy', 'Loading recent MCP audit events…'));
+  content.replaceChildren(node('p', 'muted-copy', 'Loading connected tool history…'));
   try {
     const history = await client.listMcpAuditHistory({ limit: 100 });
-    const back = node('button', 'text-button', 'Back to MCP servers');
+    const back = node('button', 'text-button', 'Back to connected tools');
     back.type = 'button';
     back.addEventListener('click', () => void openMcpServers());
     const refresh = node('button', 'text-button', 'Refresh');
@@ -5022,11 +5106,11 @@ async function openMcpAuditHistory() {
       node(
         'p',
         'muted-copy',
-        'History shows sanitized lifecycle events and tool outcomes. Arguments, prompts, tool results, commands, and credential references are omitted.',
+        'See when connected tools were enabled, tested, or used. Private message content and credentials are not shown here.',
       ),
     );
   } catch (error) {
-    const back = node('button', 'text-button', 'Back to MCP servers');
+    const back = node('button', 'text-button', 'Back to connected tools');
     back.type = 'button';
     back.addEventListener('click', () => void openMcpServers());
     content.replaceChildren(back, node('p', 'muted-copy', error.message));
@@ -5034,7 +5118,7 @@ async function openMcpAuditHistory() {
 }
 
 function renderMcpServerEditor({ name, config }) {
-  elements.settings_title.textContent = name ? `Edit MCP server · ${name}` : 'Add MCP server';
+  elements.settings_title.textContent = name ? `Edit connected tool · ${name}` : 'Connect a tool';
   const content = elements.settings_content;
   const form = node('form', 'mcp-editor');
   const field = (labelText, value, { type = 'text', className = '' } = {}) => {
@@ -5192,6 +5276,7 @@ async function initialize() {
     elements.model_picker.replaceChildren(fallback);
     elements.model_picker.disabled = false;
     await withStartupTimeout('recent sessions', (signal) => refreshSessions({ signal }));
+    void projectManager.refresh();
     const availableSessions = [...sessionsById.values()];
     const nativeSessionId = await getDesktopRememberedSessionId();
     const rememberedSessionId =
@@ -5233,10 +5318,10 @@ async function initialize() {
         const automaticOption = node(
           'option',
           '',
-          settings.routing?.enabled === false ? 'Auto · configured default' : 'Auto · best match for this task',
+          settings.routing?.enabled === false ? 'Auto · use the default AI' : 'Auto · pick an AI for each task',
         );
         automaticOption.value = AUTO_MODEL_OPTION;
-        automaticOption.title = 'Choose a model automatically for each task. Select a profile to pin one model.';
+        automaticOption.title = 'Let Xyst choose an AI for each task, or choose one AI for this chat.';
         automaticOption.selected = shouldSelectAuto;
         elements.model_picker.append(automaticOption);
         for (const option of options) {
@@ -5247,7 +5332,7 @@ async function initialize() {
         }
         if (!elements.model_picker.value)
           elements.model_picker.value = shouldSelectAuto ? AUTO_MODEL_OPTION : settings.default_model || options[0].value;
-        elements.model_picker.title = 'Auto routes each task to a configured model; choosing a profile pins it for the run.';
+        elements.model_picker.title = 'Let Xyst choose an AI for each task, or choose one AI for this chat.';
         appendLocalModelPickerOptions();
       })
       .catch(() => {
@@ -5297,7 +5382,7 @@ elements.new_session.addEventListener('click', () => {
   currentRoutingDecision = null;
   renderRunInspector();
   elements.session_actions.hidden = true;
-  elements.conversation_title.textContent = 'New conversation';
+  elements.conversation_title.textContent = 'New chat';
   resetTimeline();
   renderSessions([...sessionsById.values()]);
   elements.prompt_input.focus();

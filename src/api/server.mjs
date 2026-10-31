@@ -1898,6 +1898,7 @@ export class LocalControlServer {
       ['/app/run-inspector.mjs', [path.join(GUI_ROOT, 'run-inspector.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/review-plan.mjs', [path.join(GUI_ROOT, 'review-plan.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/workspace-panel.mjs', [path.join(GUI_ROOT, 'workspace-panel.mjs'), 'text/javascript; charset=utf-8']],
+      ['/app/project-manager.mjs', [path.join(GUI_ROOT, 'project-manager.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/onboarding.mjs', [path.join(GUI_ROOT, 'onboarding.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/session-status.mjs', [path.join(GUI_ROOT, 'session-status.mjs'), 'text/javascript; charset=utf-8']],
       ['/app/web-search-settings.mjs', [path.join(GUI_ROOT, 'web-search-settings.mjs'), 'text/javascript; charset=utf-8']],

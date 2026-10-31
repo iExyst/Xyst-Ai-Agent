@@ -147,6 +147,7 @@ async function smokeInstalledPackage({ packageName, debPath, version, smokeRoot,
 async function assertPackagedSourcesMatch(resourceRoot) {
   for (const relativePath of [
     'gui/app.mjs',
+    'gui/project-manager.mjs',
     'gui/timeline.mjs',
     'gui/web-search-settings.mjs',
     'src/config/load.mjs',

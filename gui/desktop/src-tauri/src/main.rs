@@ -36,6 +36,32 @@ struct LaunchOptions {
 struct DesktopService {
     child: Mutex<Option<Child>>,
     stdin: Mutex<Option<ChildStdin>>,
+    node: OsString,
+    cli: PathBuf,
+    config: Option<PathBuf>,
+    workspace: Mutex<PathBuf>,
+    api_token: Mutex<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecentProject {
+    name: String,
+    path: String,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecentProjects {
+    projects: Vec<RecentProject>,
+}
+
+#[derive(Serialize)]
+struct ProjectList {
+    current_name: String,
+    current_path: String,
+    create_location: String,
+    recent: Vec<RecentProject>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -57,6 +83,8 @@ struct LastWorkspace {
 
 const MAX_WORKSPACE_STATE_BYTES: u64 = 32 * 1024;
 const MAX_SESSION_STATE_BYTES: u64 = 1024;
+const MAX_RECENT_PROJECTS: usize = 20;
+const MAX_PROJECTS_STATE_BYTES: u64 = 64 * 1024;
 const TEST_APP_DIRECTORIES_ROOT_ENV: &str = "XYST_TEST_APP_DIRECTORIES_ROOT";
 
 impl WindowBounds {
@@ -191,6 +219,364 @@ fn set_last_session(app: tauri::AppHandle, id: Option<String>) -> Result<(), Str
             Err(error) => Err(error.to_string()),
         },
     }
+}
+
+fn projects_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|directory| directory.join("recent-projects.json"))
+        .map_err(|error| format!("Could not find the Xyst settings folder: {error}"))
+}
+
+fn default_projects_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().home_dir())
+        .map_err(|error| format!("Could not find your Documents folder: {error}"))?;
+    Ok(base.join("Xyst Projects"))
+}
+
+fn read_recent_projects(path: &Path) -> Vec<RecentProject> {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return Vec::new();
+    };
+    if !metadata.is_file() || metadata.len() > MAX_PROJECTS_STATE_BYTES {
+        return Vec::new();
+    }
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    if bytes.len() as u64 > MAX_PROJECTS_STATE_BYTES {
+        return Vec::new();
+    }
+    let Ok(state) = serde_json::from_slice::<RecentProjects>(&bytes) else {
+        return Vec::new();
+    };
+    state
+        .projects
+        .into_iter()
+        .filter_map(|project| {
+            if project.name.trim().is_empty()
+                || project.name.len() > 256
+                || project.path.len() > 32_768
+            {
+                return None;
+            }
+            let path = canonical_directory(Path::new(&project.path)).ok()?;
+            Some(RecentProject {
+                name: path.file_name()?.to_string_lossy().into_owned(),
+                path: display_path(&path),
+            })
+        })
+        .take(MAX_RECENT_PROJECTS)
+        .collect()
+}
+
+fn remember_project(registry_path: &Path, workspace: &Path) -> Result<(), String> {
+    let workspace = canonical_directory(workspace).map_err(|error| error.to_string())?;
+    if workspace.to_str().is_none() {
+        return Err("This folder path cannot be saved by Xyst".to_owned());
+    }
+    let mut projects = read_recent_projects(registry_path);
+    projects.retain(|project| !same_path(Path::new(&project.path), &workspace));
+    projects.insert(
+        0,
+        RecentProject {
+            name: workspace
+                .file_name()
+                .unwrap_or_else(|| OsStr::new("Project"))
+                .to_string_lossy()
+                .into_owned(),
+            path: display_path(&workspace),
+        },
+    );
+    projects.truncate(MAX_RECENT_PROJECTS);
+    let bytes = serde_json::to_vec(&RecentProjects { projects })
+        .map_err(|error| format!("Could not save the project list: {error}"))?;
+    write_atomic_bytes(registry_path, &bytes)
+        .map_err(|error| format!("Could not save the project list: {error}"))
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+fn display_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned()
+    }
+    #[cfg(not(windows))]
+    {
+        value.into_owned()
+    }
+}
+
+fn validate_project_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Enter a name for your project.".to_owned());
+    }
+    if name.chars().count() > 80 {
+        return Err("Project names must be 80 characters or fewer.".to_owned());
+    }
+    if name == "."
+        || name == ".."
+        || name.ends_with('.')
+        || name.ends_with(' ')
+        || name
+            .chars()
+            .any(|character| character.is_control() || "<>:\"/\\|?*".contains(character))
+    {
+        return Err(
+            "Use a project name without folder-path symbols such as /, \\, or :".to_owned(),
+        );
+    }
+    #[cfg(windows)]
+    {
+        let reserved = name
+            .split('.')
+            .next()
+            .unwrap_or(name)
+            .trim()
+            .to_ascii_uppercase();
+        if matches!(reserved.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || reserved
+                .strip_prefix("COM")
+                .or_else(|| reserved.strip_prefix("LPT"))
+                .is_some_and(|number| {
+                    number.len() == 1 && matches!(number.as_bytes()[0], b'1'..=b'9')
+                })
+        {
+            return Err(
+                "Choose a different project name; that name is reserved by Windows.".to_owned(),
+            );
+        }
+    }
+    Ok(name.to_owned())
+}
+
+#[tauri::command]
+fn list_projects(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, DesktopService>,
+    token: String,
+) -> Result<ProjectList, String> {
+    authorize_project_request(service.inner(), &token)?;
+    let current = service
+        .workspace
+        .lock()
+        .map_err(|_| "The project manager is unavailable".to_owned())?
+        .clone();
+    let registry = projects_path(&app)?;
+    let mut recent = read_recent_projects(&registry);
+    if !recent
+        .iter()
+        .any(|project| same_path(Path::new(&project.path), &current))
+    {
+        remember_project(&registry, &current)?;
+        recent = read_recent_projects(&registry);
+    }
+    Ok(ProjectList {
+        current_name: current
+            .file_name()
+            .unwrap_or_else(|| OsStr::new("Project"))
+            .to_string_lossy()
+            .into_owned(),
+        current_path: display_path(&current),
+        create_location: display_path(&default_projects_directory(&app)?),
+        recent,
+    })
+}
+
+#[tauri::command]
+fn choose_project_folder(
+    service: tauri::State<'_, DesktopService>,
+    token: String,
+) -> Result<Option<String>, String> {
+    authorize_project_request(service.inner(), &token)?;
+    Ok(FileDialog::new()
+        .set_title("Choose a project folder")
+        .pick_folder()
+        .and_then(|path| canonical_directory(&path).ok())
+        .map(|path| display_path(&path)))
+}
+
+#[tauri::command]
+fn remove_recent_project(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, DesktopService>,
+    path: String,
+    token: String,
+) -> Result<(), String> {
+    authorize_project_request(service.inner(), &token)?;
+    let current = service
+        .workspace
+        .lock()
+        .map_err(|_| "The project manager is unavailable".to_owned())?
+        .clone();
+    let selected = canonical_directory(Path::new(&path))
+        .map_err(|_| "That project folder is no longer available.".to_owned())?;
+    if same_path(&selected, &current) {
+        return Err("The open project stays in your recent list.".to_owned());
+    }
+    let registry = projects_path(&app)?;
+    let mut projects = read_recent_projects(&registry);
+    projects.retain(|project| !same_path(Path::new(&project.path), &selected));
+    let bytes = serde_json::to_vec(&RecentProjects { projects })
+        .map_err(|error| format!("Could not save the project list: {error}"))?;
+    write_atomic_bytes(&registry, &bytes)
+        .map_err(|error| format!("Could not save the project list: {error}"))
+}
+
+#[tauri::command]
+fn create_project(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, DesktopService>,
+    name: String,
+    token: String,
+) -> Result<bool, String> {
+    authorize_project_request(service.inner(), &token)?;
+    let name = validate_project_name(&name)?;
+    let parent = default_projects_directory(&app)?;
+    std::fs::create_dir_all(&parent)
+        .map_err(|error| format!("Could not create the Xyst Projects folder: {error}"))?;
+    let project_path = parent.join(name);
+    std::fs::create_dir(&project_path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            "A folder with that name already exists. Choose another name or open the existing folder.".to_owned()
+        } else {
+            format!("Could not create the project folder: {error}")
+        }
+    })?;
+    switch_project_inner(&app, service.inner(), &project_path)
+}
+
+#[tauri::command]
+fn switch_project(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, DesktopService>,
+    path: String,
+    token: String,
+) -> Result<bool, String> {
+    authorize_project_request(service.inner(), &token)?;
+    switch_project_inner(&app, service.inner(), Path::new(&path))
+}
+
+fn authorize_project_request(service: &DesktopService, supplied: &str) -> Result<(), String> {
+    let expected = service
+        .api_token
+        .lock()
+        .map_err(|_| "The project manager is unavailable".to_owned())?;
+    let expected_bytes = expected.as_bytes();
+    let supplied_bytes = supplied.as_bytes();
+    let mut difference = 0_u8;
+    for index in 0..expected_bytes.len().max(supplied_bytes.len()) {
+        difference |= expected_bytes.get(index).copied().unwrap_or_default()
+            ^ supplied_bytes.get(index).copied().unwrap_or_default();
+    }
+    if expected_bytes.len() == supplied_bytes.len() && difference == 0 && !expected_bytes.is_empty()
+    {
+        Ok(())
+    } else {
+        Err(
+            "Project request was not authorized. Reopen the project window and try again."
+                .to_owned(),
+        )
+    }
+}
+
+fn switch_project_inner(
+    app: &tauri::AppHandle,
+    service: &DesktopService,
+    path: &Path,
+) -> Result<bool, String> {
+    let workspace =
+        canonical_directory(path).map_err(|_| "Choose an existing project folder.".to_owned())?;
+    let current = service
+        .workspace
+        .lock()
+        .map_err(|_| "The project manager is unavailable".to_owned())?
+        .clone();
+    if same_path(&workspace, &current) {
+        return Ok(false);
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "The main Xyst window is unavailable".to_owned())?;
+    let (new_child, new_input, bootstrap) = start_service(
+        &service.node,
+        &service.cli,
+        &workspace,
+        service.config.as_deref(),
+    )
+    .map_err(|error| format!("Could not open this project: {error}"))?;
+    let (url, new_api_token) = match validate_bootstrap(bootstrap) {
+        Ok(connection) => connection,
+        Err(error) => {
+            DesktopService {
+                child: Mutex::new(Some(new_child)),
+                stdin: Mutex::new(Some(new_input)),
+                node: service.node.clone(),
+                cli: service.cli.clone(),
+                config: service.config.clone(),
+                workspace: Mutex::new(workspace.clone()),
+                api_token: Mutex::new(String::new()),
+            }
+            .request_shutdown();
+            return Err(format!("Could not open this project: {error}"));
+        }
+    };
+    if let Ok(registry) = projects_path(app) {
+        let _ = remember_project(&registry, &workspace);
+    }
+    if let Some(state_path) = last_session_path(app) {
+        let _ = std::fs::remove_file(state_path);
+    }
+    if let Err(error) = window.navigate(url) {
+        DesktopService {
+            child: Mutex::new(Some(new_child)),
+            stdin: Mutex::new(Some(new_input)),
+            node: service.node.clone(),
+            cli: service.cli.clone(),
+            config: service.config.clone(),
+            workspace: Mutex::new(workspace),
+            api_token: Mutex::new(String::new()),
+        }
+        .request_shutdown();
+        return Err(format!("Could not switch to that project: {error}"));
+    }
+    if let Some(state_path) = workspace_history_path(app) {
+        save_last_workspace(&state_path, &workspace);
+    }
+    service.request_shutdown();
+    *service
+        .child
+        .lock()
+        .map_err(|_| "Could not switch the local runtime".to_owned())? = Some(new_child);
+    *service
+        .stdin
+        .lock()
+        .map_err(|_| "Could not switch the local runtime".to_owned())? = Some(new_input);
+    *service
+        .workspace
+        .lock()
+        .map_err(|_| "Could not switch the local runtime".to_owned())? = workspace;
+    *service
+        .api_token
+        .lock()
+        .map_err(|_| "Could not switch the local runtime".to_owned())? = new_api_token;
+    Ok(true)
 }
 
 fn restore_last_workspace(state_path: &Path) -> Option<PathBuf> {
@@ -499,7 +885,15 @@ fn main() {
             Some(tauri::utils::config::AppDirectoriesOverride::Root(root));
     }
     let result = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_last_session, set_last_session])
+        .invoke_handler(tauri::generate_handler![
+            get_last_session,
+            set_last_session,
+            list_projects,
+            choose_project_folder,
+            create_project,
+            switch_project,
+            remove_recent_project
+        ])
         .setup(move |app| {
             let workspace = if let Some(path) = launch_workspace.as_deref() {
                 match canonical_directory(path) {
@@ -523,13 +917,16 @@ fn main() {
             if let Some(path) = workspace_history_path(app.handle()) {
                 save_last_workspace(&path, &workspace);
             }
+            if let Ok(path) = projects_path(app.handle()) {
+                let _ = remember_project(&path, &workspace);
+            }
             let cli = resolve_cli(app.handle())?;
             let node = resolve_node(app.handle());
             verify_node(&node)?;
             let (child, input, bootstrap_line) =
                 start_service(&node, &cli, &workspace, config.as_deref())?;
-            let url = match validate_bootstrap(bootstrap_line) {
-                Ok(url) => url,
+            let (url, api_token) = match validate_bootstrap(bootstrap_line) {
+                Ok(connection) => connection,
                 Err(error) => {
                     let mut child = child;
                     let _ = child.kill();
@@ -540,6 +937,11 @@ fn main() {
             app.manage(DesktopService {
                 child: Mutex::new(Some(child)),
                 stdin: Mutex::new(Some(input)),
+                node,
+                cli,
+                config,
+                workspace: Mutex::new(workspace),
+                api_token: Mutex::new(api_token),
             });
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Xyst AI Assistant")
@@ -991,7 +1393,7 @@ fn combined_proxy_bypass(upper: Option<OsString>, lower: Option<OsString>) -> Op
     }
 }
 
-fn validate_bootstrap(line: String) -> Result<Url, Box<dyn std::error::Error>> {
+fn validate_bootstrap(line: String) -> Result<(Url, String), Box<dyn std::error::Error>> {
     let bootstrap: Bootstrap = serde_json::from_str(&line)
         .map_err(|_| "Xyst AI Assistant service returned an invalid bootstrap record")?;
     if bootstrap.api_version != 1 || bootstrap.token.len() < 32 {
@@ -1011,9 +1413,11 @@ fn validate_bootstrap(line: String) -> Result<Url, Box<dyn std::error::Error>> {
             "Xyst AI Assistant service did not bind to the expected loopback origin".into(),
         );
     }
-    Ok(url
-        .join("/app")
-        .map_err(|_| "Could not open the Xyst AI Assistant local app")?)
+    Ok((
+        url.join("/app")
+            .map_err(|_| "Could not open the Xyst AI Assistant local app")?,
+        bootstrap.token,
+    ))
 }
 
 #[cfg(test)]

@@ -33,6 +33,7 @@
       "../../../gui/run-inspector.mjs": "xyst/gui/run-inspector.mjs",
       "../../../gui/review-plan.mjs": "xyst/gui/review-plan.mjs",
       "../../../gui/workspace-panel.mjs": "xyst/gui/workspace-panel.mjs",
+      "../../../gui/project-manager.mjs": "xyst/gui/project-manager.mjs",
       "../../../gui/onboarding.mjs": "xyst/gui/onboarding.mjs",
       "../../../gui/startup.mjs": "xyst/gui/startup.mjs",
       "../../../gui/chat-scroll.mjs": "xyst/gui/chat-scroll.mjs",

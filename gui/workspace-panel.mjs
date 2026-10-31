@@ -12,7 +12,7 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
 
   async function refresh() {
     const current = ++generation;
-    content.replaceChildren(element('p', 'muted-copy', 'Loading workspace…'));
+    content.replaceChildren(element('p', 'muted-copy', 'Loading project files…'));
     try {
       const [worktreesResult, viewResult] = await Promise.allSettled([
         client.listWorktrees(),
@@ -24,12 +24,12 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
       if (current !== generation) return;
       const toolbar = element('div', 'workspace-toolbar');
       const picker = element('select', 'data-picker');
-      picker.setAttribute('aria-label', 'Workspace or worktree');
-      const base = element('option', '', 'Current workspace');
+      picker.setAttribute('aria-label', 'Project or separate work area');
+      const base = element('option', '', 'Main project');
       base.value = '';
       picker.append(base);
       for (const tree of worktrees) {
-        const option = element('option', '', `${tree.branch || 'Detached'} · ${tree.id.slice(0, 8)}`);
+        const option = element('option', '', `Separate work area · ${tree.branch || 'new'}`);
         option.value = tree.id;
         picker.append(option);
       }
@@ -40,10 +40,10 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
         void refresh();
       });
       const branchInput = element('input', 'workspace-branch-input');
-      branchInput.placeholder = 'New branch name';
-      branchInput.setAttribute('aria-label', 'New worktree branch name');
+      branchInput.placeholder = 'Name this separate work area';
+      branchInput.setAttribute('aria-label', 'Name for the separate work area');
       branchInput.maxLength = 200;
-      const add = element('button', 'secondary-button', 'Create worktree');
+      const add = element('button', 'secondary-button', 'Create separate work area');
       add.type = 'button';
       add.addEventListener('click', async () => {
         const branch = branchInput.value.trim();
@@ -65,17 +65,12 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
       toolbar.append(picker, branchInput, add);
       if (worktreeId) {
         const selected = worktrees.find((entry) => entry.id === worktreeId);
-        const remove = element('button', 'secondary-button workspace-danger-button', 'Remove worktree');
+        const remove = element('button', 'secondary-button workspace-danger-button', 'Remove separate work area');
         remove.type = 'button';
-        remove.title = 'Only clean worktrees without active runs can be removed';
+        remove.title = 'A work area can be removed after its changes are saved and its tasks are stopped.';
         remove.addEventListener('click', async () => {
           const label = selected?.branch || worktreeId.slice(0, 8);
-          if (
-            !window.confirm(
-              `Remove managed worktree “${label}”? It must have no uncommitted, untracked, or ignored files and no active run.`,
-            )
-          )
-            return;
+          if (!window.confirm(`Remove separate work area “${label}”? Save or move any changes you need first, and stop its tasks.`)) return;
           remove.disabled = true;
           try {
             await client.removeWorktree(worktreeId);
@@ -96,7 +91,7 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
         element(
           'strong',
           '',
-          `${worktreeId ? worktrees.find((entry) => entry.id === worktreeId)?.branch || 'Worktree' : 'Workspace'} / ${pathLabel}`,
+          `${worktreeId ? `Separate area · ${worktrees.find((entry) => entry.id === worktreeId)?.branch || 'new'}` : 'Main project'} / ${pathLabel}`,
         ),
       );
       if (view.parent !== null) {
@@ -110,14 +105,20 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
       }
 
       const git = element('section', 'workspace-git');
-      git.append(element('h3', '', view.git.available ? `Git · ${view.git.branch || 'branch unavailable'}` : 'Git unavailable'));
-      if (!view.git.available) git.append(element('p', 'muted-copy', 'This folder is not inside a Git repository.'));
-      else if (!view.git.entries.length) git.append(element('p', 'muted-copy', 'Working tree clean.'));
+      git.append(
+        element('h3', '', view.git.available ? `File changes${view.git.branch ? ` · ${view.git.branch}` : ''}` : 'Change history'),
+      );
+      if (!view.git.available) git.append(element('p', 'muted-copy', 'Change history is not set up for this project folder.'));
+      else if (!view.git.entries.length) git.append(element('p', 'muted-copy', 'No file changes to review.'));
       else {
         const changes = element('ul', 'workspace-change-list');
         for (const change of view.git.entries) {
           const item = element('li');
-          item.append(element('code', 'workspace-change-code', change.code), element('span', '', change.path));
+          const changeLabels = { M: 'Edited', A: 'Added', D: 'Deleted', '??': 'New file', R: 'Renamed', C: 'Copied' };
+          item.append(
+            element('span', 'workspace-change-code', changeLabels[change.code.trim()] || 'Changed'),
+            element('span', '', change.path),
+          );
           changes.append(item);
         }
         if (view.git.truncated) changes.append(element('li', 'muted-copy', 'Additional changes omitted from this preview.'));
@@ -149,7 +150,13 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
       }
       tree.append(list);
       if (view.truncated) tree.append(element('p', 'muted-copy', 'Showing the first 500 entries.'));
-      content.replaceChildren(toolbar, heading, git, tree);
+      content.replaceChildren(
+        element('p', 'muted-copy', 'Browse folders, preview files, and review changes in this project.'),
+        toolbar,
+        heading,
+        git,
+        tree,
+      );
     } catch (error) {
       if (current === generation) content.replaceChildren(element('p', 'muted-copy', error.message));
     }
@@ -157,7 +164,7 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
 
   async function openFile(filePath, targetLine = null) {
     const current = ++generation;
-    content.replaceChildren(element('p', 'muted-copy', `Loading ${filePath}…`));
+    content.replaceChildren(element('p', 'muted-copy', `Opening ${filePath}…`));
     try {
       const file = await client.readWorkspaceFile({ path: filePath, ...(worktreeId ? { worktreeId } : {}) });
       if (current !== generation) return;
@@ -165,10 +172,7 @@ export function mountWorkspacePanel({ client, dialog, content, refreshButton, cl
       const back = element('button', 'text-button', 'Back to files');
       back.type = 'button';
       back.addEventListener('click', () => void refresh());
-      heading.append(
-        element('strong', '', `${file.path} · ${file.bytes.toLocaleString()} bytes${targetLine ? ` · line ${targetLine}` : ''}`),
-        back,
-      );
+      heading.append(element('strong', '', `${file.path}${targetLine ? ` · line ${targetLine}` : ''}`), back);
       const preview = element('pre', 'workspace-file-preview');
       if (targetLine && file.text) {
         const lines = file.text.split('\n');

@@ -1240,3 +1240,44 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .settings-view > .settings-page-heading { padding: 14px 16px; }
   .inline-settings-content .runtime-settings-nav { flex-shrink: 0; }
 }
+
+.project-switcher { width: calc(100% - 4px); min-height: 58px; display: grid; grid-template-columns: 34px minmax(0, 1fr) 18px; align-items: center; gap: 9px; margin: 10px 2px 3px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.project-switcher:hover { border-color: var(--stroke-strong); background: var(--surface-hover); }
+.project-folder-icon { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border: 1px solid var(--stroke-strong); border-radius: 8px; background: var(--surface-active); color: var(--brand-mint); font-size: 17px; }
+.project-switcher-copy, .project-current-card > div, .project-list-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; text-align: left; }
+.project-switcher-copy small, .project-current-card small { color: var(--text-subtle); font-size: 8px; font-weight: 700; letter-spacing: .12em; }
+.project-switcher-copy strong { overflow: hidden; color: var(--text-strong); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.project-switcher-chevron { color: var(--text-subtle); font-size: 13px; text-align: center; }
+.sidebar-collapsed .project-switcher { width: 42px; grid-template-columns: 1fr; justify-items: center; margin: 10px 0 3px; padding: 4px; }
+.sidebar-collapsed .project-switcher-copy, .sidebar-collapsed .project-switcher-chevron { display: none; }
+.project-dialog, .new-project-dialog { width: min(560px, calc(100vw - 28px)); max-height: min(82vh, 760px); padding: 20px; }
+.project-dialog .dialog-heading, .new-project-dialog .dialog-heading { margin-bottom: 12px; }
+.project-intro { margin: 0 0 14px; font-size: 12px; line-height: 1.55; }
+.project-current-card { display: flex; align-items: center; gap: 11px; padding: 11px; border: 1px solid var(--stroke-strong); border-radius: 9px; background: var(--surface-active); }
+.project-current-card strong { overflow-wrap: anywhere; color: var(--text-strong); font-size: 11px; font-weight: 600; }
+.project-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 9px; margin: 18px 1px 7px; }
+.project-list-heading h3 { margin: 0; color: var(--text-strong); font-size: 13px; }
+.project-list-heading span { color: var(--text-subtle); font-size: 10px; }
+.project-list { display: flex; flex-direction: column; gap: 5px; max-height: min(34vh, 320px); overflow: auto; }
+.project-list-row { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 4px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface); }
+.project-list-select { min-width: 0; flex: 1; display: flex; align-items: center; gap: 9px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.project-list-select:hover:not(:disabled) { background: var(--surface-hover); }
+.project-list-copy strong { overflow: hidden; color: var(--text-strong); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.project-list-copy small { overflow: hidden; color: var(--text-subtle); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.project-current-badge { padding: 4px 7px; border-radius: 999px; background: var(--success-surface); color: var(--brand-mint); font-size: 9px; font-weight: 700; }
+.project-remove-recent { flex: none; padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--text-subtle); font-size: 9px; cursor: pointer; }
+.project-remove-recent:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.project-empty { margin: 0; padding: 16px 9px; border: 1px dashed var(--line); border-radius: 8px; line-height: 1.5; }
+.project-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.project-dialog-actions > button { min-height: 38px; }
+.project-dialog-status { min-height: 15px; margin: 9px 0 0; font-size: 10px; }
+.project-dialog-status.is-error { color: var(--danger-strong); }
+.new-project-dialog form { display: flex; flex-direction: column; gap: 10px; }
+.new-project-dialog form > .muted-copy { margin: 0 0 3px; line-height: 1.5; }
+.project-name-label { color: var(--text-strong); font-size: 11px; font-weight: 700; }
+.project-name-input { width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid var(--stroke-strong); border-radius: 8px; background: var(--surface-input); color: var(--text); font: inherit; }
+.project-location-note { margin: 0; color: var(--text-subtle); font-size: 10px; line-height: 1.5; }
+.project-location-note strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.new-project-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.new-project-dialog .dialog-actions button { min-height: 36px; }
+@media (max-width: 560px) { .project-dialog, .new-project-dialog { padding: 15px; } .project-remove-recent { max-width: 70px; font-size: 8px; } }

@@ -19,76 +19,81 @@
           <div class="brand-copy"><strong>XYST</strong><span>CONTROL ROOM</span></div>
           <span id="connection-indicator" class="connection-dot" title="Connecting" aria-label="Connecting"></span>
         </div>
-        <button id="new-session" class="new-session-button" type="button"><span aria-hidden="true">＋</span> New conversation <kbd>⌘ K</kbd></button>
+        <button id="project-switcher" class="project-switcher" type="button" aria-haspopup="dialog" aria-controls="project-dialog">
+          <span class="project-folder-icon" aria-hidden="true">▰</span>
+          <span class="project-switcher-copy"><small>YOUR PROJECT</small><strong id="project-current-name">Loading project…</strong></span>
+          <span class="project-switcher-chevron" aria-hidden="true">▾</span>
+        </button>
+        <button id="new-session" class="new-session-button" type="button" title="Start a new chat in this project"><span aria-hidden="true">＋</span> New chat <kbd>Ctrl+K</kbd></button>
         <form id="search-form" class="search-form" role="search">
-          <label class="visually-hidden" for="workspace-search">Search the workspace</label>
+          <label class="visually-hidden" for="workspace-search">Search files in this project</label>
           <span aria-hidden="true" class="search-glyph">⌕</span>
-          <input id="workspace-search" type="search" placeholder="Search workspace" autocomplete="off">
+          <input id="workspace-search" type="search" placeholder="Search files in this project" autocomplete="off">
           <kbd>/</kbd>
-          <label class="semantic-toggle"><input id="semantic-search-toggle" type="checkbox"> Semantic</label>
+          <label class="semantic-toggle" title="Find files by what they mean, even when they do not use the exact words"><input id="semantic-search-toggle" type="checkbox"> Meaning</label>
         </form>
-        <input id="import-session-file" class="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose a Xyst AI Assistant session export">
-        <div class="section-heading"><span>RECENT</span><div class="session-list-actions"><button id="import-session" type="button" title="Import a session export">Import</button><button id="refresh-sessions" type="button" title="Refresh sessions" aria-label="Refresh sessions">↻</button></div></div>
+        <input id="import-session-file" class="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose a saved Xyst chat to import">
+        <div class="section-heading"><span>RECENT CHATS</span><div class="session-list-actions"><button id="import-session" type="button" title="Import a chat saved from Xyst">Import chat</button><button id="refresh-sessions" type="button" title="Refresh recent chats" aria-label="Refresh recent chats">↻</button></div></div>
         <nav id="session-list" class="session-list" aria-label="Recent conversations"></nav>
         <div id="sidebar-search-results" class="sidebar-search-results" hidden></div>
         <nav id="control-room-nav" class="control-room-nav" aria-label="System settings">
-          <span class="section-heading">SYSTEM</span>
-          <button type="button" data-settings-category="models">◈ <span>Models</span></button>
-          <button type="button" data-settings-category="routing">⌁ <span>Routing</span></button>
-          <button type="button" data-settings-category="agents">✳ <span>Agent setup</span></button>
-          <button type="button" data-settings-category="safety">⬡ <span>Safety</span></button>
-          <button type="button" data-settings-category="appearance">◐ <span>Appearance</span></button>
-          <button type="button" data-settings-category="data">⌕ <span>Data & search</span></button>
-          <button type="button" data-settings-category="updates">↻ <span>Updates</span></button>
-          <button type="button" data-settings-category="usage">▤ <span>Usage & limits</span></button>
+          <span class="section-heading">MAKE XYST YOURS</span>
+          <button type="button" data-settings-category="models" title="Choose which AI writes Xyst’s replies">◈ <span>Choose an AI</span></button>
+          <button type="button" data-settings-category="routing" title="Choose whether Xyst uses one AI or picks one for each task">⌁ <span>AI choices</span></button>
+          <button type="button" data-settings-category="agents" title="Choose whether Xyst can make changes or only suggest them">✳ <span>How Xyst works</span></button>
+          <button type="button" data-settings-category="safety" title="Choose what Xyst can do and when it should ask first">⬡ <span>Permissions</span></button>
+          <button type="button" data-settings-category="appearance" title="Change colors, layout, and shortcuts">◐ <span>Look & feel</span></button>
+          <button type="button" data-settings-category="data" title="Choose what Xyst remembers and when it looks up current information">⌕ <span>Memory & web search</span></button>
+          <button type="button" data-settings-category="updates" title="Check for an Xyst update">↻ <span>Updates</span></button>
+          <button type="button" data-settings-category="usage" title="See usage and change optional limits">▤ <span>Usage & limits</span></button>
           <button id="settings-button" type="button" aria-label="Settings" aria-controls="settings-view">⚙ <span>Settings</span></button>
         </nav>
         <footer class="sidebar-footer">
           <div class="workspace-avatar" aria-hidden="true"><svg viewBox="0 0 40 40"><use href="#xyst-symbol"/></svg></div>
-          <div class="workspace-copy"><strong>Current workspace</strong><span id="workspace-status">Local · connecting</span></div>
+          <div class="workspace-copy"><strong>Local assistant</strong><span id="workspace-status">Connecting…</span></div>
           <span class="local-lock" title="Loopback service" aria-label="Loopback service">⌑</span>
         </footer>
       </aside>
 
       <main class="main-panel">
         <header class="topbar">
-          <div class="breadcrumb"><span class="breadcrumb-muted">Xyst AI Assistant</span><span class="breadcrumb-separator">/</span><strong id="conversation-title">New conversation</strong></div>
+          <div class="breadcrumb"><span class="breadcrumb-muted">Xyst AI Assistant</span><span class="breadcrumb-separator">/</span><strong id="conversation-title">New chat</strong></div>
           <div class="topbar-actions">
             <button id="toggle-sidebar" class="icon-button" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-controls="session-list" aria-expanded="true">☰</button>
             <div id="session-actions" class="session-actions" hidden aria-label="Conversation actions">
-              <button id="recap-session" class="text-button" type="button">Recap</button>
-              <button id="rename-session" class="text-button" type="button">Rename</button>
-              <button id="export-session" class="text-button" type="button">Export</button>
-              <button id="fork-session" class="text-button" type="button">Fork</button>
-              <button id="archive-session" class="text-button" type="button">Archive</button>
-              <button id="delete-session" class="text-button danger-text" type="button">Delete</button>
+              <button id="recap-session" class="text-button" type="button" title="Get a short summary of this chat">Summary</button>
+              <button id="rename-session" class="text-button" type="button" title="Change this chat’s name">Rename chat</button>
+              <button id="export-session" class="text-button" type="button" title="Save this chat as a file">Export chat</button>
+              <button id="fork-session" class="text-button" type="button" title="Start a new chat with this one’s history">Start from here</button>
+              <button id="archive-session" class="text-button" type="button" title="Mark this chat as archived">Archive</button>
+              <button id="delete-session" class="text-button danger-text" type="button" title="Permanently delete this chat and its saved messages">Delete</button>
             </div>
-            <label class="model-picker-label" for="model-picker">MODEL</label>
+            <label class="model-picker-label" for="model-picker" title="Choose which AI answers this chat">AI MODEL</label>
             <select id="model-picker" aria-label="Model" disabled><option>Loading models…</option></select>
-            <button id="discover-models-button" class="icon-button model-discover-button" type="button" title="Find local models, including LM Studio" aria-label="Find local models">⌕</button>
+            <button id="discover-models-button" class="icon-button model-discover-button" type="button" title="Find local AI apps such as LM Studio or Ollama" aria-label="Find local AI apps">⌕</button>
             <details id="run-inspector" class="run-inspector">
-              <summary>Run details</summary>
-              <div id="run-inspector-content" class="run-inspector-content"><p class="muted-copy">Routing and budget details appear when available.</p></div>
+              <summary title="See which AI is chosen and how this chat is set up">Why this AI?</summary>
+              <div id="run-inspector-content" class="run-inspector-content"><p class="muted-copy">The chosen AI and usage details appear here when available.</p></div>
             </details>
           </div>
         </header>
 
         <nav id="primary-tabs" class="primary-tabs" role="tablist" aria-label="Assistant modes">
-          <button class="primary-tab" id="tab-agent" role="tab" type="button" aria-selected="true" aria-controls="mode-workspace" data-mode="agent"><span class="tab-glyph" aria-hidden="true">✳</span>Agent</button>
-          <button class="primary-tab" id="tab-plan" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="plan"><span class="tab-glyph" aria-hidden="true">⌁</span>Plan</button>
-          <button class="primary-tab" id="tab-review" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="review"><span class="tab-glyph" aria-hidden="true">◈</span>Review</button>
+          <button class="primary-tab" id="tab-agent" role="tab" type="button" aria-selected="true" aria-controls="mode-workspace" data-mode="agent" title="Ask Xyst to work on your project. It may change files and asks before sensitive actions."><span class="tab-glyph" aria-hidden="true">✳</span>Agent</button>
+          <button class="primary-tab" id="tab-plan" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="plan" title="Ask Xyst to make a plan. It will not change files."><span class="tab-glyph" aria-hidden="true">⌁</span>Plan</button>
+          <button class="primary-tab" id="tab-review" role="tab" type="button" aria-selected="false" aria-controls="mode-workspace" data-mode="review" title="Ask Xyst to inspect and explain changes without editing files."><span class="tab-glyph" aria-hidden="true">◈</span>Review</button>
         </nav>
 
         <div id="status-banner" class="status-banner" role="status" hidden></div>
         <div id="mode-workspace" role="tabpanel" aria-labelledby="tab-agent" class="mode-workspace">
         <section id="timeline" class="timeline" aria-label="Conversation" aria-live="polite">
           <div id="welcome" class="welcome-state">
-            <p class="eyebrow">LOCAL SYSTEM / OVERVIEW</p>
-            <h1>Good to see you, <span>Operator.</span></h1>
-            <p class="welcome-description">Your control room is ready. Start a task or manage your local agent.</p>
+            <p class="eyebrow">YOUR PROJECT</p>
+            <h1>What would you like to work on?</h1>
+            <p class="welcome-description">Tell Xyst what you need in everyday language. It can explain a plan, work with your project files, and ask before actions that need your approval.</p>
             <div id="main-overview" class="main-overview"></div>
             <div class="home-work-grid">
-              <section class="home-task-card" aria-labelledby="home-task-title"><p class="eyebrow">DIRECT LINE</p><h2 id="home-task-title">Give Xyst a task</h2><p class="muted-copy">Ask Xyst to inspect your workspace, make a change, or plan the next step.</p><div id="home-task-slot"></div></section>
+              <section class="home-task-card" aria-labelledby="home-task-title"><p class="eyebrow">START HERE</p><h2 id="home-task-title">Ask Xyst</h2><p class="muted-copy">Try “Explain this project,” “Help me fix this error,” or “Make a plan before changing anything.”</p><div id="home-task-slot"></div></section>
               <aside id="home-model-status" class="home-model-status" aria-label="Model status"></aside>
             </div>
             <div id="home-tools"></div>
@@ -108,21 +113,21 @@
             <textarea id="prompt-input" rows="1" maxlength="100000" placeholder="Describe what you want to work on…" required></textarea>
             <div id="attached-images" class="attached-images" hidden aria-label="Attached images"></div>
             <details id="mcp-selection" class="mcp-run-selection" hidden>
-              <summary id="mcp-selection-summary">MCP tools · all configured servers</summary>
-              <p class="muted-copy">Choose which configured MCP servers this conversation can use. The choice is saved when you send your next message.</p>
+              <summary id="mcp-selection-summary">Connected tools · all available</summary>
+              <p class="muted-copy">Choose which connected tools Xyst can use in this chat. Your choice is saved with your next message.</p>
               <div id="mcp-selection-options" class="mcp-selection-options"></div>
             </details>
             <details id="run-budget-controls" class="run-budget-controls" hidden>
-              <summary>Adjust budgets for this run</summary>
-              <p class="muted-copy">Available while paused in Assisted autonomy. Clear a field to restore its value from when this run started.</p>
+              <summary>Change this chat’s usage limits</summary>
+              <p class="muted-copy">Pause the chat first. Clear a field to use the limit that was set when this chat started.</p>
               <div id="run-budget-fields" class="run-budget-fields"></div>
-              <div class="run-budget-actions"><button id="apply-run-budgets" class="text-button" type="button">Apply budget changes</button><span id="run-budget-status" role="status"></span></div>
+              <div class="run-budget-actions"><button id="apply-run-budgets" class="text-button" type="button">Save limit changes</button><span id="run-budget-status" role="status"></span></div>
             </details>
             <div class="composer-footer">
-              <div class="composer-hints"><span id="active-mode-label" class="active-mode-label">Agent mode</span><span class="composer-divider">·</span><span class="keyboard-hint"><kbd>Enter</kbd> to send</span><select id="run-mode" aria-label="Run mode" class="visually-hidden"><option value="agent">Agent</option><option value="plan">Plan · read only</option><option value="review">Review · read only</option></select></div>
+              <div class="composer-hints"><span id="active-mode-label" class="active-mode-label">Agent · can make changes</span><span class="composer-divider">·</span><span class="keyboard-hint"><kbd>Enter</kbd> to send</span><select id="run-mode" aria-label="Run mode" class="visually-hidden"><option value="agent">Agent</option><option value="plan">Plan · read only</option><option value="review">Review · read only</option></select></div>
               <div class="composer-controls">
                 <input id="image-files" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="Choose images to attach">
-                <button id="attach-images" class="text-button" type="button" title="Attach images">Image</button>
+            <button id="attach-images" class="text-button" type="button" title="Attach images to your message">Attach image</button>
                 <button id="pause-run" class="text-button" type="button" hidden>Pause run</button>
                 <button id="change-run-model" class="text-button" type="button" hidden>Use selected model</button>
                 <button id="send-direction" class="text-button" type="button" hidden>Send direction</button>
@@ -131,29 +136,29 @@
               </div>
             </div>
           </form>
-          <p class="composer-caption">Your workspace content is treated as untrusted input. Review every proposed change.</p>
+            <p class="composer-caption">Check Xyst’s proposed file changes before accepting them. Your files stay on this computer unless you choose a connected online model or service.</p>
         </section>
         <div id="workspace-tools-dock" class="workspace-tools-dock" hidden></div>
         </div>
 
         <section id="settings-view" class="settings-view" role="region" aria-labelledby="settings-page-title" hidden>
           <div class="settings-page-heading">
-            <div><p class="eyebrow">XYST CONTROL ROOM</p><h1 id="settings-page-title">Models</h1><p id="settings-page-description"></p></div>
+            <div><p class="eyebrow">XYST SETTINGS</p><h1 id="settings-page-title">Choose an AI</h1><p id="settings-page-description"></p></div>
           </div>
           <div id="inline-settings-content" class="inline-settings-content"></div>
           <div id="settings-legacy-cards" hidden>
           <section class="settings-page-card model-connection-card" aria-labelledby="model-connection-title">
-            <div class="settings-card-heading"><div><span class="settings-card-icon" aria-hidden="true">◉</span><div><h2 id="model-connection-title">Local model server</h2><p>Connect LM Studio, Ollama, or another OpenAI-compatible server running on this computer.</p></div></div><button id="settings-discover-models" class="secondary-button" type="button">Find local models</button></div>
-            <details class="local-model-help"><summary>Connection help</summary><p>Start the local server in LM Studio. Xyst checks <code>http://127.0.0.1:1234/v1</code> and imports the model you choose. Loading an installed model uses LM Studio memory without downloading files. Discovery sends no prompts or workspace files.</p></details>
-            <div id="local-model-results" class="local-model-results" aria-live="polite"><p class="muted-copy">Use “Find local models” to check for running local servers.</p></div>
+            <div class="settings-card-heading"><div><span class="settings-card-icon" aria-hidden="true">◉</span><div><h2 id="model-connection-title">Connect an AI on this computer</h2><p>Connect a local AI app such as LM Studio or Ollama. Compatible AI services can also be added here.</p></div></div><button id="settings-discover-models" class="secondary-button" type="button">Find local AI apps</button></div>
+            <details class="local-model-help"><summary>Connection help</summary><p>Start the local server in your AI app. Xyst checks the connection and lists available AIs. Loading an AI already installed on your computer does not download it. This search sends no chats or project files.</p></details>
+            <div id="local-model-results" class="local-model-results" aria-live="polite"><p class="muted-copy">Choose “Find local AI apps” to look for AI services already running on this computer.</p></div>
           </section>
           <section class="settings-page-card" aria-labelledby="configured-models-title">
-            <div class="settings-card-heading"><div><span class="settings-card-icon model-icon" aria-hidden="true">◈</span><div><h2 id="configured-models-title">Model profiles</h2><p>Profiles saved in your Xyst runtime settings.</p></div></div></div>
-            <div id="configured-models-list" class="configured-models-list"><p class="muted-copy">Loading configured models…</p></div>
+            <div class="settings-card-heading"><div><span class="settings-card-icon model-icon" aria-hidden="true">◈</span><div><h2 id="configured-models-title">Available AIs</h2><p>These are the AI services you can choose for a chat.</p></div></div></div>
+            <div id="configured-models-list" class="configured-models-list"><p class="muted-copy">Loading available AIs…</p></div>
           </section>
-          <section class="settings-page-card tools-shortcuts-card" aria-label="Workspace tools">
-            <div class="settings-card-heading"><div><span class="settings-card-icon" aria-hidden="true">⌘</span><div><h2>Workspace tools</h2><p>Open the tools you use to manage projects and conversations.</p></div></div></div>
-            <div class="settings-tool-links"><button id="memory-button" type="button">Memory</button><button id="goals-button" type="button">Goals</button><button id="skills-button" type="button">Skills</button><button id="mcp-button" type="button">MCP servers</button><button id="extensions-button" type="button">Packages</button><button id="processes-button" type="button">Processes</button><button id="workspace-button" type="button">Workspace</button></div>
+          <section class="settings-page-card tools-shortcuts-card" aria-label="Project tools">
+            <div class="settings-card-heading"><div><span class="settings-card-icon" aria-hidden="true">⌘</span><div><h2>Project tools</h2><p>See what Xyst remembers, connect extra tools, and manage your project files.</p></div></div></div>
+            <div class="settings-tool-links"><button id="memory-button" type="button" title="Review notes Xyst can remember">Memory</button><button id="goals-button" type="button" title="Save goals for this project">Project goals</button><button id="skills-button" type="button" title="Manage reusable instructions for Xyst">Instructions</button><button id="mcp-button" type="button" title="Connect services and tools to Xyst">Connected tools</button><button id="extensions-button" type="button" title="Manage optional tool add-ons">Tool add-ons</button><button id="processes-button" type="button" title="See long-running tasks started by Xyst">Background tasks</button><button id="workspace-button" type="button" title="Browse project files and recent changes">Project files</button></div>
           </section>
           </div>
         </section>
@@ -161,7 +166,7 @@
     </div>
 
     <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading"><div><p class="eyebrow">PERSONALIZE XYST</p><h2 id="settings-title">Settings</h2><p class="dialog-description">Shape your models, agent behavior, privacy, and workspace.</p></div><button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow">PERSONALIZE XYST</p><h2 id="settings-title">Settings</h2><p class="dialog-description">Choose an AI, set what Xyst can do, and change how the app looks.</p></div><button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button></div>
       <div id="settings-content" class="settings-content"><p class="muted-copy">Loading current settings…</p></div>
     </dialog>
     <dialog id="recap-dialog" class="settings-dialog recap-dialog" aria-labelledby="recap-title">
@@ -169,12 +174,31 @@
       <pre id="recap-content" class="recap-content"></pre>
     </dialog>
     <dialog id="process-dialog" class="settings-dialog process-dialog" aria-labelledby="process-title">
-      <div class="dialog-heading"><div><p class="eyebrow">BACKGROUND JOBS</p><h2 id="process-title">Processes</h2></div><div class="dialog-actions"><button id="refresh-processes" class="text-button" type="button">Refresh</button><button id="close-processes" class="icon-button" type="button" aria-label="Close processes">×</button></div></div>
+      <div class="dialog-heading"><div><p class="eyebrow">BACKGROUND TASKS</p><h2 id="process-title">Background tasks</h2></div><div class="dialog-actions"><button id="refresh-processes" class="text-button" type="button">Refresh</button><button id="close-processes" class="icon-button" type="button" aria-label="Close background tasks">×</button></div></div>
       <div id="process-content" class="settings-content process-content"><p class="muted-copy">Loading background processes…</p></div>
     </dialog>
     <dialog id="workspace-dialog" class="settings-dialog workspace-dialog" aria-labelledby="workspace-title">
-      <div class="dialog-heading"><div><p class="eyebrow">FILES & SOURCE CONTROL</p><h2 id="workspace-title">Workspace</h2></div><div class="dialog-actions"><button id="refresh-workspace" class="text-button" type="button">Refresh</button><button id="close-workspace" class="icon-button" type="button" aria-label="Close workspace">×</button></div></div>
+      <div class="dialog-heading"><div><p class="eyebrow">PROJECT FILES & CHANGES</p><h2 id="workspace-title">Project files</h2></div><div class="dialog-actions"><button id="refresh-workspace" class="text-button" type="button">Refresh</button><button id="close-workspace" class="icon-button" type="button" aria-label="Close project files">×</button></div></div>
       <div id="workspace-content" class="settings-content workspace-content"><p class="muted-copy">Loading workspace…</p></div>
+    </dialog>
+    <dialog id="project-dialog" class="settings-dialog project-dialog" aria-labelledby="project-title">
+      <div class="dialog-heading"><div><p class="eyebrow">PROJECTS</p><h2 id="project-title">Your projects</h2></div><button id="close-projects" class="icon-button" type="button" aria-label="Close projects">×</button></div>
+      <p class="muted-copy project-intro">A project is a folder for your files and conversations. Each project keeps its own chat history. Switching projects does not delete anything.</p>
+      <section class="project-current-card" aria-label="Current project"><span class="project-folder-icon" aria-hidden="true">▰</span><div><small>OPEN NOW</small><strong id="project-current-detail">Loading…</strong></div></section>
+      <div class="project-list-heading"><h3>Recent projects</h3><span>Choose one to open it</span></div>
+      <div id="project-list" class="project-list" aria-live="polite"><p class="muted-copy">Loading your projects…</p></div>
+      <div class="project-dialog-actions"><button id="create-project" class="send-button" type="button">＋ New project</button><button id="open-project-folder" class="secondary-button" type="button">Open an existing folder…</button></div>
+      <p id="project-dialog-status" class="muted-copy project-dialog-status" role="status"></p>
+    </dialog>
+    <dialog id="new-project-dialog" class="settings-dialog new-project-dialog" aria-labelledby="new-project-title">
+      <form id="new-project-form" method="dialog">
+        <div class="dialog-heading"><div><p class="eyebrow">START FRESH</p><h2 id="new-project-title">Create a project</h2></div><button id="cancel-new-project" class="icon-button" type="button" aria-label="Cancel">×</button></div>
+        <p class="muted-copy">Give it a name. Xyst will make a new folder for it and open a fresh conversation list.</p>
+        <label class="project-name-label" for="new-project-name">Project name</label>
+        <input id="new-project-name" class="project-name-input" type="text" maxlength="80" placeholder="For example, My website" autocomplete="off" required>
+        <p class="project-location-note">Saved in <strong id="new-project-location">Documents / Xyst Projects</strong>. You can also open any folder you already use.</p>
+        <div class="dialog-actions"><button id="cancel-new-project-button" class="secondary-button" type="button">Cancel</button><button id="confirm-create-project" class="send-button" type="submit">Create project</button></div>
+      </form>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   </body>

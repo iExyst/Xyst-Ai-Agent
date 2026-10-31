@@ -54,6 +54,7 @@ export async function smokeLinuxAppImage({ packagePath } = {}) {
 
     for (const relativePath of [
       'gui/app.mjs',
+      'gui/project-manager.mjs',
       'gui/session-status.mjs',
       'gui/web-search-settings.mjs',
       'src/api/server.mjs',

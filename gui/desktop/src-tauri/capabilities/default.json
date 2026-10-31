@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Xyst AI Assistant desktop window; local application controls stay on the authenticated loopback API.",
+  "description": "Xyst desktop controls are available only to the main window and loopback app; project actions require the live runtime token.",
+  "remote": { "urls": ["http://127.0.0.1:*/*"] },
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-get-last-session",
+    "allow-set-last-session",
+    "allow-list-projects",
+    "allow-choose-project-folder",
+    "allow-create-project",
+    "allow-switch-project",
+    "allow-remove-recent-project"
+  ]
 }
