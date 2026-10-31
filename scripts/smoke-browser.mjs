@@ -2564,7 +2564,13 @@ async function verifyRuntimeSettingRoundTrips(protocol, service) {
       ),
     })),
     { category: 'agents', name: 'tools.autonomy', value: 'unrestricted', path: ['tools', 'autonomy'] },
-    { category: 'safety', label: 'Limit what commands can access', value: 'read-only', path: ['sandbox', 'mode'], saveLabel: 'Save sandbox setting' },
+    {
+      category: 'safety',
+      label: 'Limit what commands can access',
+      value: 'read-only',
+      path: ['sandbox', 'mode'],
+      saveLabel: 'Save sandbox setting',
+    },
     { category: 'data', label: 'Enable automatic web, news, and reference lookups', value: false, path: ['web_search', 'enabled'] },
   ];
   for (const entry of cases) {
