@@ -350,8 +350,8 @@ async function verifyDesktopAutomation(env, timeoutMs) {
 
   try {
     nodes = await waitFor(
-      (items) => items.some((node) => node.name === 'Models' && node.role.toLowerCase().includes('heading')),
-      'the Models settings page',
+      (items) => items.some((node) => node.name === 'Choose an AI' && node.role.toLowerCase().includes('heading')),
+      'the Choose an AI settings page',
     );
   } catch (error) {
     const wrapped = new Error(
@@ -361,16 +361,16 @@ async function verifyDesktopAutomation(env, timeoutMs) {
     wrapped.statusMessages = error.statusMessages;
     throw wrapped;
   }
-  const safetyButton = nodes.find((node) => node.name.includes('Safety') && node.role.toLowerCase().includes('push button'));
-  assert.ok(safetyButton, 'Linux AT-SPI did not find the Safety settings category');
+  const safetyButton = nodes.find((node) => node.name.includes('Permissions') && node.role.toLowerCase().includes('push button'));
+  assert.ok(safetyButton, 'Linux AT-SPI did not find the Permissions settings category');
   const accessibilityClick = await controlDesktop(
     { action: 'click', element_path: safetyButton.path, expected_name: safetyButton.name },
     options,
   );
   assert.equal(accessibilityClick.status, 'completed');
   nodes = await waitFor(
-    (items) => items.some((node) => node.name === 'Safety' && node.role.toLowerCase().includes('heading')),
-    'the Safety settings category',
+    (items) => items.some((node) => node.name === 'Permissions and safety' && node.role.toLowerCase().includes('heading')),
+    'the Permissions and safety settings category',
   );
 
   const updatesButton = nodes.find((node) => node.name.includes('Updates') && node.role.toLowerCase().includes('push button'));
